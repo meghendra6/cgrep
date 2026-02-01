@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! OpenCode installation for cgrep
 //!
 //! Installs cgrep as a tool in OpenCode's configuration.

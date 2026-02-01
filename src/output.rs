@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Output and color utilities for consistent terminal formatting
 //!
 //! Provides shared color functions respecting NO_COLOR environment variable.

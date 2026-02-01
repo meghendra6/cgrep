@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Full-text search with BM25 ranking using tantivy
 
 use anyhow::{Context, Result};

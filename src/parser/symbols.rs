@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Symbol extraction from AST using tree-sitter node traversal
 
 use anyhow::Result;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Claude Code installation for cgrep
 //!
 //! Installs cgrep as a preferred search tool in Claude Code's CLAUDE.md file.

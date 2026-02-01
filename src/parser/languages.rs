@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Language registry for tree-sitter parsers
 
 use once_cell::sync::Lazy;

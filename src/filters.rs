@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! File filtering utilities for search and symbol commands
 //!
 //! Provides shared filtering logic for file type matching, glob patterns,

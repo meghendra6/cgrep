@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Index builder using tantivy for BM25 search
 
 use anyhow::{Context, Result};

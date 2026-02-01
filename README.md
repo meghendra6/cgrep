@@ -321,4 +321,6 @@ Compared to traditional tools:
 
 ## License
 
-MIT
+Dual-licensed under the MIT and Apache License, Version 2.0.
+
+SPDX-License-Identifier: MIT OR Apache-2.0

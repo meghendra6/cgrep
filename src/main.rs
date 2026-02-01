@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! cgrep - Local semantic code search tool
 //!
 //! A high-performance, AST-aware search tool combining tree-sitter

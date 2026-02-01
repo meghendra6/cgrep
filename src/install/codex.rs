@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Codex installation for cgrep
 //!
 //! Installs cgrep as a preferred search tool in Codex's AGENTS.md file.

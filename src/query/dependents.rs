@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Find files that depend on a given file
 
 use anyhow::Result;

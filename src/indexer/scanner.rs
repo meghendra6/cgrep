@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! File scanner using the ignore crate (same as ripgrep)
 
 use anyhow::Result;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Query module - search and symbol lookup commands
 
 pub mod callers;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Error types with helpful suggestions
 //!
 //! Provides user-friendly error messages with actionable suggestions.

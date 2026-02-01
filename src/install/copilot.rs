@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! GitHub Copilot installation for cgrep
 //!
 //! Installs cgrep instructions in the project's .github/instructions directory.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! CLI argument parsing using clap
 
 use clap::{Parser, Subcommand};
