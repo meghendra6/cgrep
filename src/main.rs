@@ -1,4 +1,4 @@
-//! lgrep - Local semantic code search tool
+//! cgrep - Local semantic code search tool
 //!
 //! A high-performance, AST-aware search tool combining tree-sitter
 //! for code structure analysis and tantivy for BM25 text ranking.
@@ -16,10 +16,10 @@ use cli::{Cli, Commands};
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
-    // Initialize tracing with LGREP_LOG env var (e.g., LGREP_LOG=debug lgrep search "query")
+    // Initialize tracing with CGREP_LOG env var (e.g., CGREP_LOG=debug cgrep search "query")
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_env("LGREP_LOG").unwrap_or_else(|_| EnvFilter::new("warn")),
+            EnvFilter::try_from_env("CGREP_LOG").unwrap_or_else(|_| EnvFilter::new("warn")),
         )
         .init();
 
@@ -121,7 +121,7 @@ fn main() -> Result<()> {
         }
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
-            generate(shell, &mut cmd, "lgrep", &mut std::io::stdout());
+            generate(shell, &mut cmd, "cgrep", &mut std::io::stdout());
         }
     }
 

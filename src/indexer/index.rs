@@ -17,8 +17,8 @@ use tantivy::{
 use crate::indexer::scanner::FileScanner;
 use crate::parser::symbols::SymbolExtractor;
 
-const INDEX_DIR: &str = ".lgrep";
-const METADATA_FILE: &str = ".lgrep/metadata.json";
+const INDEX_DIR: &str = ".cgrep";
+const METADATA_FILE: &str = ".cgrep/metadata.json";
 
 /// Metadata for incremental indexing
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -217,7 +217,7 @@ impl IndexBuilder {
     #[allow(dead_code)]
     pub fn open(root: impl AsRef<Path>) -> Result<Index> {
         let index_path = root.as_ref().join(INDEX_DIR);
-        Index::open_in_dir(&index_path).context("Failed to open index. Run 'lgrep index' first.")
+        Index::open_in_dir(&index_path).context("Failed to open index. Run 'cgrep index' first.")
     }
 }
 

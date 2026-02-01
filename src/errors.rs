@@ -15,9 +15,9 @@ impl fmt::Display for IndexNotFoundError {
         write!(
             f,
             "Index not found at '{}'\n\n\
-             Suggestion: Run 'lgrep index' to create the search index first.\n\
-             Example: lgrep index\n\
-             Or with a specific path: lgrep index /path/to/project",
+             Suggestion: Run 'cgrep index' to create the search index first.\n\
+             Example: cgrep index\n\
+             Or with a specific path: cgrep index /path/to/project",
             self.index_path
         )
     }
@@ -38,8 +38,8 @@ impl fmt::Display for NoResultsError {
             "No results found for query: '{}'\n\n\
              Suggestions:\n\
              - Try a different or broader search query\n\
-             - Check if the index is up to date: lgrep index --force\n\
-             - Use --fuzzy for approximate matching: lgrep search --fuzzy \"{}\"",
+             - Check if the index is up to date: cgrep index --force\n\
+             - Use --fuzzy for approximate matching: cgrep search --fuzzy \"{}\"",
             self.query, self.query
         )
     }
@@ -61,7 +61,7 @@ impl fmt::Display for UnsupportedLanguageError {
             f,
             "Unsupported language: '{}'\n\n\
              Supported languages: {}\n\n\
-             Example: lgrep symbols \"function_name\" --lang rust",
+             Example: cgrep symbols \"function_name\" --lang rust",
             self.language, supported_list
         )
     }
@@ -76,7 +76,7 @@ pub mod suggestions {
         format!(
             "Supported languages: {}\n\n\
              Use the -t/--lang flag to specify a language.\n\
-             Example: lgrep symbols \"main\" --lang rust",
+             Example: cgrep symbols \"main\" --lang rust",
             languages.join(", ")
         )
     }
@@ -85,10 +85,10 @@ pub mod suggestions {
     pub fn index_not_found_suggestion(path: &str) -> String {
         format!(
             "Index not found at '{}'\n\n\
-             Run 'lgrep index' to create the search index:\n\
-             $ lgrep index\n\n\
+             Run 'cgrep index' to create the search index:\n\
+             $ cgrep index\n\n\
              Or specify a path:\n\
-             $ lgrep index {}",
+             $ cgrep index {}",
             path, path
         )
     }
@@ -99,7 +99,7 @@ pub mod suggestions {
             "No results found for '{}'\n\n\
              Try:\n\
              - A different search query\n\
-             - Running 'lgrep index --force' to rebuild the index\n\
+             - Running 'cgrep index --force' to rebuild the index\n\
              - Using --fuzzy for approximate matching",
             query
         )

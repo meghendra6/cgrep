@@ -1,16 +1,5 @@
-# Build artifacts
+# cgrep - local index
+.cgrep/
+# Rust build artefacts
 /target/
-/.lgrep/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Debug
-*.log
+Cargo.lock

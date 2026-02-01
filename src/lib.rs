@@ -1,6 +1,6 @@
-//! lgrep - Local semantic code search library
+//! cgrep - Local semantic code search library
 //!
-//! Shared modules for the lgrep CLI tool.
+//! Shared modules for the cgrep CLI tool.
 
 pub mod config;
 pub mod errors;

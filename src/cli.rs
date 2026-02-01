@@ -3,12 +3,12 @@
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
 
-/// lgrep - Local semantic code search tool
+/// cgrep - Local semantic code search tool
 ///
 /// A high-performance search tool combining AST analysis with BM25 ranking.
 /// Supports symbol search, dependency tracking, and full-text search.
 #[derive(Parser, Debug)]
-#[command(name = "lgrep")]
+#[command(name = "cgrep")]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
     /// Output format (text or json)
@@ -149,35 +149,35 @@ pub enum Commands {
         path: Option<String>,
     },
 
-    /// Install lgrep for Claude Code
+    /// Install cgrep for Claude Code
     #[command(name = "install-claude-code")]
     InstallClaudeCode,
 
-    /// Uninstall lgrep from Claude Code
+    /// Uninstall cgrep from Claude Code
     #[command(name = "uninstall-claude-code")]
     UninstallClaudeCode,
 
-    /// Install lgrep for Codex
+    /// Install cgrep for Codex
     #[command(name = "install-codex")]
     InstallCodex,
 
-    /// Uninstall lgrep from Codex
+    /// Uninstall cgrep from Codex
     #[command(name = "uninstall-codex")]
     UninstallCodex,
 
-    /// Install lgrep for GitHub Copilot
+    /// Install cgrep for GitHub Copilot
     #[command(name = "install-copilot")]
     InstallCopilot,
 
-    /// Uninstall lgrep from GitHub Copilot
+    /// Uninstall cgrep from GitHub Copilot
     #[command(name = "uninstall-copilot")]
     UninstallCopilot,
 
-    /// Install lgrep for OpenCode
+    /// Install cgrep for OpenCode
     #[command(name = "install-opencode")]
     InstallOpencode,
 
-    /// Uninstall lgrep from OpenCode
+    /// Uninstall cgrep from OpenCode
     #[command(name = "uninstall-opencode")]
     UninstallOpencode,
 

@@ -1,6 +1,6 @@
-//! Codex installation for lgrep
+//! Codex installation for cgrep
 //!
-//! Installs lgrep as a preferred search tool in Codex's AGENTS.md file.
+//! Installs cgrep as a preferred search tool in Codex's AGENTS.md file.
 
 use anyhow::{Context, Result};
 use std::path::PathBuf;
@@ -9,27 +9,27 @@ use super::{append_if_not_present, home_dir, print_install_success, print_uninst
 
 const SKILL_CONTENT: &str = r#"
 ---
-name: lgrep
+name: cgrep
 description: A local semantic search tool using tantivy + tree-sitter. Fast, offline code search.
 license: Apache 2.0
 ---
 
 ## When to use this skill
 
-Whenever you need to search local files. Use lgrep instead of grep for semantic searches.
+Whenever you need to search local files. Use cgrep instead of grep for semantic searches.
 
 ## How to use this skill
 
-Use `lgrep search` to search local files. The search is semantic - describe what you're looking for.
+Use `cgrep search` to search local files. The search is semantic - describe what you're looking for.
 
 ### Usage Examples
 
 ```bash
-lgrep search "What code parsers are available?"
-lgrep search "How are chunks defined?" -m 10
-lgrep symbols MyFunction -t function
-lgrep definition MyClass
-lgrep callers process_request
+cgrep search "What code parsers are available?"
+cgrep search "How are chunks defined?" -m 10
+cgrep symbols MyFunction -t function
+cgrep definition MyClass
+cgrep callers process_request
 ```
 
 ### Options
@@ -53,7 +53,7 @@ pub fn install() -> Result<()> {
     if added {
         print_install_success("Codex");
     } else {
-        println!("lgrep is already installed in Codex");
+        println!("cgrep is already installed in Codex");
     }
     
     Ok(())
@@ -86,7 +86,7 @@ pub fn uninstall() -> Result<()> {
         }
         print_uninstall_success("Codex");
     } else {
-        println!("lgrep is not installed in Codex");
+        println!("cgrep is not installed in Codex");
     }
     
     Ok(())

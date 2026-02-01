@@ -1,8 +1,8 @@
-# lgrep
+# cgrep
 
 > Local semantic code search tool with AST and BM25 support
 
-**lgrep** is a high-performance, fully local code search tool that combines:
+**cgrep** is a high-performance, fully local code search tool that combines:
 - **tree-sitter** for AST-aware symbol extraction
 - **tantivy** for BM25-ranked full-text search
 - **ripgrep's ignore crate** for respecting .gitignore
@@ -23,9 +23,9 @@
 ### From Source
 
 ```bash
-cd lgrep
+cd cgrep
 cargo build --release
-cp target/release/lgrep ~/.local/bin/
+cp target/release/cgrep ~/.local/bin/
 ```
 
 ### Using Cargo
@@ -38,42 +38,42 @@ cargo install --path .
 
 ```bash
 # Build the search index (run once)
-lgrep index
+cgrep index
 
 # Search for code
-lgrep search "authentication flow"
+cgrep search "authentication flow"
 
 # Find a symbol definition
-lgrep definition handleAuth
+cgrep definition handleAuth
 
 # Find all callers of a function
-lgrep callers validateToken
+cgrep callers validateToken
 
 # Find all references to a symbol
-lgrep references MyClass
+cgrep references MyClass
 
 # Search for symbols by type
-lgrep symbols UserService --type class
+cgrep symbols UserService --type class
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `lgrep search <query>` | Full-text search with BM25 ranking |
-| `lgrep symbols <name>` | Search for symbols by name |
-| `lgrep definition <name>` | Find symbol definition location |
-| `lgrep callers <function>` | Find all callers of a function |
-| `lgrep references <name>` | Find all references to a symbol |
-| `lgrep dependents <file>` | Find files that depend on a file |
-| `lgrep index` | Build or rebuild the search index |
-| `lgrep watch` | Watch for file changes and update index |
-| `lgrep completions <shell>` | Generate shell completions |
+| `cgrep search <query>` | Full-text search with BM25 ranking |
+| `cgrep symbols <name>` | Search for symbols by name |
+| `cgrep definition <name>` | Find symbol definition location |
+| `cgrep callers <function>` | Find all callers of a function |
+| `cgrep references <name>` | Find all references to a symbol |
+| `cgrep dependents <file>` | Find files that depend on a file |
+| `cgrep index` | Build or rebuild the search index |
+| `cgrep watch` | Watch for file changes and update index |
+| `cgrep completions <shell>` | Generate shell completions |
 
 ## Search Command Flags
 
 ```bash
-lgrep search <query> [options]
+cgrep search <query> [options]
 ```
 
 | Flag | Description |
@@ -91,7 +91,7 @@ lgrep search <query> [options]
 ## Symbols Command Flags
 
 ```bash
-lgrep symbols <name> [options]
+cgrep symbols <name> [options]
 ```
 
 | Flag | Description |
@@ -106,7 +106,7 @@ lgrep symbols <name> [options]
 ## References Command Flags
 
 ```bash
-lgrep references <name> [options]
+cgrep references <name> [options]
 ```
 
 | Flag | Description |
@@ -119,20 +119,20 @@ lgrep references <name> [options]
 
 ### Config File
 
-lgrep supports configuration via `.lgreprc.toml` in your project directory or `~/.config/lgrep/config.toml` for global settings:
+cgrep supports configuration via `.cgreprc.toml` in your project directory or `~/.config/cgrep/config.toml` for global settings:
 
 ```toml
-# .lgreprc.toml
+# .cgreprc.toml
 max_results = 20
 default_format = "text"  # or "json"
 ```
 
 ### Index Location
 
-lgrep stores its index in `.lgrep/` directory in your project root. Add this to your `.gitignore`:
+cgrep stores its index in `.cgrep/` directory in your project root. Add this to your `.gitignore`:
 
 ```
-.lgrep/
+.cgrep/
 ```
 
 ## Shell Completions
@@ -141,48 +141,48 @@ Generate shell completions for your preferred shell:
 
 ```bash
 # Bash
-lgrep completions bash > ~/.local/share/bash-completion/completions/lgrep
+cgrep completions bash > ~/.local/share/bash-completion/completions/cgrep
 
 # Zsh
-lgrep completions zsh > ~/.zfunc/_lgrep
+cgrep completions zsh > ~/.zfunc/_cgrep
 
 # Fish
-lgrep completions fish > ~/.config/fish/completions/lgrep.fish
+cgrep completions fish > ~/.config/fish/completions/cgrep.fish
 
 # PowerShell
-lgrep completions powershell > $PROFILE.CurrentUserAllHosts
+cgrep completions powershell > $PROFILE.CurrentUserAllHosts
 ```
 
 ## Agent Integrations
 
-lgrep integrates with AI coding agents for enhanced code understanding:
+cgrep integrates with AI coding agents for enhanced code understanding:
 
 ### Claude Code
 
 ```bash
-lgrep install-claude-code    # Install integration
-lgrep uninstall-claude-code  # Uninstall
+cgrep install-claude-code    # Install integration
+cgrep uninstall-claude-code  # Uninstall
 ```
 
 ### OpenAI Codex
 
 ```bash
-lgrep install-codex    # Install integration
-lgrep uninstall-codex  # Uninstall
+cgrep install-codex    # Install integration
+cgrep uninstall-codex  # Uninstall
 ```
 
 ### GitHub Copilot
 
 ```bash
-lgrep install-copilot    # Install integration
-lgrep uninstall-copilot  # Uninstall
+cgrep install-copilot    # Install integration
+cgrep uninstall-copilot  # Uninstall
 ```
 
 ### OpenCode
 
 ```bash
-lgrep install-opencode    # Install integration
-lgrep uninstall-opencode  # Uninstall
+cgrep install-opencode    # Install integration
+cgrep uninstall-opencode  # Uninstall
 ```
 
 ## Supported Languages
@@ -205,7 +205,7 @@ lgrep uninstall-opencode  # Uninstall
 ### Full-text Search
 
 ```bash
-$ lgrep search "error handling"
+$ cgrep search "error handling"
 
 ✓ Found 15 results for: error handling
 
@@ -219,7 +219,7 @@ $ lgrep search "error handling"
 ### Full-text Search with Context
 
 ```bash
-$ lgrep search "auth middleware" -C 2 -t typescript
+$ cgrep search "auth middleware" -C 2 -t typescript
 
 ✓ Found 5 results for: auth middleware
 
@@ -232,7 +232,7 @@ $ lgrep search "auth middleware" -C 2 -t typescript
 ### Fuzzy Search
 
 ```bash
-$ lgrep search "authentcation" --fuzzy  # Note typo
+$ cgrep search "authentcation" --fuzzy  # Note typo
 
 ✓ Found 12 results (fuzzy matching)
 ```
@@ -240,7 +240,7 @@ $ lgrep search "authentcation" --fuzzy  # Note typo
 ### Symbol Search
 
 ```bash
-$ lgrep symbols handleAuth --type function
+$ cgrep symbols handleAuth --type function
 
 🔍 Searching for symbol: handleAuth
 
@@ -250,11 +250,11 @@ $ lgrep symbols handleAuth --type function
 ### Find Definition
 
 ```bash
-$ lgrep definition FileScanner
+$ cgrep definition FileScanner
 
 🔍 Finding definition of: FileScanner
 
-  [struct] FileScanner lgrep/src/indexer/scanner.rs:20:1
+  [struct] FileScanner cgrep/src/indexer/scanner.rs:20:1
 
   ➜   20 pub struct FileScanner {
       21     root: PathBuf,
@@ -264,7 +264,7 @@ $ lgrep definition FileScanner
 ### Find Callers
 
 ```bash
-$ lgrep callers validateToken
+$ cgrep callers validateToken
 
 🔍 Finding callers of: validateToken
 
@@ -275,7 +275,7 @@ $ lgrep callers validateToken
 ### Find References
 
 ```bash
-$ lgrep references UserService
+$ cgrep references UserService
 
 🔍 Finding references of: UserService
 
@@ -289,7 +289,7 @@ $ lgrep references UserService
 ### JSON Output
 
 ```bash
-$ lgrep search "config" --format json
+$ cgrep search "config" --format json
 [
   {
     "path": "src/config.ts",
@@ -304,7 +304,7 @@ $ lgrep search "config" --format json
 
 Compared to traditional tools:
 
-| Metric | grep | ripgrep | lgrep |
+| Metric | grep | ripgrep | cgrep |
 |--------|------|---------|-------|
 | File scan | 1x | 10-50x | 10-50x |
 | Code understanding | ❌ | ❌ | ✅ |
@@ -316,7 +316,7 @@ Compared to traditional tools:
 
 | Variable | Description |
 |----------|-------------|
-| `LGREP_LOG` | Set log level (e.g., `debug`, `info`, `warn`) |
+| `CGREP_LOG` | Set log level (e.g., `debug`, `info`, `warn`) |
 | `NO_COLOR` | Disable colored output |
 
 ## License

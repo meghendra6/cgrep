@@ -1,6 +1,6 @@
-//! Configuration file support for lgrep
+//! Configuration file support for cgrep
 //!
-//! Loads configuration from .lgreprc.toml in current directory or ~/.config/lgrep/config.toml
+//! Loads configuration from .cgreprc.toml in current directory or ~/.config/cgrep/config.toml
 
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -13,7 +13,7 @@ pub enum ConfigOutputFormat {
     Json,
 }
 
-/// Configuration loaded from .lgreprc.toml or ~/.config/lgrep/config.toml
+/// Configuration loaded from .cgreprc.toml or ~/.config/cgrep/config.toml
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -29,17 +29,17 @@ impl Config {
     /// Load configuration from files
     ///
     /// Precedence (highest to lowest):
-    /// 1. .lgreprc.toml in current directory
-    /// 2. ~/.config/lgrep/config.toml
+    /// 1. .cgreprc.toml in current directory
+    /// 2. ~/.config/cgrep/config.toml
     pub fn load() -> Self {
         // Try current directory first
-        if let Some(config) = Self::load_from_path(&PathBuf::from(".lgreprc.toml")) {
+        if let Some(config) = Self::load_from_path(&PathBuf::from(".cgreprc.toml")) {
             return config;
         }
 
         // Try home directory config
         if let Some(home) = dirs::home_dir() {
-            let config_path = home.join(".config").join("lgrep").join("config.toml");
+            let config_path = home.join(".config").join("cgrep").join("config.toml");
             if let Some(config) = Self::load_from_path(&config_path) {
                 return config;
             }

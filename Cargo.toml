@@ -1,19 +1,22 @@
 [package]
-name = "lgrep"
-version = "0.1.0"
+name = "cgrep"
+version = "1.0.0"
 edition = "2021"
-description = "Local semantic code search tool with AST and BM25 support"
-license = "MIT"
-authors = ["lgrep contributors"]
+description = "cgrep (codegrep) - Local semantic code search tool for AI agents with AST and BM25 support"
+license = "MIT OR Apache-2.0"
+authors = ["cgrep contributors"]
+repository = "https://github.com/meghendra6/cgrep"
+homepage = "https://github.com/meghendra6/cgrep"
+readme = "README.md"
 keywords = ["search", "code", "ast", "grep"]
 categories = ["command-line-utilities", "development-tools"]
 
 [lib]
-name = "lgrep"
+name = "cgrep"
 path = "src/lib.rs"
 
 [[bin]]
-name = "lgrep"
+name = "cgrep"
 path = "src/main.rs"
 
 [dependencies]

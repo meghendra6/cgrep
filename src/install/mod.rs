@@ -1,4 +1,4 @@
-//! Agent installation module for lgrep
+//! Agent installation module for cgrep
 //!
 //! Provides install/uninstall commands for various AI coding agents.
 
@@ -61,18 +61,18 @@ pub fn home_dir() -> Result<std::path::PathBuf> {
 
 /// Print success message for installation
 pub fn print_install_success(agent: &str) {
-    println!("✓ Successfully installed lgrep for {}", agent);
+    println!("✓ Successfully installed cgrep for {}", agent);
     println!();
-    println!("  lgrep is a local semantic search tool.");
+    println!("  cgrep is a local semantic search tool.");
     println!("  It indexes files locally using tantivy + tree-sitter.");
     println!();
     println!(
-        "  To uninstall: lgrep uninstall-{}",
+        "  To uninstall: cgrep uninstall-{}",
         agent.to_lowercase().replace(' ', "-")
     );
 }
 
 /// Print success message for uninstallation
 pub fn print_uninstall_success(agent: &str) {
-    println!("✓ Successfully uninstalled lgrep from {}", agent);
+    println!("✓ Successfully uninstalled cgrep from {}", agent);
 }

@@ -9,9 +9,9 @@ use std::time::Instant;
 use crate::cli::OutputFormat;
 use crate::indexer::scanner::FileScanner;
 use crate::parser::symbols::SymbolExtractor;
-use lgrep::config::Config;
-use lgrep::filters::{matches_file_type, CompiledGlob, matches_glob_compiled, should_exclude_compiled};
-use lgrep::output::{use_colors, colorize_path, colorize_line_num, colorize_kind, colorize_name};
+use cgrep::config::Config;
+use cgrep::filters::{matches_file_type, CompiledGlob, matches_glob_compiled, should_exclude_compiled};
+use cgrep::output::{use_colors, colorize_path, colorize_line_num, colorize_kind, colorize_name};
 
 /// Symbol result for JSON output
 #[derive(Debug, Serialize)]

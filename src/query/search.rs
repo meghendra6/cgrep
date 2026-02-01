@@ -15,12 +15,12 @@ use tantivy::{
 };
 
 use crate::cli::OutputFormat;
-use lgrep::config::Config;
-use lgrep::errors::IndexNotFoundError;
-use lgrep::filters::{matches_file_type, CompiledGlob, matches_glob_compiled, should_exclude_compiled};
-use lgrep::output::{use_colors, colorize_path, colorize_line_num, colorize_match, colorize_context};
+use cgrep::config::Config;
+use cgrep::errors::IndexNotFoundError;
+use cgrep::filters::{matches_file_type, CompiledGlob, matches_glob_compiled, should_exclude_compiled};
+use cgrep::output::{use_colors, colorize_path, colorize_line_num, colorize_match, colorize_context};
 
-const INDEX_DIR: &str = ".lgrep";
+const INDEX_DIR: &str = ".cgrep";
 
 /// Search result for JSON output
 #[derive(Debug, Serialize)]

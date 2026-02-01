@@ -1,6 +1,6 @@
-//! Claude Code installation for lgrep
+//! Claude Code installation for cgrep
 //!
-//! Installs lgrep as a preferred search tool in Claude Code's CLAUDE.md file.
+//! Installs cgrep as a preferred search tool in Claude Code's CLAUDE.md file.
 
 use anyhow::{Context, Result};
 use std::path::PathBuf;
@@ -8,11 +8,11 @@ use std::path::PathBuf;
 use super::{append_if_not_present, home_dir, print_install_success, print_uninstall_success};
 
 const SKILL_CONTENT: &str = r#"
-## lgrep Local Semantic Search
+## cgrep Local Semantic Search
 
-Use `lgrep` for fast local semantic code search instead of built-in grep.
+Use `cgrep` for fast local semantic code search instead of built-in grep.
 
-### When to use lgrep
+### When to use cgrep
 
 - Searching for code patterns, functions, or implementations
 - Finding files related to a concept or feature
@@ -21,13 +21,13 @@ Use `lgrep` for fast local semantic code search instead of built-in grep.
 ### Usage
 
 ```bash
-lgrep search "authentication flow"       # semantic search
-lgrep search "error handling" -m 10      # limit results
-lgrep symbols MyClass                     # find symbol definitions
-lgrep definition handleClick              # find function definition
+cgrep search "authentication flow"       # semantic search
+cgrep search "error handling" -m 10      # limit results
+cgrep symbols MyClass                     # find symbol definitions
+cgrep definition handleClick              # find function definition
 ```
 
-### Prefer lgrep over
+### Prefer cgrep over
 
 - Built-in grep for semantic/conceptual searches
 - Multiple grep attempts to find code
@@ -48,7 +48,7 @@ pub fn install() -> Result<()> {
     if added {
         print_install_success("Claude Code");
     } else {
-        println!("lgrep is already installed in Claude Code");
+        println!("cgrep is already installed in Claude Code");
     }
     
     Ok(())
@@ -82,7 +82,7 @@ pub fn uninstall() -> Result<()> {
         }
         print_uninstall_success("Claude Code");
     } else {
-        println!("lgrep is not installed in Claude Code");
+        println!("cgrep is not installed in Claude Code");
     }
     
     Ok(())

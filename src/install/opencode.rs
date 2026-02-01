@@ -1,6 +1,6 @@
-//! OpenCode installation for lgrep
+//! OpenCode installation for cgrep
 //!
-//! Installs lgrep as a tool in OpenCode's configuration.
+//! Installs cgrep as a tool in OpenCode's configuration.
 
 use anyhow::{Context, Result};
 use std::fs;
@@ -12,42 +12,42 @@ const TOOL_DEFINITION: &str = r#"import { tool } from "@opencode-ai/plugin"
 
 const SKILL = `
 ---
-name: lgrep
+name: cgrep
 description: A local semantic search tool using tantivy + tree-sitter. Fast, offline code search.
 license: Apache 2.0
 ---
 
 ## When to use this skill
 
-Whenever you need to search local files. Use lgrep instead of grep for semantic searches.
+Whenever you need to search local files. Use cgrep instead of grep for semantic searches.
 
 ## How to use this skill
 
-Use \`lgrep search\` to search local files. The search is semantic - describe what you're looking for.
+Use \`cgrep search\` to search local files. The search is semantic - describe what you're looking for.
 
 ### Do
 
 \`\`\`bash
-lgrep search "What code parsers are available?"
-lgrep search "How are chunks defined?" -m 10
-lgrep symbols MyFunction -t function
+cgrep search "What code parsers are available?"
+cgrep search "How are chunks defined?" -m 10
+cgrep symbols MyFunction -t function
 \`\`\`
 
 ### Don't
 
 \`\`\`bash
-lgrep search "parser"  # Too vague
+cgrep search "parser"  # Too vague
 \`\`\`
 `
 
-export default tool("lgrep", {
+export default tool("cgrep", {
   description: SKILL,
   parameters: {
     type: "object",
     properties: {
       command: {
         type: "string",
-        description: "The lgrep command to run",
+        description: "The cgrep command to run",
       },
     },
     required: ["command"],
@@ -65,7 +65,7 @@ fn get_tool_path() -> Result<PathBuf> {
         .join(".config")
         .join("opencode")
         .join("tool")
-        .join("lgrep.ts"))
+        .join("cgrep.ts"))
 }
 
 fn get_config_path() -> Result<PathBuf> {
@@ -84,19 +84,19 @@ pub fn install() -> Result<()> {
     let tool_path = get_tool_path()?;
 
     let created = write_file_if_changed(&tool_path, TOOL_DEFINITION)
-        .context("Failed to write lgrep tool")?;
+        .context("Failed to write cgrep tool")?;
 
     if created {
-        println!("Created lgrep tool at {:?}", tool_path);
+        println!("Created cgrep tool at {:?}", tool_path);
     } else {
-        println!("lgrep tool already up to date");
+        println!("cgrep tool already up to date");
     }
 
     // Try to update config to include the tool
     let config_path = get_config_path()?;
     if config_path.exists() {
         println!("OpenCode config found at {:?}", config_path);
-        println!("Note: You may need to manually add lgrep to your MCP configuration.");
+        println!("Note: You may need to manually add cgrep to your MCP configuration.");
     }
 
     print_install_success("OpenCode");
@@ -108,10 +108,10 @@ pub fn uninstall() -> Result<()> {
 
     if tool_path.exists() {
         fs::remove_file(&tool_path)?;
-        println!("Removed lgrep tool from {:?}", tool_path);
+        println!("Removed cgrep tool from {:?}", tool_path);
         print_uninstall_success("OpenCode");
     } else {
-        println!("lgrep tool not found in OpenCode");
+        println!("cgrep tool not found in OpenCode");
     }
 
     Ok(())
