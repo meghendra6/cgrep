@@ -5,6 +5,7 @@
 
 mod cli;
 mod indexer;
+mod install;
 mod parser;
 mod query;
 
@@ -37,6 +38,32 @@ fn main() -> Result<()> {
         }
         Commands::Watch { path } => {
             indexer::watch::run(path.as_deref())?;
+        }
+
+        // Agent installation commands
+        Commands::InstallClaudeCode => {
+            install::claude_code::install()?;
+        }
+        Commands::UninstallClaudeCode => {
+            install::claude_code::uninstall()?;
+        }
+        Commands::InstallCodex => {
+            install::codex::install()?;
+        }
+        Commands::UninstallCodex => {
+            install::codex::uninstall()?;
+        }
+        Commands::InstallCopilot => {
+            install::copilot::install()?;
+        }
+        Commands::UninstallCopilot => {
+            install::copilot::uninstall()?;
+        }
+        Commands::InstallOpencode => {
+            install::opencode::install()?;
+        }
+        Commands::UninstallOpencode => {
+            install::opencode::uninstall()?;
         }
     }
 

@@ -97,4 +97,36 @@ pub enum Commands {
         #[arg(short, long)]
         path: Option<String>,
     },
+
+    /// Install lgrep for Claude Code
+    #[command(name = "install-claude-code")]
+    InstallClaudeCode,
+
+    /// Uninstall lgrep from Claude Code
+    #[command(name = "uninstall-claude-code")]
+    UninstallClaudeCode,
+
+    /// Install lgrep for Codex
+    #[command(name = "install-codex")]
+    InstallCodex,
+
+    /// Uninstall lgrep from Codex
+    #[command(name = "uninstall-codex")]
+    UninstallCodex,
+
+    /// Install lgrep for GitHub Copilot
+    #[command(name = "install-copilot")]
+    InstallCopilot,
+
+    /// Uninstall lgrep from GitHub Copilot
+    #[command(name = "uninstall-copilot")]
+    UninstallCopilot,
+
+    /// Install lgrep for OpenCode
+    #[command(name = "install-opencode")]
+    InstallOpencode,
+
+    /// Uninstall lgrep from OpenCode
+    #[command(name = "uninstall-opencode")]
+    UninstallOpencode,
 }
