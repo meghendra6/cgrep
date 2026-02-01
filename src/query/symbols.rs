@@ -9,6 +9,7 @@ use std::time::Instant;
 use crate::cli::OutputFormat;
 use crate::indexer::scanner::FileScanner;
 use crate::parser::symbols::SymbolExtractor;
+use lgrep::config::Config;
 use lgrep::filters::{matches_file_type, CompiledGlob, matches_glob_compiled, should_exclude_compiled};
 use lgrep::output::{use_colors, colorize_path, colorize_line_num, colorize_kind, colorize_name};
 
@@ -35,9 +36,19 @@ pub fn run(
     let start_time = Instant::now();
     let use_color = use_colors() && format == OutputFormat::Text;
     
+    // Load config for exclude patterns
+    let config = Config::load();
+    
     // Precompile glob patterns for efficient repeated matching
     let compiled_glob = glob_pattern.and_then(CompiledGlob::new);
     let compiled_exclude = exclude_pattern.and_then(CompiledGlob::new);
+    
+    // Compile config exclude patterns
+    let config_exclude_patterns: Vec<CompiledGlob> = config
+        .exclude_patterns
+        .iter()
+        .filter_map(|p| CompiledGlob::new(p.as_str()))
+        .collect();
     
     let root = std::env::current_dir()?;
     let scanner = FileScanner::new(&root);
@@ -65,6 +76,10 @@ pub fn run(
             continue;
         }
         if should_exclude_compiled(&rel_path, compiled_exclude.as_ref()) {
+            continue;
+        }
+        // Also check config exclude patterns
+        if config_exclude_patterns.iter().any(|p| should_exclude_compiled(&rel_path, Some(p))) {
             continue;
         }
 

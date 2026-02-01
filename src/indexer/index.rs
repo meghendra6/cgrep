@@ -220,7 +220,8 @@ impl IndexBuilder {
 /// Run the index command
 pub fn run(path: Option<&str>, force: bool) -> Result<()> {
     let root = path.map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap());
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| anyhow::anyhow!("Cannot determine current directory"))?;
 
     let builder = IndexBuilder::new(&root)?;
     let count = builder.build(force)?;

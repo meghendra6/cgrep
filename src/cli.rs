@@ -1,6 +1,7 @@
 //! CLI argument parsing using clap
 
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 
 /// lgrep - Local semantic code search tool
 ///
@@ -163,4 +164,11 @@ pub enum Commands {
     /// Uninstall lgrep from OpenCode
     #[command(name = "uninstall-opencode")]
     UninstallOpencode,
+
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: Shell,
+    },
 }

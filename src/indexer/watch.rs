@@ -67,7 +67,8 @@ fn should_reindex(event: &Event) -> bool {
 /// Run the watch command
 pub fn run(path: Option<&str>) -> Result<()> {
     let root = path.map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap());
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| anyhow::anyhow!("Cannot determine current directory"))?;
 
     // Build initial index
     let builder = IndexBuilder::new(&root)?;

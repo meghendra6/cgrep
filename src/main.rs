@@ -10,7 +10,8 @@ mod parser;
 mod query;
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::generate;
 use cli::{Cli, Commands};
 use tracing_subscriber::EnvFilter;
 
@@ -73,6 +74,10 @@ fn main() -> Result<()> {
         }
         Commands::UninstallOpencode => {
             install::opencode::uninstall()?;
+        }
+        Commands::Completions { shell } => {
+            let mut cmd = Cli::command();
+            generate(shell, &mut cmd, "lgrep", &mut std::io::stdout());
         }
     }
 

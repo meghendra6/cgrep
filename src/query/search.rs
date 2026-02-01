@@ -15,7 +15,8 @@ use tantivy::{
 };
 
 use crate::cli::OutputFormat;
-use crate::indexer::IndexBuilder;
+use lgrep::config::Config;
+use lgrep::errors::IndexNotFoundError;
 use lgrep::filters::{matches_file_type, CompiledGlob, matches_glob_compiled, should_exclude_compiled};
 use lgrep::output::{use_colors, colorize_path, colorize_line_num, colorize_match, colorize_context};
 
@@ -52,21 +53,22 @@ pub fn run(
     let compiled_glob = glob_pattern.and_then(CompiledGlob::new);
     let compiled_exclude = exclude_pattern.and_then(CompiledGlob::new);
     
+    // Load config for defaults
+    let config = Config::load();
+    let effective_max_results = config.merge_max_results(Some(max_results));
+    
     let root = path
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap());
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| anyhow::anyhow!("Cannot determine current directory"))?;
 
     let index_path = root.join(INDEX_DIR);
 
-    // Check if index exists, create if not
+    // Check if index exists, return helpful error if not
     if !index_path.exists() {
-        if use_color {
-            println!("{} Index not found, building...", "⚠".yellow());
-        } else {
-            println!("Index not found, building...");
-        }
-        let builder = IndexBuilder::new(&root)?;
-        builder.build(false)?;
+        return Err(IndexNotFoundError {
+            index_path: index_path.display().to_string(),
+        }.into());
     }
 
     let index = Index::open_in_dir(&index_path).context("Failed to open index")?;
@@ -111,7 +113,7 @@ pub fn run(
     };
 
     // Get more results than needed for filtering
-    let fetch_limit = max_results * 5;
+    let fetch_limit = effective_max_results * 5;
     let top_docs = searcher.search(&parsed_query, &TopDocs::with_limit(fetch_limit))?;
 
     // Track stats
@@ -121,7 +123,7 @@ pub fn run(
     // Collect results with filtering
     let mut results: Vec<SearchResult> = Vec::new();
     for (score, doc_address) in &top_docs {
-        if results.len() >= max_results {
+        if results.len() >= effective_max_results {
             break;
         }
         
