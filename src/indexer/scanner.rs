@@ -81,31 +81,42 @@ impl FileScanner {
     /// Get list of file paths only (faster)
     #[allow(dead_code)]
     pub fn list_files(&self) -> Result<Vec<PathBuf>> {
-        let mut files = Vec::new();
+        let (tx, rx) = mpsc::channel();
 
-        for entry in WalkBuilder::new(&self.root)
+        let walker = WalkBuilder::new(&self.root)
             .hidden(false)
             .git_ignore(true)
-            .build()
-        {
-            if let Ok(entry) = entry {
-                let path = entry.path();
-                if path.is_file() {
-                    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                        if self.extensions.contains(&ext.to_lowercase()) {
-                            files.push(path.to_path_buf());
+            .git_exclude(true)
+            .build_parallel();
+
+        let extensions = self.extensions.clone();
+
+        walker.run(|| {
+            let tx = tx.clone();
+            let extensions = extensions.clone();
+
+            Box::new(move |entry| {
+                if let Ok(entry) = entry {
+                    let path = entry.path();
+                    if path.is_file() {
+                        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                            if extensions.contains(&ext.to_lowercase()) {
+                                let _ = tx.send(path.to_path_buf());
+                            }
                         }
                     }
                 }
-            }
-        }
+                ignore::WalkState::Continue
+            })
+        });
 
-        Ok(files)
+        drop(tx);
+        Ok(rx.into_iter().collect())
     }
 }
 
 /// Detect language from file extension
-fn detect_language(ext: &str) -> Option<String> {
+pub fn detect_language(ext: &str) -> Option<String> {
     match ext.to_lowercase().as_str() {
         "rs" => Some("rust".into()),
         "ts" | "tsx" => Some("typescript".into()),

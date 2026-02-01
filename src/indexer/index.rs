@@ -16,7 +16,7 @@ use tantivy::{
     Index, IndexWriter, TantivyDocument,
 };
 
-use crate::indexer::scanner::FileScanner;
+use crate::indexer::scanner::{detect_language, FileScanner};
 use crate::parser::symbols::SymbolExtractor;
 
 const INDEX_DIR: &str = ".cgrep";
@@ -108,7 +108,7 @@ impl IndexBuilder {
             .context("Failed to create index writer")?;
 
         let scanner = FileScanner::new(&self.root);
-        let files = scanner.scan()?;
+        let files = scanner.list_files()?;
         let total_files = files.len();
 
         // Track counters
@@ -127,12 +127,12 @@ impl IndexBuilder {
         let processed_files: Vec<_> = files
             .par_iter()
             .progress_with(pb.clone())
-            .filter_map(|file| {
-                let path_str = file.path.to_string_lossy().to_string();
+            .filter_map(|path| {
+                let path_str = path.to_string_lossy().to_string();
                 pb.set_message(path_str.clone());
 
                 // Get file mtime
-                let mtime = std::fs::metadata(&file.path)
+                let mtime = std::fs::metadata(path)
                     .and_then(|m| m.modified())
                     .ok()
                     .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
@@ -148,11 +148,22 @@ impl IndexBuilder {
                     return Some((path_str, mtime, None));
                 }
 
+                let content = match std::fs::read_to_string(path) {
+                    Ok(content) => content,
+                    Err(_) => return None,
+                };
+
+                let lang_str = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .and_then(detect_language)
+                    .unwrap_or_default();
+
                 // Extract symbols using tree-sitter (thread-safe via new extractor per file)
-                let symbols = if let Some(ref lang) = file.language {
+                let symbols = if !lang_str.is_empty() {
                     let extractor = SymbolExtractor::new();
                     extractor
-                        .extract(&file.content, lang)
+                        .extract(&content, &lang_str)
                         .unwrap_or_default()
                         .into_iter()
                         .map(|s| s.name)
@@ -162,14 +173,9 @@ impl IndexBuilder {
                     String::new()
                 };
 
-                let lang_str = file.language.clone().unwrap_or_default();
                 indexed_count.fetch_add(1, Ordering::Relaxed);
 
-                Some((
-                    path_str,
-                    mtime,
-                    Some((file.content.clone(), lang_str, symbols)),
-                ))
+                Some((path_str, mtime, Some((content, lang_str, symbols))))
             })
             .collect();
 
