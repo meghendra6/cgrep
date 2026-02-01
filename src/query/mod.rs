@@ -3,5 +3,6 @@
 pub mod callers;
 pub mod definition;
 pub mod dependents;
+pub mod references;
 pub mod search;
 pub mod symbols;

@@ -19,8 +19,7 @@ fn main() -> Result<()> {
     // Initialize tracing with LGREP_LOG env var (e.g., LGREP_LOG=debug lgrep search "query")
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_env("LGREP_LOG")
-                .unwrap_or_else(|_| EnvFilter::new("warn")),
+            EnvFilter::try_from_env("LGREP_LOG").unwrap_or_else(|_| EnvFilter::new("warn")),
         )
         .init();
 
@@ -28,17 +27,62 @@ fn main() -> Result<()> {
     let format = cli.format;
 
     match cli.command {
-        Commands::Search { query, path, max_results, context, file_type, glob, exclude, quiet, fuzzy } => {
-            query::search::run(&query, path.as_deref(), max_results, context, file_type.as_deref(), glob.as_deref(), exclude.as_deref(), quiet, fuzzy, format)?;
+        Commands::Search {
+            query,
+            path,
+            max_results,
+            context,
+            file_type,
+            glob,
+            exclude,
+            quiet,
+            fuzzy,
+        } => {
+            query::search::run(
+                &query,
+                path.as_deref(),
+                max_results,
+                context,
+                file_type.as_deref(),
+                glob.as_deref(),
+                exclude.as_deref(),
+                quiet,
+                fuzzy,
+                format,
+            )?;
         }
-        Commands::Symbols { name, symbol_type, lang, file_type, glob, exclude, quiet } => {
-            query::symbols::run(&name, symbol_type.as_deref(), lang.as_deref(), file_type.as_deref(), glob.as_deref(), exclude.as_deref(), quiet, format)?;
+        Commands::Symbols {
+            name,
+            symbol_type,
+            lang,
+            file_type,
+            glob,
+            exclude,
+            quiet,
+        } => {
+            query::symbols::run(
+                &name,
+                symbol_type.as_deref(),
+                lang.as_deref(),
+                file_type.as_deref(),
+                glob.as_deref(),
+                exclude.as_deref(),
+                quiet,
+                format,
+            )?;
         }
         Commands::Definition { name } => {
             query::definition::run(&name, format)?;
         }
         Commands::Callers { function } => {
             query::callers::run(&function, format)?;
+        }
+        Commands::References {
+            name,
+            path,
+            max_results,
+        } => {
+            query::references::run(&name, path.as_deref(), max_results, format)?;
         }
         Commands::Dependents { file } => {
             query::dependents::run(&file, format)?;

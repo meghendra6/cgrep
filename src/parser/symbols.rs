@@ -114,6 +114,10 @@ impl SymbolExtractor {
             "python" => self.match_python_node(kind),
             "rust" => self.match_rust_node(kind),
             "go" => self.match_go_node(kind),
+            "c" => self.match_c_node(kind),
+            "cpp" => self.match_cpp_node(kind),
+            "java" => self.match_java_node(kind),
+            "ruby" => self.match_ruby_node(kind),
             _ => return None,
         }?;
 
@@ -175,6 +179,56 @@ impl SymbolExtractor {
             "function_declaration" => Some((SymbolKind::Function, "name")),
             "method_declaration" => Some((SymbolKind::Method, "name")),
             "type_spec" => Some((SymbolKind::Type, "name")),
+            _ => None,
+        }
+    }
+
+    /// Match C AST nodes
+    fn match_c_node(&self, kind: &str) -> Option<(SymbolKind, &'static str)> {
+        match kind {
+            "function_definition" => Some((SymbolKind::Function, "declarator")),
+            "function_declarator" => Some((SymbolKind::Function, "declarator")),
+            "struct_specifier" => Some((SymbolKind::Struct, "name")),
+            "enum_specifier" => Some((SymbolKind::Enum, "name")),
+            "type_definition" => Some((SymbolKind::Type, "declarator")),
+            _ => None,
+        }
+    }
+
+    /// Match C++ AST nodes
+    fn match_cpp_node(&self, kind: &str) -> Option<(SymbolKind, &'static str)> {
+        match kind {
+            "function_definition" => Some((SymbolKind::Function, "declarator")),
+            "function_declarator" => Some((SymbolKind::Function, "declarator")),
+            "class_specifier" => Some((SymbolKind::Class, "name")),
+            "struct_specifier" => Some((SymbolKind::Struct, "name")),
+            "enum_specifier" => Some((SymbolKind::Enum, "name")),
+            "namespace_definition" => Some((SymbolKind::Module, "name")),
+            "type_definition" => Some((SymbolKind::Type, "declarator")),
+            _ => None,
+        }
+    }
+
+    /// Match Java AST nodes
+    fn match_java_node(&self, kind: &str) -> Option<(SymbolKind, &'static str)> {
+        match kind {
+            "method_declaration" => Some((SymbolKind::Method, "name")),
+            "class_declaration" => Some((SymbolKind::Class, "name")),
+            "interface_declaration" => Some((SymbolKind::Interface, "name")),
+            "enum_declaration" => Some((SymbolKind::Enum, "name")),
+            "constructor_declaration" => Some((SymbolKind::Function, "name")),
+            "field_declaration" => Some((SymbolKind::Property, "declarator")),
+            _ => None,
+        }
+    }
+
+    /// Match Ruby AST nodes
+    fn match_ruby_node(&self, kind: &str) -> Option<(SymbolKind, &'static str)> {
+        match kind {
+            "method" => Some((SymbolKind::Method, "name")),
+            "singleton_method" => Some((SymbolKind::Method, "name")),
+            "class" => Some((SymbolKind::Class, "name")),
+            "module" => Some((SymbolKind::Module, "name")),
             _ => None,
         }
     }

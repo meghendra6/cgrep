@@ -26,6 +26,10 @@ impl LanguageRegistry {
         languages.insert("python".into(), tree_sitter_python::LANGUAGE.into());
         languages.insert("rust".into(), tree_sitter_rust::LANGUAGE.into());
         languages.insert("go".into(), tree_sitter_go::LANGUAGE.into());
+        languages.insert("c".into(), tree_sitter_c::LANGUAGE.into());
+        languages.insert("cpp".into(), tree_sitter_cpp::LANGUAGE.into());
+        languages.insert("java".into(), tree_sitter_java::LANGUAGE.into());
+        languages.insert("ruby".into(), tree_sitter_ruby::LANGUAGE.into());
 
         Self { languages }
     }

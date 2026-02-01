@@ -1,6 +1,7 @@
 //! Index builder using tantivy for BM25 search
 
 use anyhow::{Context, Result};
+use colored::Colorize;
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -9,10 +10,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::SystemTime;
 use tantivy::{
-    schema::{Schema, STORED, TEXT, Field},
+    schema::{Field, Schema, STORED, TEXT},
     Index, IndexWriter, TantivyDocument,
 };
-use colored::Colorize;
 
 use crate::indexer::scanner::FileScanner;
 use crate::parser::symbols::SymbolExtractor;
@@ -52,7 +52,8 @@ impl IndexBuilder {
         let content = schema_builder.add_text_field("content", TEXT | STORED);
         let language = schema_builder.add_text_field("language", TEXT | STORED);
         let symbols = schema_builder.add_text_field("symbols", TEXT | STORED);
-        let line_number = schema_builder.add_u64_field("line_number", tantivy::schema::INDEXED | STORED);
+        let line_number =
+            schema_builder.add_u64_field("line_number", tantivy::schema::INDEXED | STORED);
 
         let schema = schema_builder.build();
         let fields = IndexFields {
@@ -90,8 +91,7 @@ impl IndexBuilder {
 
         // Open existing index or create new one
         let index = if index_meta_exists && !force {
-            Index::open_in_dir(&index_path)
-                .context("Failed to open existing index")?
+            Index::open_in_dir(&index_path).context("Failed to open existing index")?
         } else {
             if index_path.exists() {
                 std::fs::remove_dir_all(&index_path)?;
@@ -138,8 +138,8 @@ impl IndexBuilder {
                     .unwrap_or(0);
 
                 // Check if file needs re-indexing
-                let needs_indexing = force
-                    || old_metadata.files.get(&path_str).copied() != Some(mtime);
+                let needs_indexing =
+                    force || old_metadata.files.get(&path_str).copied() != Some(mtime);
 
                 if !needs_indexing {
                     skipped_count.fetch_add(1, Ordering::Relaxed);
@@ -163,7 +163,11 @@ impl IndexBuilder {
                 let lang_str = file.language.clone().unwrap_or_default();
                 indexed_count.fetch_add(1, Ordering::Relaxed);
 
-                Some((path_str, mtime, Some((file.content.clone(), lang_str, symbols))))
+                Some((
+                    path_str,
+                    mtime,
+                    Some((file.content.clone(), lang_str, symbols)),
+                ))
             })
             .collect();
 
@@ -219,7 +223,8 @@ impl IndexBuilder {
 
 /// Run the index command
 pub fn run(path: Option<&str>, force: bool) -> Result<()> {
-    let root = path.map(std::path::PathBuf::from)
+    let root = path
+        .map(std::path::PathBuf::from)
         .or_else(|| std::env::current_dir().ok())
         .ok_or_else(|| anyhow::anyhow!("Cannot determine current directory"))?;
 

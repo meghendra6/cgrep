@@ -63,7 +63,8 @@ pub enum Commands {
         quiet: bool,
         /// Enable fuzzy matching (allows 1-2 character differences)
         #[arg(short = 'f', long)]
-        fuzzy: bool,    },
+        fuzzy: bool,
+    },
 
     /// Search for symbols (functions, classes, etc.)
     Symbols {
@@ -106,6 +107,21 @@ pub enum Commands {
     Callers {
         /// Function name to find callers for
         function: String,
+    },
+
+    /// Find all references to a symbol
+    #[command(alias = "refs")]
+    References {
+        /// Symbol name to find references for
+        name: String,
+
+        /// Path to search in (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Maximum number of results
+        #[arg(short, long, default_value = "50")]
+        max_results: usize,
     },
 
     /// Find files that depend on a given file
