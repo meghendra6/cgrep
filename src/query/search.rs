@@ -227,31 +227,43 @@ pub fn run(
                     println!("\nFound {} results for: {}\n", outcome.results.len(), query);
                 }
 
+                let highlight_snippet = |snippet: &str| {
+                    if outcome.mode == IndexMode::Scan {
+                        if let Some(re) = compiled_regex.as_ref() {
+                            highlight_matches_regex(snippet, re, use_color)
+                        } else {
+                            highlight_matches(snippet, query, use_color)
+                        }
+                    } else {
+                        highlight_matches(snippet, query, use_color)
+                    }
+                };
+
+                let format_line_prefix = |marker: &str, line_num: usize, width: usize| {
+                    let padded = format!("{:>width$}", line_num, width = width);
+                    let num = if use_color { padded.yellow().to_string() } else { padded };
+                    let marker = if use_color && marker == ">" {
+                        marker.blue().to_string()
+                    } else {
+                        marker.to_string()
+                    };
+                    format!("{} {} | ", marker, num)
+                };
+
                 let mut prev_had_context = false;
                 for (idx, result) in outcome.results.iter().enumerate() {
+                    let has_context = !result.context_before.is_empty() || !result.context_after.is_empty();
+
                     // Print separator between context groups
-                    if idx > 0 && (prev_had_context || !result.context_before.is_empty()) {
+                    if idx > 0 && (prev_had_context || has_context) {
                         println!("{}", if use_color { "--".dimmed().to_string() } else { "--".to_string() });
                     }
 
-                    // Print context before
-                    for (i, line) in result.context_before.iter().enumerate() {
-                        if let Some(match_line) = result.line {
-                            let ctx_line_num = match_line.saturating_sub(result.context_before.len() - i);
-                            println!(
-                                "{}-{}:  {}",
-                                colorize_path(&result.path, use_color),
-                                colorize_line_num(ctx_line_num, use_color),
-                                colorize_context(line, use_color)
-                            );
-                        }
-                    }
-
-                    // Print match line
+                    // Print match header
                     let line_info = result.line
                         .map(|l| format!(":{}", colorize_line_num(l, use_color)))
                         .unwrap_or_default();
-                    
+
                     if use_color {
                         match outcome.mode {
                             IndexMode::Index => {
@@ -292,37 +304,44 @@ pub fn run(
                         }
                     }
 
-                    if !result.snippet.is_empty() {
-                        let highlighted = if outcome.mode == IndexMode::Scan {
-                            if let Some(re) = compiled_regex.as_ref() {
-                                highlight_matches_regex(&result.snippet, re, use_color)
-                            } else {
-                                highlight_matches(&result.snippet, query, use_color)
+                    if has_context {
+                        if let Some(match_line) = result.line {
+                            let max_line = match_line + result.context_after.len();
+                            let min_line = match_line.saturating_sub(result.context_before.len());
+                            let width = std::cmp::max(max_line, min_line).to_string().len();
+
+                            // Print context before
+                            for (i, line) in result.context_before.iter().enumerate() {
+                                let ctx_line_num = match_line.saturating_sub(result.context_before.len() - i);
+                                let prefix = format_line_prefix(" ", ctx_line_num, width);
+                                println!("{}{}", prefix, colorize_context(line, use_color));
                             }
-                        } else {
-                            highlight_matches(&result.snippet, query, use_color)
-                        };
+
+                            // Print match line (single-line snippet)
+                            if !result.snippet.is_empty() {
+                                let highlighted = highlight_snippet(&result.snippet);
+                                let match_text = highlighted.lines().next().unwrap_or("");
+                                let prefix = format_line_prefix(">", match_line, width);
+                                println!("{}{}", prefix, match_text);
+                            }
+
+                            // Print context after
+                            for (i, line) in result.context_after.iter().enumerate() {
+                                let ctx_line_num = match_line + i + 1;
+                                let prefix = format_line_prefix(" ", ctx_line_num, width);
+                                println!("{}{}", prefix, colorize_context(line, use_color));
+                            }
+                        }
+                    } else if !result.snippet.is_empty() {
+                        let highlighted = highlight_snippet(&result.snippet);
                         for line in highlighted.lines().take(3) {
                             println!("    {}", line);
                         }
                     }
 
-                    // Print context after
-                    for (i, line) in result.context_after.iter().enumerate() {
-                        if let Some(match_line) = result.line {
-                            let ctx_line_num = match_line + i + 1;
-                            println!(
-                                "{}-{}:  {}",
-                                colorize_path(&result.path, use_color),
-                                colorize_line_num(ctx_line_num, use_color),
-                                colorize_context(line, use_color)
-                            );
-                        }
-                    }
+                    prev_had_context = has_context;
 
-                    prev_had_context = !result.context_after.is_empty();
-                    
-                    if result.context_before.is_empty() && result.context_after.is_empty() {
+                    if !has_context {
                         println!();
                     }
                 }
