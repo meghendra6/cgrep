@@ -10,12 +10,12 @@ use rayon::ThreadPoolBuilder;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::io::BufRead;
 use std::path::Path;
 use std::sync::mpsc;
 use std::time::SystemTime;
+use memmap2::Mmap;
 use tantivy::{
-    schema::{Field, Schema, STORED, TEXT},
+    schema::{Field, Schema, STORED, STRING, TEXT, Term},
     Index, IndexWriter, TantivyDocument,
 };
 
@@ -23,6 +23,8 @@ use crate::indexer::scanner::{detect_language, FileScanner};
 use crate::parser::symbols::SymbolExtractor;
 use cgrep::utils::INDEX_DIR;
 const METADATA_FILE: &str = ".cgrep/metadata.json";
+pub(crate) const DEFAULT_WRITER_BUDGET_BYTES: usize = 50_000_000;
+const HIGH_MEMORY_WRITER_BUDGET_BYTES: usize = 1024 * 1024 * 1024;
 
 /// Metadata for incremental indexing
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -105,36 +107,60 @@ enum ReadOutcome {
 
 fn read_text_chunks(path: &Path, max_doc_bytes: usize) -> Result<ReadOutcome> {
     let file = std::fs::File::open(path)?;
-    let mut reader = std::io::BufReader::new(file);
-    let mut hasher = blake3::Hasher::new();
+    if let Ok(mmap) = unsafe { Mmap::map(&file) } {
+        return read_text_chunks_from_bytes(&mmap, max_doc_bytes);
+    }
+
+    let bytes = std::fs::read(path)?;
+    read_text_chunks_from_bytes(&bytes, max_doc_bytes)
+}
+
+fn read_text_chunks_from_bytes(bytes: &[u8], max_doc_bytes: usize) -> Result<ReadOutcome> {
+    if bytes.iter().any(|&b| b == 0) {
+        return Ok(ReadOutcome::Binary { hash: None });
+    }
+
+    let text = match std::str::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(_) => return Ok(ReadOutcome::Binary { hash: None }),
+    };
+
+    let hash = blake3::hash(bytes).to_hex().to_string();
+    let chunks = build_chunks(text, max_doc_bytes);
+    Ok(ReadOutcome::Text { chunks, hash })
+}
+
+fn build_chunks(text: &str, max_doc_bytes: usize) -> Vec<TextChunk> {
+    let bytes = text.as_bytes();
     let mut chunks: Vec<TextChunk> = Vec::new();
     let mut current_chunk = String::new();
     let mut chunk_start_line: u64 = 1;
     let mut current_line: u64 = 0;
-    let mut line = String::new();
+    let mut line_start: usize = 0;
 
-    loop {
-        line.clear();
-        let read = match reader.read_line(&mut line) {
-            Ok(read) => read,
-            Err(err) => {
-                if err.kind() == std::io::ErrorKind::InvalidData {
-                    return Ok(ReadOutcome::Binary { hash: None });
-                }
-                return Err(err.into());
+    for (idx, &byte) in bytes.iter().enumerate() {
+        if byte == b'\n' {
+            let line_end = idx + 1;
+            current_line += 1;
+            let line = &text[line_start..line_end];
+
+            if current_chunk.len() + line.len() > max_doc_bytes && !current_chunk.is_empty() {
+                let content = std::mem::take(&mut current_chunk);
+                chunks.push(TextChunk {
+                    start_line: chunk_start_line,
+                    content,
+                });
+                chunk_start_line = current_line;
             }
-        };
-        if read == 0 {
-            break;
-        }
 
+            current_chunk.push_str(line);
+            line_start = line_end;
+        }
+    }
+
+    if line_start < bytes.len() {
         current_line += 1;
-        if line.as_bytes().iter().any(|&b| b == 0) {
-            return Ok(ReadOutcome::Binary { hash: None });
-        }
-
-        hasher.update(line.as_bytes());
-
+        let line = &text[line_start..];
         if current_chunk.len() + line.len() > max_doc_bytes && !current_chunk.is_empty() {
             let content = std::mem::take(&mut current_chunk);
             chunks.push(TextChunk {
@@ -143,8 +169,7 @@ fn read_text_chunks(path: &Path, max_doc_bytes: usize) -> Result<ReadOutcome> {
             });
             chunk_start_line = current_line;
         }
-
-        current_chunk.push_str(&line);
+        current_chunk.push_str(line);
     }
 
     if !current_chunk.is_empty() {
@@ -154,8 +179,7 @@ fn read_text_chunks(path: &Path, max_doc_bytes: usize) -> Result<ReadOutcome> {
         });
     }
 
-    let hash = hasher.finalize().to_hex().to_string();
-    Ok(ReadOutcome::Text { chunks, hash })
+    chunks
 }
 
 fn extract_symbols_from_chunks(chunks: &[TextChunk], lang: &str) -> String {
@@ -198,6 +222,7 @@ fn should_skip_without_read(
 /// Tantivy field handles
 pub struct IndexFields {
     pub path: Field,
+    pub path_exact: Field,
     pub content: Field,
     pub language: Field,
     pub symbols: Field,
@@ -223,6 +248,7 @@ impl IndexBuilder {
         let mut schema_builder = Schema::builder();
 
         let path = schema_builder.add_text_field("path", TEXT | STORED);
+        let path_exact = schema_builder.add_text_field("path_exact", STRING | STORED);
         let content = schema_builder.add_text_field("content", TEXT | STORED);
         let language = schema_builder.add_text_field("language", TEXT | STORED);
         let symbols = schema_builder.add_text_field("symbols", TEXT | STORED);
@@ -232,6 +258,7 @@ impl IndexBuilder {
         let schema = schema_builder.build();
         let fields = IndexFields {
             path,
+            path_exact,
             content,
             language,
             symbols,
@@ -247,7 +274,7 @@ impl IndexBuilder {
     }
 
     /// Build or rebuild the index (with incremental support)
-    pub fn build(&self, force: bool) -> Result<usize> {
+    pub fn build(&self, force: bool, writer_budget_bytes: usize) -> Result<usize> {
         let index_path = self.root.join(INDEX_DIR);
         let metadata_path = self.root.join(METADATA_FILE);
 
@@ -266,7 +293,15 @@ impl IndexBuilder {
 
         // Open existing index or create new one
         let index = if index_meta_exists && !force {
-            Index::open_in_dir(&index_path).context("Failed to open existing index")?
+            let index = Index::open_in_dir(&index_path).context("Failed to open existing index")?;
+            let schema = index.schema();
+            if schema.get_field("path_exact").is_err() {
+                anyhow::bail!(
+                    "Index schema upgrade required: missing 'path_exact'.\n\
+                     Run 'cgrep index --force' to rebuild the index."
+                );
+            }
+            index
         } else {
             if index_path.exists() {
                 std::fs::remove_dir_all(&index_path)?;
@@ -277,16 +312,20 @@ impl IndexBuilder {
         };
 
         let mut writer: IndexWriter = index
-            .writer(50_000_000) // 50MB heap
+            .writer(writer_budget_bytes)
             .context("Failed to create index writer")?;
 
         let scanner = FileScanner::with_excludes(&self.root, self.exclude_patterns.clone())
             .with_gitignore(false);
         let files = scanner.list_files()?;
+        let current_paths: HashSet<String> = files
+            .iter()
+            .map(|path| path.to_string_lossy().to_string())
+            .collect();
         let total_files = files.len();
 
         enum ProcessedFile {
-            Skipped { path: String, meta: FileMetadata },
+            Skipped { path: String, meta: FileMetadata, delete_docs: bool },
             Indexed { path: String, meta: FileMetadata, docs: Vec<TantivyDocument> },
             ReadError { path: String, fallback: Option<FileMetadata> },
         }
@@ -296,6 +335,7 @@ impl IndexBuilder {
         };
         let mut indexed_count = 0usize;
         let mut skipped_count = 0usize;
+        let mut deleted_count = 0usize;
         let mut error_count = 0usize;
         let mut indexing_error: Option<anyhow::Error> = None;
 
@@ -309,10 +349,26 @@ impl IndexBuilder {
 
         let (tx, rx) = mpsc::sync_channel::<ProcessedFile>(64);
         let path_field = self.fields.path;
+        let path_exact_field = self.fields.path_exact;
         let content_field = self.fields.content;
         let language_field = self.fields.language;
         let symbols_field = self.fields.symbols;
         let line_number_field = self.fields.line_number;
+
+        if !old_metadata.files.is_empty() {
+            let removed_paths: Vec<String> = old_metadata
+                .files
+                .keys()
+                .filter(|path| !current_paths.contains(*path))
+                .cloned()
+                .collect();
+            if !removed_paths.is_empty() {
+                for path in &removed_paths {
+                    writer.delete_term(Term::from_field_text(path_exact_field, path));
+                }
+                deleted_count = removed_paths.len();
+            }
+        }
 
         let io_threads = std::thread::available_parallelism()
             .map(|n| n.get())
@@ -351,7 +407,7 @@ impl IndexBuilder {
                     let existing_meta = old_metadata.files.get(&path_str).cloned();
 
                     if let Some(meta) = should_skip_without_read(existing_meta.as_ref(), mtime, size, force) {
-                        let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta });
+                        let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta, delete_docs: false });
                         pb_producer.inc(1);
                         return;
                     }
@@ -375,7 +431,7 @@ impl IndexBuilder {
                                 symbols: String::new(),
                                 is_binary: true,
                             };
-                            let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta });
+                            let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta, delete_docs: true });
                             pb_producer.inc(1);
                             return;
                         }
@@ -386,7 +442,7 @@ impl IndexBuilder {
                             let mut updated = meta.clone();
                             updated.mtime = mtime;
                             updated.size = size;
-                            let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta: updated });
+                            let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta: updated, delete_docs: false });
                             pb_producer.inc(1);
                             return;
                         }
@@ -421,7 +477,7 @@ impl IndexBuilder {
                     };
 
                     if chunks.is_empty() {
-                        let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta });
+                        let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta, delete_docs: true });
                         pb_producer.inc(1);
                         return;
                     }
@@ -430,6 +486,7 @@ impl IndexBuilder {
                     for chunk in &chunks {
                         let mut doc = TantivyDocument::default();
                         doc.add_text(path_field, &path_str);
+                        doc.add_text(path_exact_field, &path_str);
                         doc.add_text(content_field, &chunk.content);
                         doc.add_text(language_field, &lang_str);
                         doc.add_text(symbols_field, &symbols);
@@ -449,12 +506,16 @@ impl IndexBuilder {
             drop(tx);
             for msg in rx {
                 match msg {
-                    ProcessedFile::Skipped { path, meta } => {
+                    ProcessedFile::Skipped { path, meta, delete_docs } => {
+                        if delete_docs {
+                            writer.delete_term(Term::from_field_text(path_exact_field, &path));
+                        }
                         skipped_count += 1;
                         new_metadata.files.insert(path, meta);
                     }
                     ProcessedFile::Indexed { path, meta, docs } => {
                         if indexing_error.is_none() {
+                            writer.delete_term(Term::from_field_text(path_exact_field, &path));
                             for doc in docs {
                                 if let Err(err) = writer.add_document(doc) {
                                     indexing_error = Some(err.into());
@@ -495,12 +556,13 @@ impl IndexBuilder {
             eprintln!("Warning: {} files could not be read", error_count);
         }
 
-        if skipped > 0 {
+        if skipped > 0 || deleted_count > 0 {
             println!(
-                "{} Indexed {} files ({} unchanged, {} total)",
+                "{} Indexed {} files ({} unchanged, {} removed, {} total)",
                 "✓".green(),
                 indexed.to_string().cyan(),
                 skipped.to_string().dimmed(),
+                deleted_count.to_string().dimmed(),
                 total_files
             );
         } else {
@@ -519,14 +581,20 @@ impl IndexBuilder {
 }
 
 /// Run the index command
-pub fn run(path: Option<&str>, force: bool, excludes: Vec<String>) -> Result<()> {
+pub fn run(path: Option<&str>, force: bool, excludes: Vec<String>, high_memory: bool) -> Result<()> {
     let root = path
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::current_dir().ok())
         .ok_or_else(|| anyhow::anyhow!("Cannot determine current directory"))?;
 
     let builder = IndexBuilder::with_excludes(&root, excludes)?;
-    let count = builder.build(force)?;
+    let writer_budget_bytes = if high_memory {
+        eprintln!("Using high-memory indexing: writer budget = 1GiB");
+        HIGH_MEMORY_WRITER_BUDGET_BYTES
+    } else {
+        DEFAULT_WRITER_BUDGET_BYTES
+    };
+    let count = builder.build(force, writer_budget_bytes)?;
 
     println!("Index complete: {} files", count);
     Ok(())
@@ -537,11 +605,27 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
     use std::path::Path;
+    use tantivy::{collector::Count, query::TermQuery, schema::IndexRecordOption, Index};
 
     fn load_metadata(root: &Path) -> IndexMetadata {
         let metadata_path = root.join(METADATA_FILE);
         let content = std::fs::read_to_string(metadata_path).expect("read metadata");
         serde_json::from_str(&content).expect("parse metadata")
+    }
+
+    fn count_docs_for_path(root: &Path, file_path: &Path) -> usize {
+        let index_path = root.join(INDEX_DIR);
+        let index = Index::open_in_dir(&index_path).expect("open index");
+        let schema = index.schema();
+        let path_exact_field = schema.get_field("path_exact").expect("path_exact field");
+        let reader = index.reader().expect("reader");
+        let searcher = reader.searcher();
+        let term = Term::from_field_text(
+            path_exact_field,
+            &file_path.to_string_lossy().to_string(),
+        );
+        let query = TermQuery::new(term, IndexRecordOption::Basic);
+        searcher.search(&query, &Count).expect("count")
     }
 
     #[test]
@@ -552,10 +636,10 @@ mod tests {
         std::fs::write(root.join("two.txt"), "hello").expect("write two");
 
         let builder = IndexBuilder::new(root).expect("builder");
-        let first = builder.build(false).expect("first build");
+        let first = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("first build");
         assert_eq!(first, 2);
 
-        let second = builder.build(false).expect("second build");
+        let second = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("second build");
         assert_eq!(second, 0);
     }
 
@@ -569,7 +653,7 @@ mod tests {
         std::fs::write(root.join("main.rs"), "fn main() {}").expect("write main");
 
         let builder = IndexBuilder::new(root).expect("builder");
-        let indexed = builder.build(false).expect("build");
+        let indexed = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("build");
         assert_eq!(indexed, 2);
     }
 
@@ -581,12 +665,12 @@ mod tests {
         std::fs::write(&file_path, "fn a() {}").expect("write one");
 
         let builder = IndexBuilder::new(root).expect("builder");
-        let first = builder.build(false).expect("first build");
+        let first = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("first build");
         assert_eq!(first, 1);
 
         std::thread::sleep(std::time::Duration::from_millis(5));
         std::fs::write(&file_path, "fn a() {}").expect("touch same content");
-        let second = builder.build(false).expect("second build");
+        let second = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("second build");
         assert_eq!(second, 0);
     }
 
@@ -598,13 +682,53 @@ mod tests {
         std::fs::write(&file_path, "fn a() {}").expect("write one");
 
         let builder = IndexBuilder::new(root).expect("builder");
-        let first = builder.build(false).expect("first build");
+        let first = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("first build");
         assert_eq!(first, 1);
 
         std::thread::sleep(std::time::Duration::from_millis(5));
         std::fs::write(&file_path, "fn b() {}").expect("write two");
-        let second = builder.build(false).expect("second build");
+        let second = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("second build");
         assert_eq!(second, 1);
+    }
+
+    #[test]
+    fn reindex_replaces_existing_docs() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let file_path = root.join("replace.rs");
+        std::fs::write(&file_path, "fn a() {}").expect("write one");
+
+        let builder = IndexBuilder::new(root).expect("builder");
+        let first = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("first build");
+        assert_eq!(first, 1);
+        assert_eq!(count_docs_for_path(root, &file_path), 1);
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        std::fs::write(&file_path, "fn b() {}").expect("write two");
+        let second = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("second build");
+        assert_eq!(second, 1);
+        assert_eq!(count_docs_for_path(root, &file_path), 1);
+    }
+
+    #[test]
+    fn removed_files_are_deleted_from_index() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let keep_path = root.join("keep.rs");
+        let drop_path = root.join("drop.rs");
+        std::fs::write(&keep_path, "fn keep() {}").expect("write keep");
+        std::fs::write(&drop_path, "fn drop() {}").expect("write drop");
+
+        let builder = IndexBuilder::new(root).expect("builder");
+        let first = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("first build");
+        assert_eq!(first, 2);
+        assert_eq!(count_docs_for_path(root, &drop_path), 1);
+
+        std::fs::remove_file(&drop_path).expect("remove drop");
+        let second = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("second build");
+        assert_eq!(second, 0);
+        assert_eq!(count_docs_for_path(root, &drop_path), 0);
+        assert_eq!(count_docs_for_path(root, &keep_path), 1);
     }
 
     #[test]
@@ -615,7 +739,7 @@ mod tests {
         std::fs::write(root.join("bin.rs"), vec![0, 159, 146, 150]).expect("write bin");
 
         let builder = IndexBuilder::new(root).expect("builder");
-        let first = builder.build(false).expect("first build");
+        let first = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("first build");
         assert_eq!(first, 1);
 
         let metadata = load_metadata(root);
@@ -632,7 +756,7 @@ mod tests {
         std::fs::write(root.join("bad.rs"), vec![0xFF, 0xFE, 0xFD]).expect("write bad");
 
         let builder = IndexBuilder::new(root).expect("builder");
-        let count = builder.build(false).expect("build");
+        let count = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("build");
         assert_eq!(count, 0);
 
         let metadata = load_metadata(root);
@@ -648,10 +772,10 @@ mod tests {
         std::fs::write(root.join("bin.rs"), vec![0, 1, 2, 3]).expect("write bin");
 
         let builder = IndexBuilder::new(root).expect("builder");
-        let first = builder.build(false).expect("first build");
+        let first = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("first build");
         assert_eq!(first, 0);
 
-        let second = builder.build(false).expect("second build");
+        let second = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("second build");
         assert_eq!(second, 0);
     }
 
@@ -662,7 +786,7 @@ mod tests {
         std::fs::write(root.join("lib.rs"), "fn cached_symbol() {}").expect("write lib");
 
         let builder = IndexBuilder::new(root).expect("builder");
-        let count = builder.build(false).expect("build");
+        let count = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("build");
         assert_eq!(count, 1);
 
         let metadata = load_metadata(root);
