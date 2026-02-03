@@ -10,6 +10,7 @@ use std::path::Path;
 
 use crate::cli::OutputFormat;
 use crate::indexer::scanner::FileScanner;
+use crate::query::index_filter::{find_files_with_content, read_scanned_files};
 use cgrep::utils::get_root_with_index;
 
 /// Dependent result for JSON output
@@ -23,14 +24,19 @@ struct DependentResult {
 /// Run the dependents command
 pub fn run(file: &str, format: OutputFormat) -> Result<()> {
     let root = get_root_with_index(std::env::current_dir()?);
-    let scanner = FileScanner::new(&root);
-    let files = scanner.scan()?;
-
     let target_path = Path::new(file);
     let target_stem = target_path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(file);
+
+    let files = match find_files_with_content(&root, target_stem)? {
+        Some(indexed_paths) => read_scanned_files(&indexed_paths),
+        None => {
+            let scanner = FileScanner::new(&root);
+            scanner.scan()?
+        }
+    };
 
     // Patterns to match imports
     let patterns = vec![

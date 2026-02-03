@@ -9,6 +9,7 @@ use serde::Serialize;
 
 use crate::cli::OutputFormat;
 use crate::indexer::scanner::FileScanner;
+use crate::query::index_filter::{find_files_with_content, read_scanned_files};
 use cgrep::utils::get_root_with_index;
 
 /// Caller result for JSON output
@@ -22,8 +23,13 @@ struct CallerResult {
 /// Run the callers command
 pub fn run(function: &str, format: OutputFormat) -> Result<()> {
     let root = get_root_with_index(std::env::current_dir()?);
-    let scanner = FileScanner::new(&root);
-    let files = scanner.scan()?;
+    let files = match find_files_with_content(&root, function)? {
+        Some(indexed_paths) => read_scanned_files(&indexed_paths),
+        None => {
+            let scanner = FileScanner::new(&root);
+            scanner.scan()?
+        }
+    };
 
     // Pattern to match function calls
     // Matches: functionName( or object.functionName( or object?.functionName(
