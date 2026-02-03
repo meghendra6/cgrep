@@ -15,7 +15,7 @@ use std::path::Path;
 use std::sync::mpsc;
 use std::time::SystemTime;
 use tantivy::{
-    schema::{Field, Schema, STORED, TEXT},
+    schema::{Field, Schema, STORED, STRING, TEXT, Term},
     Index, IndexWriter, TantivyDocument,
 };
 
@@ -200,6 +200,7 @@ fn should_skip_without_read(
 /// Tantivy field handles
 pub struct IndexFields {
     pub path: Field,
+    pub path_exact: Field,
     pub content: Field,
     pub language: Field,
     pub symbols: Field,
@@ -225,6 +226,7 @@ impl IndexBuilder {
         let mut schema_builder = Schema::builder();
 
         let path = schema_builder.add_text_field("path", TEXT | STORED);
+        let path_exact = schema_builder.add_text_field("path_exact", STRING | STORED);
         let content = schema_builder.add_text_field("content", TEXT | STORED);
         let language = schema_builder.add_text_field("language", TEXT | STORED);
         let symbols = schema_builder.add_text_field("symbols", TEXT | STORED);
@@ -234,6 +236,7 @@ impl IndexBuilder {
         let schema = schema_builder.build();
         let fields = IndexFields {
             path,
+            path_exact,
             content,
             language,
             symbols,
@@ -268,7 +271,15 @@ impl IndexBuilder {
 
         // Open existing index or create new one
         let index = if index_meta_exists && !force {
-            Index::open_in_dir(&index_path).context("Failed to open existing index")?
+            let index = Index::open_in_dir(&index_path).context("Failed to open existing index")?;
+            let schema = index.schema();
+            if schema.get_field("path_exact").is_err() {
+                anyhow::bail!(
+                    "Index schema upgrade required: missing 'path_exact'.\n\
+                     Run 'cgrep index --force' to rebuild the index."
+                );
+            }
+            index
         } else {
             if index_path.exists() {
                 std::fs::remove_dir_all(&index_path)?;
@@ -285,10 +296,14 @@ impl IndexBuilder {
         let scanner = FileScanner::with_excludes(&self.root, self.exclude_patterns.clone())
             .with_gitignore(false);
         let files = scanner.list_files()?;
+        let current_paths: HashSet<String> = files
+            .iter()
+            .map(|path| path.to_string_lossy().to_string())
+            .collect();
         let total_files = files.len();
 
         enum ProcessedFile {
-            Skipped { path: String, meta: FileMetadata },
+            Skipped { path: String, meta: FileMetadata, delete_docs: bool },
             Indexed { path: String, meta: FileMetadata, docs: Vec<TantivyDocument> },
             ReadError { path: String, fallback: Option<FileMetadata> },
         }
@@ -298,6 +313,7 @@ impl IndexBuilder {
         };
         let mut indexed_count = 0usize;
         let mut skipped_count = 0usize;
+        let mut deleted_count = 0usize;
         let mut error_count = 0usize;
         let mut indexing_error: Option<anyhow::Error> = None;
 
@@ -311,10 +327,26 @@ impl IndexBuilder {
 
         let (tx, rx) = mpsc::sync_channel::<ProcessedFile>(64);
         let path_field = self.fields.path;
+        let path_exact_field = self.fields.path_exact;
         let content_field = self.fields.content;
         let language_field = self.fields.language;
         let symbols_field = self.fields.symbols;
         let line_number_field = self.fields.line_number;
+
+        if !old_metadata.files.is_empty() {
+            let removed_paths: Vec<String> = old_metadata
+                .files
+                .keys()
+                .filter(|path| !current_paths.contains(*path))
+                .cloned()
+                .collect();
+            if !removed_paths.is_empty() {
+                for path in &removed_paths {
+                    writer.delete_term(Term::from_field_text(path_exact_field, path));
+                }
+                deleted_count = removed_paths.len();
+            }
+        }
 
         let io_threads = std::thread::available_parallelism()
             .map(|n| n.get())
@@ -353,7 +385,7 @@ impl IndexBuilder {
                     let existing_meta = old_metadata.files.get(&path_str).cloned();
 
                     if let Some(meta) = should_skip_without_read(existing_meta.as_ref(), mtime, size, force) {
-                        let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta });
+                        let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta, delete_docs: false });
                         pb_producer.inc(1);
                         return;
                     }
@@ -377,7 +409,7 @@ impl IndexBuilder {
                                 symbols: String::new(),
                                 is_binary: true,
                             };
-                            let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta });
+                            let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta, delete_docs: true });
                             pb_producer.inc(1);
                             return;
                         }
@@ -388,7 +420,7 @@ impl IndexBuilder {
                             let mut updated = meta.clone();
                             updated.mtime = mtime;
                             updated.size = size;
-                            let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta: updated });
+                            let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta: updated, delete_docs: false });
                             pb_producer.inc(1);
                             return;
                         }
@@ -423,7 +455,7 @@ impl IndexBuilder {
                     };
 
                     if chunks.is_empty() {
-                        let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta });
+                        let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta, delete_docs: true });
                         pb_producer.inc(1);
                         return;
                     }
@@ -432,6 +464,7 @@ impl IndexBuilder {
                     for chunk in &chunks {
                         let mut doc = TantivyDocument::default();
                         doc.add_text(path_field, &path_str);
+                        doc.add_text(path_exact_field, &path_str);
                         doc.add_text(content_field, &chunk.content);
                         doc.add_text(language_field, &lang_str);
                         doc.add_text(symbols_field, &symbols);
@@ -451,12 +484,16 @@ impl IndexBuilder {
             drop(tx);
             for msg in rx {
                 match msg {
-                    ProcessedFile::Skipped { path, meta } => {
+                    ProcessedFile::Skipped { path, meta, delete_docs } => {
+                        if delete_docs {
+                            writer.delete_term(Term::from_field_text(path_exact_field, &path));
+                        }
                         skipped_count += 1;
                         new_metadata.files.insert(path, meta);
                     }
                     ProcessedFile::Indexed { path, meta, docs } => {
                         if indexing_error.is_none() {
+                            writer.delete_term(Term::from_field_text(path_exact_field, &path));
                             for doc in docs {
                                 if let Err(err) = writer.add_document(doc) {
                                     indexing_error = Some(err.into());
@@ -497,12 +534,13 @@ impl IndexBuilder {
             eprintln!("Warning: {} files could not be read", error_count);
         }
 
-        if skipped > 0 {
+        if skipped > 0 || deleted_count > 0 {
             println!(
-                "{} Indexed {} files ({} unchanged, {} total)",
+                "{} Indexed {} files ({} unchanged, {} removed, {} total)",
                 "✓".green(),
                 indexed.to_string().cyan(),
                 skipped.to_string().dimmed(),
+                deleted_count.to_string().dimmed(),
                 total_files
             );
         } else {
@@ -545,11 +583,27 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
     use std::path::Path;
+    use tantivy::{collector::Count, query::TermQuery, schema::IndexRecordOption, Index};
 
     fn load_metadata(root: &Path) -> IndexMetadata {
         let metadata_path = root.join(METADATA_FILE);
         let content = std::fs::read_to_string(metadata_path).expect("read metadata");
         serde_json::from_str(&content).expect("parse metadata")
+    }
+
+    fn count_docs_for_path(root: &Path, file_path: &Path) -> usize {
+        let index_path = root.join(INDEX_DIR);
+        let index = Index::open_in_dir(&index_path).expect("open index");
+        let schema = index.schema();
+        let path_exact_field = schema.get_field("path_exact").expect("path_exact field");
+        let reader = index.reader().expect("reader");
+        let searcher = reader.searcher();
+        let term = Term::from_field_text(
+            path_exact_field,
+            &file_path.to_string_lossy().to_string(),
+        );
+        let query = TermQuery::new(term, IndexRecordOption::Basic);
+        searcher.search(&query, &Count).expect("count")
     }
 
     #[test]
@@ -613,6 +667,46 @@ mod tests {
         std::fs::write(&file_path, "fn b() {}").expect("write two");
         let second = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("second build");
         assert_eq!(second, 1);
+    }
+
+    #[test]
+    fn reindex_replaces_existing_docs() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let file_path = root.join("replace.rs");
+        std::fs::write(&file_path, "fn a() {}").expect("write one");
+
+        let builder = IndexBuilder::new(root).expect("builder");
+        let first = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("first build");
+        assert_eq!(first, 1);
+        assert_eq!(count_docs_for_path(root, &file_path), 1);
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        std::fs::write(&file_path, "fn b() {}").expect("write two");
+        let second = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("second build");
+        assert_eq!(second, 1);
+        assert_eq!(count_docs_for_path(root, &file_path), 1);
+    }
+
+    #[test]
+    fn removed_files_are_deleted_from_index() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let keep_path = root.join("keep.rs");
+        let drop_path = root.join("drop.rs");
+        std::fs::write(&keep_path, "fn keep() {}").expect("write keep");
+        std::fs::write(&drop_path, "fn drop() {}").expect("write drop");
+
+        let builder = IndexBuilder::new(root).expect("builder");
+        let first = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("first build");
+        assert_eq!(first, 2);
+        assert_eq!(count_docs_for_path(root, &drop_path), 1);
+
+        std::fs::remove_file(&drop_path).expect("remove drop");
+        let second = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("second build");
+        assert_eq!(second, 0);
+        assert_eq!(count_docs_for_path(root, &drop_path), 0);
+        assert_eq!(count_docs_for_path(root, &keep_path), 1);
     }
 
     #[test]
