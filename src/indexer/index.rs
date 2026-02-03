@@ -5,6 +5,7 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
+use memmap2::Mmap;
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use serde::de::Deserializer;
@@ -13,18 +14,380 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::mpsc;
 use std::time::SystemTime;
-use memmap2::Mmap;
 use tantivy::{
-    schema::{Field, Schema, STORED, STRING, TEXT, Term},
+    schema::{Field, Schema, Term, STORED, STRING, TEXT},
     Index, IndexWriter, TantivyDocument,
 };
 
 use crate::indexer::scanner::{detect_language, FileScanner};
 use crate::parser::symbols::SymbolExtractor;
+use cgrep::config::{Config, EmbeddingProviderType};
+use cgrep::embedding::{
+    ChunkConfig, EmbeddingChunkInput, EmbeddingChunker, EmbeddingProvider, EmbeddingProviderConfig,
+    EmbeddingStorage,
+};
 use cgrep::utils::INDEX_DIR;
 const METADATA_FILE: &str = ".cgrep/metadata.json";
 pub(crate) const DEFAULT_WRITER_BUDGET_BYTES: usize = 50_000_000;
 const HIGH_MEMORY_WRITER_BUDGET_BYTES: usize = 1024 * 1024 * 1024;
+const DEFAULT_EMBEDDING_BATCH_SIZE: usize = 32;
+const DEFAULT_EMBEDDING_BATCH_MAX_CHARS: usize = 200_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmbeddingsMode {
+    Off,
+    Auto,
+    Precompute,
+}
+
+impl EmbeddingsMode {
+    fn parse(s: &str) -> Result<Self> {
+        match s.to_lowercase().as_str() {
+            "off" | "false" | "0" => Ok(Self::Off),
+            "auto" => Ok(Self::Auto),
+            "precompute" | "on" | "true" | "1" => Ok(Self::Precompute),
+            other => anyhow::bail!(
+                "Invalid value for --embeddings: '{}'. Expected one of: auto, precompute, off",
+                other
+            ),
+        }
+    }
+}
+
+struct EmbeddingBatchEntry {
+    path: String,
+    file_hash: String,
+    last_modified: i64,
+    chunk_lines: Vec<(u32, u32)>,
+    chunk_hashes: Vec<String>,
+    start_idx: usize,
+    count: usize,
+}
+
+#[derive(Default)]
+struct EmbeddingIndexStats {
+    files_total: usize,
+    files_embedded: usize,
+    files_skipped_up_to_date: usize,
+    files_deleted: usize,
+    chunks_embedded: usize,
+}
+
+fn create_embedding_provider(
+    mode: EmbeddingsMode,
+    config: &Config,
+) -> Result<Option<Box<dyn EmbeddingProvider>>> {
+    use cgrep::embedding::provider::create_provider;
+
+    // If the user explicitly disabled embeddings in config, honor it in auto mode.
+    // (CLI `--embeddings=precompute` is considered an explicit override.)
+    if mode == EmbeddingsMode::Auto
+        && matches!(
+            config.embeddings.enabled(),
+            cgrep::config::EmbeddingEnabled::Off
+        )
+    {
+        return Ok(None);
+    }
+
+    // Detect whether the repo config appears to have any embeddings configuration at all.
+    // This lets us keep `cgrep index` quiet by default (no warnings) when the provider
+    // isn't configured/available.
+    let has_embeddings_config = config.embeddings.enabled.is_some()
+        || config.embeddings.provider.is_some()
+        || config.embeddings.model.is_some()
+        || config.embeddings.command.is_some()
+        || config.embeddings.chunk_lines.is_some()
+        || config.embeddings.chunk_overlap.is_some()
+        || config.embeddings.max_file_bytes.is_some()
+        || config.embeddings.semantic_max_chunks.is_some();
+
+    let provider_type = config.embeddings.provider();
+    let provider = match provider_type {
+        EmbeddingProviderType::Command => EmbeddingProviderConfig {
+            provider: "command".to_string(),
+            model: config.embeddings.model().to_string(),
+            command: Some(config.embeddings.command().to_string()),
+            normalize: true,
+        },
+        EmbeddingProviderType::Dummy => EmbeddingProviderConfig {
+            provider: "dummy".to_string(),
+            model: "dummy".to_string(),
+            command: None,
+            normalize: true,
+        },
+        EmbeddingProviderType::Builtin => {
+            anyhow::bail!("Embedding provider type 'builtin' is not implemented yet.");
+        }
+    };
+
+    match mode {
+        EmbeddingsMode::Off => Ok(None),
+        EmbeddingsMode::Auto => match create_provider(&provider) {
+            Ok(p) => Ok(Some(p)),
+            Err(err) => {
+                if has_embeddings_config {
+                    eprintln!(
+                        "Warning: embeddings are disabled (provider unavailable): {}",
+                        err
+                    );
+                }
+                Ok(None)
+            }
+        },
+        EmbeddingsMode::Precompute => Ok(Some(create_provider(&provider)?)),
+    }
+}
+
+fn read_utf8_text_bytes(bytes: &[u8]) -> Result<Option<String>> {
+    if bytes.contains(&0) {
+        return Ok(None);
+    }
+    let text = match std::str::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(_) => return Ok(None),
+    };
+    Ok(Some(text.to_string()))
+}
+
+fn read_utf8_text(path: &Path) -> Result<Option<String>> {
+    let file = std::fs::File::open(path)?;
+    if let Ok(mmap) = unsafe { Mmap::map(&file) } {
+        return read_utf8_text_bytes(&mmap);
+    }
+
+    let bytes = std::fs::read(path)?;
+    read_utf8_text_bytes(&bytes)
+}
+
+fn embed_texts_batched(
+    provider: &dyn EmbeddingProvider,
+    texts: &[String],
+    batch_size: usize,
+) -> Result<(usize, Vec<Vec<f32>>)> {
+    if texts.is_empty() {
+        return Ok((0, Vec::new()));
+    }
+
+    let mut all_vectors: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
+    let mut dimension: usize = 0;
+
+    for batch in texts.chunks(batch_size) {
+        let result = provider.embed(batch)?;
+        dimension = result.dimension;
+        all_vectors.extend(result.vectors);
+    }
+
+    Ok((dimension, all_vectors))
+}
+
+fn index_embeddings(
+    root: &Path,
+    mode: EmbeddingsMode,
+    embeddings_force: bool,
+    config: &Config,
+    index_metadata: &IndexMetadata,
+) -> Result<EmbeddingIndexStats> {
+    let Some(provider) = create_embedding_provider(mode, config)? else {
+        return Ok(EmbeddingIndexStats::default());
+    };
+
+    let mut stats = EmbeddingIndexStats::default();
+    let mut storage = EmbeddingStorage::open_default(root)?;
+
+    // Best-effort: record model early (dimension becomes known after first embed call).
+    let _ = storage.set_meta("model", provider.model());
+
+    let result: Result<()> = (|| {
+        if embeddings_force {
+            storage.clear_all()?;
+        }
+
+        let current_paths: HashSet<&str> =
+            index_metadata.files.keys().map(|p| p.as_str()).collect();
+
+        // Clean embeddings for files that no longer exist in the repo.
+        let stored_files = storage.list_files()?;
+        for stored in stored_files {
+            if !current_paths.contains(stored.path.as_str()) {
+                let _ = storage.delete_file_chunks(&stored.path)?;
+                stats.files_deleted += 1;
+            }
+        }
+
+        let chunk_config = ChunkConfig::new(
+            config.embeddings.chunk_lines(),
+            config.embeddings.chunk_overlap(),
+        )?
+        .with_max_file_bytes(config.embeddings.max_file_bytes());
+        let chunker = EmbeddingChunker::new(chunk_config);
+
+        let mut batch_texts: Vec<String> = Vec::new();
+        let mut batch_chars: usize = 0;
+        let mut batch_entries: Vec<EmbeddingBatchEntry> = Vec::new();
+
+        let flush_batch = |batch_texts: &mut Vec<String>,
+                           batch_entries: &mut Vec<EmbeddingBatchEntry>,
+                           storage: &mut EmbeddingStorage,
+                           provider: &dyn EmbeddingProvider,
+                           stats: &mut EmbeddingIndexStats|
+         -> Result<()> {
+            if batch_texts.is_empty() {
+                return Ok(());
+            }
+
+            let (dimension, vectors) =
+                embed_texts_batched(provider, batch_texts, DEFAULT_EMBEDDING_BATCH_SIZE)?;
+            if vectors.len() != batch_texts.len() {
+                anyhow::bail!(
+                    "Embedding provider returned {} vectors for {} inputs",
+                    vectors.len(),
+                    batch_texts.len()
+                );
+            }
+
+            // Persist dimension when first known.
+            if dimension > 0 {
+                let _ = storage.set_meta("dimension", &dimension.to_string());
+            }
+
+            for entry in batch_entries.iter() {
+                let end = entry.start_idx + entry.count;
+                let slice = &vectors[entry.start_idx..end];
+
+                let mut inputs: Vec<EmbeddingChunkInput<'_>> = Vec::with_capacity(entry.count);
+                for (i, embedding) in slice.iter().enumerate() {
+                    let (start_line, end_line) = entry.chunk_lines[i];
+                    inputs.push(EmbeddingChunkInput {
+                        start_line,
+                        end_line,
+                        content_hash: entry.chunk_hashes[i].as_str(),
+                        embedding: embedding.as_slice(),
+                    });
+                }
+
+                storage.replace_file_embeddings(
+                    &entry.path,
+                    &entry.file_hash,
+                    entry.last_modified,
+                    &inputs,
+                )?;
+
+                stats.files_embedded += 1;
+                stats.chunks_embedded += entry.count;
+            }
+
+            batch_texts.clear();
+            batch_entries.clear();
+            Ok(())
+        };
+
+        for (path, meta) in index_metadata.files.iter() {
+            stats.files_total += 1;
+
+            // If the file is binary, ensure any old embeddings are removed.
+            if meta.is_binary || meta.hash.is_empty() {
+                let _ = storage.delete_file_chunks(path)?;
+                continue;
+            }
+
+            if !embeddings_force && !storage.file_needs_update(path, &meta.hash)? {
+                stats.files_skipped_up_to_date += 1;
+                continue;
+            }
+
+            let file_path = Path::new(path);
+            let text = match read_utf8_text(file_path) {
+                Ok(Some(text)) => text,
+                Ok(None) => {
+                    // Binary/non-UTF8: ensure we don't keep stale embeddings.
+                    let _ = storage.delete_file_chunks(path)?;
+                    continue;
+                }
+                Err(err) => {
+                    // Keep any existing embeddings if the file can't be read right now.
+                    eprintln!("Warning: failed to read {} for embeddings: {}", path, err);
+                    continue;
+                }
+            };
+
+            let file_hash = meta.hash.clone();
+            let last_modified = (meta.mtime / 1_000_000_000) as i64;
+
+            if chunker.is_file_too_large(&text) {
+                storage.replace_file_embeddings(path, &file_hash, last_modified, &[])?;
+                stats.files_embedded += 1;
+                continue;
+            }
+
+            let embedding_chunks = chunker.chunk_text(&text);
+            if embedding_chunks.is_empty() {
+                storage.replace_file_embeddings(path, &file_hash, last_modified, &[])?;
+                stats.files_embedded += 1;
+                continue;
+            }
+
+            let mut chunk_lines: Vec<(u32, u32)> = Vec::with_capacity(embedding_chunks.len());
+            let mut chunk_hashes: Vec<String> = Vec::with_capacity(embedding_chunks.len());
+            let mut texts: Vec<String> = Vec::with_capacity(embedding_chunks.len());
+
+            for chunk in embedding_chunks {
+                chunk_lines.push((chunk.start_line, chunk.end_line));
+                chunk_hashes.push(blake3::hash(chunk.text.as_bytes()).to_hex().to_string());
+                texts.push(chunk.text);
+            }
+
+            // Batch across files but keep each file's chunks contiguous.
+            let file_chars: usize = texts.iter().map(|t| t.len()).sum();
+            if !batch_texts.is_empty()
+                && (batch_texts.len() + texts.len() > DEFAULT_EMBEDDING_BATCH_SIZE
+                    || batch_chars + file_chars > DEFAULT_EMBEDDING_BATCH_MAX_CHARS)
+            {
+                flush_batch(
+                    &mut batch_texts,
+                    &mut batch_entries,
+                    &mut storage,
+                    provider.as_ref(),
+                    &mut stats,
+                )?;
+                batch_chars = 0;
+            }
+
+            let start_idx = batch_texts.len();
+            let count = texts.len();
+            batch_chars += file_chars;
+            batch_texts.extend(texts);
+            batch_entries.push(EmbeddingBatchEntry {
+                path: path.clone(),
+                file_hash,
+                last_modified,
+                chunk_lines,
+                chunk_hashes,
+                start_idx,
+                count,
+            });
+        }
+
+        flush_batch(
+            &mut batch_texts,
+            &mut batch_entries,
+            &mut storage,
+            provider.as_ref(),
+            &mut stats,
+        )?;
+
+        Ok(())
+    })();
+
+    match (mode, result) {
+        (_, Ok(())) => Ok(stats),
+        (EmbeddingsMode::Auto, Err(err)) => {
+            eprintln!("Warning: embedding indexing failed (auto mode): {}", err);
+            Ok(stats)
+        }
+        (_, Err(err)) => Err(err),
+    }
+}
 
 /// Metadata for incremental indexing
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -101,8 +464,13 @@ struct TextChunk {
 }
 
 enum ReadOutcome {
-    Text { chunks: Vec<TextChunk>, hash: String },
-    Binary { hash: Option<String> },
+    Text {
+        chunks: Vec<TextChunk>,
+        hash: String,
+    },
+    Binary {
+        hash: Option<String>,
+    },
 }
 
 fn read_text_chunks(path: &Path, max_doc_bytes: usize) -> Result<ReadOutcome> {
@@ -325,9 +693,20 @@ impl IndexBuilder {
         let total_files = files.len();
 
         enum ProcessedFile {
-            Skipped { path: String, meta: FileMetadata, delete_docs: bool },
-            Indexed { path: String, meta: FileMetadata, docs: Vec<TantivyDocument> },
-            ReadError { path: String, fallback: Option<FileMetadata> },
+            Skipped {
+                path: String,
+                meta: FileMetadata,
+                delete_docs: bool,
+            },
+            Indexed {
+                path: String,
+                meta: FileMetadata,
+                docs: Vec<TantivyDocument>,
+            },
+            ReadError {
+                path: String,
+                fallback: Option<FileMetadata>,
+            },
         }
 
         let mut new_metadata = IndexMetadata {
@@ -390,7 +769,10 @@ impl IndexBuilder {
                     let metadata = match std::fs::metadata(path) {
                         Ok(metadata) => metadata,
                         Err(_) => {
-                            let _ = tx.send(ProcessedFile::ReadError { path: path_str, fallback: None });
+                            let _ = tx.send(ProcessedFile::ReadError {
+                                path: path_str,
+                                fallback: None,
+                            });
                             pb_producer.inc(1);
                             return;
                         }
@@ -406,8 +788,14 @@ impl IndexBuilder {
 
                     let existing_meta = old_metadata.files.get(&path_str).cloned();
 
-                    if let Some(meta) = should_skip_without_read(existing_meta.as_ref(), mtime, size, force) {
-                        let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta, delete_docs: false });
+                    if let Some(meta) =
+                        should_skip_without_read(existing_meta.as_ref(), mtime, size, force)
+                    {
+                        let _ = tx.send(ProcessedFile::Skipped {
+                            path: path_str,
+                            meta,
+                            delete_docs: false,
+                        });
                         pb_producer.inc(1);
                         return;
                     }
@@ -415,7 +803,10 @@ impl IndexBuilder {
                     let outcome = match read_text_chunks(path, MAX_DOC_BYTES) {
                         Ok(outcome) => outcome,
                         Err(_) => {
-                            let _ = tx.send(ProcessedFile::ReadError { path: path_str, fallback: existing_meta });
+                            let _ = tx.send(ProcessedFile::ReadError {
+                                path: path_str,
+                                fallback: existing_meta,
+                            });
                             pb_producer.inc(1);
                             return;
                         }
@@ -431,7 +822,11 @@ impl IndexBuilder {
                                 symbols: String::new(),
                                 is_binary: true,
                             };
-                            let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta, delete_docs: true });
+                            let _ = tx.send(ProcessedFile::Skipped {
+                                path: path_str,
+                                meta,
+                                delete_docs: true,
+                            });
                             pb_producer.inc(1);
                             return;
                         }
@@ -442,7 +837,11 @@ impl IndexBuilder {
                             let mut updated = meta.clone();
                             updated.mtime = mtime;
                             updated.size = size;
-                            let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta: updated, delete_docs: false });
+                            let _ = tx.send(ProcessedFile::Skipped {
+                                path: path_str,
+                                meta: updated,
+                                delete_docs: false,
+                            });
                             pb_producer.inc(1);
                             return;
                         }
@@ -477,7 +876,11 @@ impl IndexBuilder {
                     };
 
                     if chunks.is_empty() {
-                        let _ = tx.send(ProcessedFile::Skipped { path: path_str, meta, delete_docs: true });
+                        let _ = tx.send(ProcessedFile::Skipped {
+                            path: path_str,
+                            meta,
+                            delete_docs: true,
+                        });
                         pb_producer.inc(1);
                         return;
                     }
@@ -506,7 +909,11 @@ impl IndexBuilder {
             drop(tx);
             for msg in rx {
                 match msg {
-                    ProcessedFile::Skipped { path, meta, delete_docs } => {
+                    ProcessedFile::Skipped {
+                        path,
+                        meta,
+                        delete_docs,
+                    } => {
                         if delete_docs {
                             writer.delete_term(Term::from_field_text(path_exact_field, &path));
                         }
@@ -581,13 +988,26 @@ impl IndexBuilder {
 }
 
 /// Run the index command
-pub fn run(path: Option<&str>, force: bool, excludes: Vec<String>, high_memory: bool) -> Result<()> {
+pub fn run(
+    path: Option<&str>,
+    force: bool,
+    excludes: Vec<String>,
+    high_memory: bool,
+    embeddings_mode: &str,
+    embeddings_force: bool,
+) -> Result<()> {
     let root = path
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::current_dir().ok())
         .ok_or_else(|| anyhow::anyhow!("Cannot determine current directory"))?;
 
-    let builder = IndexBuilder::with_excludes(&root, excludes)?;
+    let config = Config::load_for_dir(&root);
+
+    // Merge CLI excludes with config excludes (CLI takes precedence by being added first)
+    let mut all_excludes = excludes;
+    all_excludes.extend(config.index().exclude_paths().iter().cloned());
+
+    let builder = IndexBuilder::with_excludes(&root, all_excludes)?;
     let writer_budget_bytes = if high_memory {
         eprintln!("Using high-memory indexing: writer budget = 1GiB");
         HIGH_MEMORY_WRITER_BUDGET_BYTES
@@ -597,15 +1017,43 @@ pub fn run(path: Option<&str>, force: bool, excludes: Vec<String>, high_memory: 
     let count = builder.build(force, writer_budget_bytes)?;
 
     println!("Index complete: {} files", count);
+
+    let mode = EmbeddingsMode::parse(embeddings_mode)?;
+    if embeddings_force && mode == EmbeddingsMode::Off {
+        eprintln!("Warning: --embeddings-force has no effect when --embeddings=off");
+        return Ok(());
+    }
+
+    if mode != EmbeddingsMode::Off {
+        let metadata_path = root.join(METADATA_FILE);
+        let content = std::fs::read_to_string(&metadata_path).with_context(|| {
+            format!("Failed to read index metadata: {}", metadata_path.display())
+        })?;
+        let index_metadata: IndexMetadata =
+            serde_json::from_str(&content).context("Failed to parse index metadata")?;
+
+        let stats = index_embeddings(&root, mode, embeddings_force, &config, &index_metadata)?;
+        if stats.files_embedded > 0 || stats.files_skipped_up_to_date > 0 || stats.files_deleted > 0
+        {
+            println!(
+                "Embeddings: {} files embedded ({} chunks), {} up-to-date, {} removed",
+                stats.files_embedded,
+                stats.chunks_embedded,
+                stats.files_skipped_up_to_date,
+                stats.files_deleted
+            );
+        }
+    }
+
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::path::Path;
     use tantivy::{collector::Count, query::TermQuery, schema::IndexRecordOption, Index};
+    use tempfile::TempDir;
 
     fn load_metadata(root: &Path) -> IndexMetadata {
         let metadata_path = root.join(METADATA_FILE);
@@ -620,10 +1068,8 @@ mod tests {
         let path_exact_field = schema.get_field("path_exact").expect("path_exact field");
         let reader = index.reader().expect("reader");
         let searcher = reader.searcher();
-        let term = Term::from_field_text(
-            path_exact_field,
-            &file_path.to_string_lossy().to_string(),
-        );
+        let term =
+            Term::from_field_text(path_exact_field, &file_path.to_string_lossy().to_string());
         let query = TermQuery::new(term, IndexRecordOption::Basic);
         searcher.search(&query, &Count).expect("count")
     }
@@ -636,10 +1082,14 @@ mod tests {
         std::fs::write(root.join("two.txt"), "hello").expect("write two");
 
         let builder = IndexBuilder::new(root).expect("builder");
-        let first = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("first build");
+        let first = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("first build");
         assert_eq!(first, 2);
 
-        let second = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("second build");
+        let second = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("second build");
         assert_eq!(second, 0);
     }
 
@@ -653,7 +1103,9 @@ mod tests {
         std::fs::write(root.join("main.rs"), "fn main() {}").expect("write main");
 
         let builder = IndexBuilder::new(root).expect("builder");
-        let indexed = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("build");
+        let indexed = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("build");
         assert_eq!(indexed, 2);
     }
 
@@ -665,12 +1117,16 @@ mod tests {
         std::fs::write(&file_path, "fn a() {}").expect("write one");
 
         let builder = IndexBuilder::new(root).expect("builder");
-        let first = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("first build");
+        let first = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("first build");
         assert_eq!(first, 1);
 
         std::thread::sleep(std::time::Duration::from_millis(5));
         std::fs::write(&file_path, "fn a() {}").expect("touch same content");
-        let second = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("second build");
+        let second = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("second build");
         assert_eq!(second, 0);
     }
 
@@ -682,12 +1138,16 @@ mod tests {
         std::fs::write(&file_path, "fn a() {}").expect("write one");
 
         let builder = IndexBuilder::new(root).expect("builder");
-        let first = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("first build");
+        let first = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("first build");
         assert_eq!(first, 1);
 
         std::thread::sleep(std::time::Duration::from_millis(5));
         std::fs::write(&file_path, "fn b() {}").expect("write two");
-        let second = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("second build");
+        let second = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("second build");
         assert_eq!(second, 1);
     }
 
@@ -699,13 +1159,17 @@ mod tests {
         std::fs::write(&file_path, "fn a() {}").expect("write one");
 
         let builder = IndexBuilder::new(root).expect("builder");
-        let first = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("first build");
+        let first = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("first build");
         assert_eq!(first, 1);
         assert_eq!(count_docs_for_path(root, &file_path), 1);
 
         std::thread::sleep(std::time::Duration::from_millis(5));
         std::fs::write(&file_path, "fn b() {}").expect("write two");
-        let second = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("second build");
+        let second = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("second build");
         assert_eq!(second, 1);
         assert_eq!(count_docs_for_path(root, &file_path), 1);
     }
@@ -720,12 +1184,16 @@ mod tests {
         std::fs::write(&drop_path, "fn drop() {}").expect("write drop");
 
         let builder = IndexBuilder::new(root).expect("builder");
-        let first = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("first build");
+        let first = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("first build");
         assert_eq!(first, 2);
         assert_eq!(count_docs_for_path(root, &drop_path), 1);
 
         std::fs::remove_file(&drop_path).expect("remove drop");
-        let second = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("second build");
+        let second = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("second build");
         assert_eq!(second, 0);
         assert_eq!(count_docs_for_path(root, &drop_path), 0);
         assert_eq!(count_docs_for_path(root, &keep_path), 1);
@@ -739,7 +1207,9 @@ mod tests {
         std::fs::write(root.join("bin.rs"), vec![0, 159, 146, 150]).expect("write bin");
 
         let builder = IndexBuilder::new(root).expect("builder");
-        let first = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("first build");
+        let first = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("first build");
         assert_eq!(first, 1);
 
         let metadata = load_metadata(root);
@@ -756,7 +1226,9 @@ mod tests {
         std::fs::write(root.join("bad.rs"), vec![0xFF, 0xFE, 0xFD]).expect("write bad");
 
         let builder = IndexBuilder::new(root).expect("builder");
-        let count = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("build");
+        let count = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("build");
         assert_eq!(count, 0);
 
         let metadata = load_metadata(root);
@@ -772,10 +1244,14 @@ mod tests {
         std::fs::write(root.join("bin.rs"), vec![0, 1, 2, 3]).expect("write bin");
 
         let builder = IndexBuilder::new(root).expect("builder");
-        let first = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("first build");
+        let first = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("first build");
         assert_eq!(first, 0);
 
-        let second = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("second build");
+        let second = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("second build");
         assert_eq!(second, 0);
     }
 
@@ -786,7 +1262,9 @@ mod tests {
         std::fs::write(root.join("lib.rs"), "fn cached_symbol() {}").expect("write lib");
 
         let builder = IndexBuilder::new(root).expect("builder");
-        let count = builder.build(false, DEFAULT_WRITER_BUDGET_BYTES).expect("build");
+        let count = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("build");
         assert_eq!(count, 1);
 
         let metadata = load_metadata(root);

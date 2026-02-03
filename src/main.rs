@@ -65,10 +65,10 @@ fn main() -> Result<()> {
                     cli::CliSearchMode::Hybrid => cgrep::hybrid::SearchMode::Hybrid,
                 })
             };
-            
+
             // Apply profile settings if specified
             let _ = profile; // TODO: Apply profile settings
-            
+
             query::search::run(
                 &query,
                 path.as_deref(),
@@ -128,19 +128,19 @@ fn main() -> Result<()> {
         Commands::Index {
             path,
             force,
-            embeddings: _,
-            embeddings_force: _,
+            embeddings,
+            embeddings_force,
             high_memory,
             exclude_paths,
         } => {
-            // Load config for additional exclude paths
-            let config = cgrep::config::Config::load();
-
-            // Merge CLI excludes with config excludes (CLI takes precedence by being added first)
-            let mut all_excludes = exclude_paths;
-            all_excludes.extend(config.index().exclude_paths().iter().cloned());
-
-            indexer::index::run(path.as_deref(), force, all_excludes, high_memory)?;
+            indexer::index::run(
+                path.as_deref(),
+                force,
+                exclude_paths,
+                high_memory,
+                &embeddings,
+                embeddings_force,
+            )?;
         }
         Commands::Watch { path, debounce } => {
             indexer::watch::run(path.as_deref(), Some(debounce))?;
