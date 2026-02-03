@@ -138,6 +138,7 @@ Index:
 -p, --path <path>        Path to index
 -f, --force              Force full reindex
  -e, --exclude <pattern>  Exclude path/pattern (repeatable)
+    --high-memory        Use a 1GiB writer budget for faster indexing
     --embeddings <mode>  auto|precompute|off (accepted, not wired yet)
     --embeddings-force   Force regenerate embeddings (accepted, not wired yet)
 ```
