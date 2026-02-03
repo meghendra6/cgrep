@@ -9,6 +9,7 @@ use serde::Serialize;
 
 use crate::cli::OutputFormat;
 use crate::indexer::scanner::FileScanner;
+use crate::query::index_filter::{find_files_with_content, read_scanned_files};
 use cgrep::utils::get_root_with_index;
 
 /// Reference result for JSON output
@@ -26,8 +27,13 @@ pub fn run(name: &str, path: Option<&str>, max_results: usize, format: OutputFor
         Some(p) => get_root_with_index(std::path::PathBuf::from(p).canonicalize()?),
         None => get_root_with_index(std::env::current_dir()?),
     };
-    let scanner = FileScanner::new(&root);
-    let files = scanner.scan()?;
+    let files = match find_files_with_content(&root, name)? {
+        Some(indexed_paths) => read_scanned_files(&indexed_paths),
+        None => {
+            let scanner = FileScanner::new(&root);
+            scanner.scan()?
+        }
+    };
 
     // Pattern to match symbol with word boundaries
     let pattern = format!(r"\b{}\b", regex::escape(name));

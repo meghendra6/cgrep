@@ -9,6 +9,7 @@ use serde::Serialize;
 use crate::cli::OutputFormat;
 use crate::indexer::scanner::FileScanner;
 use crate::parser::symbols::{SymbolExtractor, SymbolKind};
+use crate::query::index_filter::{find_files_with_symbol, read_scanned_files};
 use cgrep::utils::get_root_with_index;
 
 /// Definition result for JSON output
@@ -24,10 +25,15 @@ struct DefinitionResult {
 /// Run the definition command
 pub fn run(name: &str, format: OutputFormat) -> Result<()> {
     let root = get_root_with_index(std::env::current_dir()?);
-    let scanner = FileScanner::new(&root);
     let extractor = SymbolExtractor::new();
 
-    let files = scanner.scan()?;
+    let files = match find_files_with_symbol(&root, name)? {
+        Some(indexed_paths) => read_scanned_files(&indexed_paths),
+        None => {
+            let scanner = FileScanner::new(&root);
+            scanner.scan()?
+        }
+    };
     let name_lower = name.to_lowercase();
 
     // Priority: exact match > contains
