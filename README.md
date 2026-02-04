@@ -182,15 +182,24 @@ The repository includes:
 
 Embeddings are stored at `.cgrep/embeddings.sqlite` under the indexed root.
 
-### Provider configuration
+### FastEmbed configuration
 
-Configure embeddings in `.cgreprc.toml`:
+Embeddings use the built-in fastembed provider with
+`sentence-transformers/all-MiniLM-L6-v2`.
+
+Environment variables (defaults shown):
+```
+FASTEMBED_MODEL=minilm
+FASTEMBED_BATCH_SIZE=512
+FASTEMBED_MAX_CHARS=2000
+FASTEMBED_NORMALIZE=true
+```
+
+Optional chunking configuration in `.cgreprc.toml`:
 
 ```toml
 [embeddings]
-provider = "command"  # command|dummy
-command = "embedder"  # defaults to "embedder"
-model = "local-model-id"
+provider = "builtin"  # builtin|dummy
 
 chunk_lines = 80
 chunk_overlap = 20
@@ -202,7 +211,7 @@ max_file_bytes = 2000000
 ### Using embeddings in search
 
 If `.cgrep/embeddings.sqlite` exists, `cgrep search --semantic/--hybrid` will use it for embedding-based reranking.
-Query embeddings are generated using the configured provider in `.cgreprc.toml`.
+Query embeddings are generated using the fastembed configuration above.
 If the embedding DB or provider is unavailable, it falls back to BM25-only search.
 
 ## Indexing behavior
@@ -234,9 +243,10 @@ exclude_patterns = ["target/**", "node_modules/**"]
 exclude_paths = ["vendor/", "dist/"]
 
 [embeddings]
-provider = "command"
-command = "embedder"
-model = "local-model-id"
+provider = "builtin"
+chunk_lines = 80
+chunk_overlap = 20
+max_file_bytes = 2000000
 ```
 Note: `max_results` is read but the CLI always supplies a default value, so the
 config value currently has no effect unless the CLI defaults change.
