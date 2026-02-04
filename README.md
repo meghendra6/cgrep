@@ -139,7 +139,7 @@ Index:
 -f, --force              Force full reindex
  -e, --exclude <pattern>  Exclude path/pattern (repeatable)
     --high-memory        Use a 1GiB writer budget for faster indexing
-    --embeddings <mode>  auto|precompute|off (default: auto)
+    --embeddings <mode>  auto|precompute|off (default: off)
     --embeddings-force   Force regenerate embeddings
 ```
 
@@ -165,15 +165,18 @@ path, score, snippet, line, context_before, context_after
 text_score, vector_score, hybrid_score, result_id, chunk_start, chunk_end
 ```
 Optional fields appear only in hybrid/semantic mode.
+For symbol results, `result_id` is the symbol ID and `chunk_start`/`chunk_end` are the symbol start/end line numbers.
 
 ## Embeddings
 
 The repository includes:
-- Chunking logic (default: 80 lines per chunk, 20 lines overlap)
+- Symbol-level embedding generation (AST symbols)
 - SQLite storage at `.cgrep/embeddings.sqlite`
 - Provider interface for generating embeddings
 
 ### Generating embeddings during indexing
+
+By default, `cgrep index` runs with embeddings disabled (`--embeddings off`).
 
 - `cgrep index --embeddings precompute`: generate embeddings for all indexed files (fails if the embedding provider is unavailable).
 - `cgrep index --embeddings auto`: best-effort (if the provider is unavailable, indexing continues without embeddings).
@@ -182,12 +185,30 @@ The repository includes:
 
 Embeddings are stored at `.cgrep/embeddings.sqlite` under the indexed root.
 
-### FastEmbed configuration
+### Embedding provider configuration
 
-Embeddings use the built-in fastembed provider with
-`sentence-transformers/all-MiniLM-L6-v2`.
+Embeddings are generated using the provider configured in `.cgreprc.toml`:
 
-Environment variables (defaults shown):
+```toml
+[embeddings]
+provider = "builtin"  # builtin|command|dummy
+
+# command provider
+command = "embedder"
+model = "local-model-id"
+
+# symbol-level tuning (optional)
+max_symbols_per_file = 500
+symbol_preview_lines = 12
+symbol_max_chars = 1200
+# symbol_kinds = ["function", "class", "method"]
+```
+
+`provider = "dummy"` is intended for tests/dev only (returns zero vectors).
+
+`chunk_lines` and `chunk_overlap` are deprecated and ignored (embeddings are symbol-level).
+
+For the builtin provider, you can tune FastEmbed via environment variables:
 ```
 FASTEMBED_MODEL=minilm
 FASTEMBED_BATCH_SIZE=512
@@ -195,23 +216,10 @@ FASTEMBED_MAX_CHARS=2000
 FASTEMBED_NORMALIZE=true
 ```
 
-Optional chunking configuration in `.cgreprc.toml`:
-
-```toml
-[embeddings]
-provider = "builtin"  # builtin|dummy
-
-chunk_lines = 80
-chunk_overlap = 20
-max_file_bytes = 2000000
-```
-
-`provider = "dummy"` is intended for tests/dev only (returns zero vectors).
-
 ### Using embeddings in search
 
 If `.cgrep/embeddings.sqlite` exists, `cgrep search --semantic/--hybrid` will use it for embedding-based reranking.
-Query embeddings are generated using the fastembed configuration above.
+Query embeddings are generated using the configured embedding provider.
 If the embedding DB or provider is unavailable, it falls back to BM25-only search.
 
 ## Indexing behavior
@@ -244,9 +252,14 @@ exclude_paths = ["vendor/", "dist/"]
 
 [embeddings]
 provider = "builtin"
-chunk_lines = 80
-chunk_overlap = 20
+# provider = "command"
+# command = "embedder"
+# model = "local-model-id"
 max_file_bytes = 2000000
+max_symbols_per_file = 500
+symbol_preview_lines = 12
+symbol_max_chars = 1200
+# symbol_kinds = ["function", "class", "method"]
 ```
 Note: `max_results` is read but the CLI always supplies a default value, so the
 config value currently has no effect unless the CLI defaults change.

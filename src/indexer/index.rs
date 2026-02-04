@@ -20,11 +20,11 @@ use tantivy::{
 };
 
 use crate::indexer::scanner::{detect_language, FileScanner};
-use crate::parser::symbols::SymbolExtractor;
+use crate::parser::symbols::{Symbol, SymbolExtractor, SymbolKind};
 use cgrep::config::{Config, EmbeddingProviderType};
 use cgrep::embedding::{
-    ChunkConfig, DummyProvider, EmbeddingChunkInput, EmbeddingChunker, EmbeddingProvider,
-    EmbeddingProviderConfig, EmbeddingStorage, FastEmbedder, DEFAULT_EMBEDDING_DIM,
+    CommandProvider, DummyProvider, EmbeddingProvider, EmbeddingProviderConfig, EmbeddingStorage,
+    FastEmbedder, SymbolEmbeddingInput, DEFAULT_EMBEDDING_DIM,
 };
 use cgrep::utils::INDEX_DIR;
 const METADATA_FILE: &str = ".cgrep/metadata.json";
@@ -56,10 +56,21 @@ struct EmbeddingBatchEntry {
     path: String,
     file_hash: String,
     last_modified: i64,
-    chunk_lines: Vec<(u32, u32)>,
-    chunk_hashes: Vec<String>,
     start_idx: usize,
     count: usize,
+    symbol_ids: Vec<String>,
+    symbols: Vec<SymbolEmbeddingMeta>,
+}
+
+#[derive(Debug, Clone)]
+struct SymbolEmbeddingMeta {
+    symbol_id: String,
+    lang: String,
+    kind: String,
+    name: String,
+    start_line: u32,
+    end_line: u32,
+    content_hash: String,
 }
 
 #[derive(Default)]
@@ -68,7 +79,7 @@ struct EmbeddingIndexStats {
     files_embedded: usize,
     files_skipped_up_to_date: usize,
     files_deleted: usize,
-    chunks_embedded: usize,
+    symbols_embedded: usize,
 }
 
 fn create_embedding_provider(
@@ -97,6 +108,10 @@ fn create_embedding_provider(
         || config.embeddings.chunk_overlap.is_some()
         || config.embeddings.max_file_bytes.is_some()
         || config.embeddings.semantic_max_chunks.is_some()
+        || config.embeddings.max_symbols_per_file.is_some()
+        || config.embeddings.symbol_preview_lines.is_some()
+        || config.embeddings.symbol_max_chars.is_some()
+        || config.embeddings.symbol_kinds.is_some()
         || EmbeddingProviderConfig::has_env_overrides();
 
     let provider_type = config.embeddings.provider();
@@ -105,9 +120,10 @@ fn create_embedding_provider(
             .and_then(|provider_config| FastEmbedder::new(provider_config))
             .map(|provider| Box::new(provider) as Box<dyn EmbeddingProvider>),
         EmbeddingProviderType::Dummy => Ok(Box::new(DummyProvider::new(DEFAULT_EMBEDDING_DIM))),
-        EmbeddingProviderType::Command => anyhow::bail!(
-            "Embedding provider type 'command' is no longer supported. Use builtin fastembed."
-        ),
+        EmbeddingProviderType::Command => Ok(Box::new(CommandProvider::new(
+            config.embeddings.command().to_string(),
+            config.embeddings.model().to_string(),
+        ))),
     };
 
     match mode {
@@ -180,26 +196,31 @@ fn flush_embedding_batch(
         let end = entry.start_idx + entry.count;
         let slice = &vectors[entry.start_idx..end];
 
-        let mut inputs: Vec<EmbeddingChunkInput<'_>> = Vec::with_capacity(entry.count);
+        let mut inputs: Vec<SymbolEmbeddingInput<'_>> = Vec::with_capacity(entry.count);
         for (i, embedding) in slice.iter().enumerate() {
-            let (start_line, end_line) = entry.chunk_lines[i];
-            inputs.push(EmbeddingChunkInput {
-                start_line,
-                end_line,
-                content_hash: entry.chunk_hashes[i].as_str(),
+            let meta = &entry.symbols[i];
+            inputs.push(SymbolEmbeddingInput {
+                symbol_id: meta.symbol_id.as_str(),
+                lang: meta.lang.as_str(),
+                symbol_kind: meta.kind.as_str(),
+                symbol_name: meta.name.as_str(),
+                start_line: meta.start_line,
+                end_line: meta.end_line,
+                content_hash: meta.content_hash.as_str(),
                 embedding: embedding.as_slice(),
             });
         }
 
-        storage.replace_file_embeddings(
+        storage.sync_file_symbols(
             &entry.path,
             &entry.file_hash,
             entry.last_modified,
+            &entry.symbol_ids,
             &inputs,
         )?;
 
         stats.files_embedded += 1;
-        stats.chunks_embedded += entry.count;
+        stats.symbols_embedded += entry.count;
     }
 
     batch_texts.clear();
@@ -221,33 +242,54 @@ fn index_embeddings(
     let mut stats = EmbeddingIndexStats::default();
     let mut storage = EmbeddingStorage::open_default(root)?;
 
+    if embeddings_force {
+        storage.reset_schema()?;
+    } else if !storage.is_symbol_unit()? {
+        let message = "Embeddings DB schema mismatch (expected symbol-level). Run `cgrep index --embeddings-force` to rebuild embeddings.";
+        return match mode {
+            EmbeddingsMode::Auto => {
+                eprintln!("Warning: {}. Skipping embeddings.", message);
+                Ok(stats)
+            }
+            EmbeddingsMode::Precompute => Err(anyhow::anyhow!(message)),
+            EmbeddingsMode::Off => Ok(stats),
+        };
+    }
+
+    let provider_label = match config.embeddings.provider() {
+        EmbeddingProviderType::Builtin => "builtin",
+        EmbeddingProviderType::Dummy => "dummy",
+        EmbeddingProviderType::Command => "command",
+    };
+
+    let _ = storage.set_meta("schema_version", "3");
+    let _ = storage.set_meta("unit", "symbol");
+    let _ = storage.set_meta("provider", provider_label);
     // Best-effort: record model early (dimension becomes known after first embed call).
     let _ = storage.set_meta("model", provider.model_id());
     let batch_size = provider.batch_size();
+    let max_file_bytes = config.embeddings.max_file_bytes();
+    let extractor = SymbolExtractor::new();
+    let preview_lines = config.embeddings.symbol_preview_lines();
+    let symbol_max_chars = config.embeddings.symbol_max_chars();
+    let max_symbols_per_file = config.embeddings.max_symbols_per_file();
+    let allowed_kinds: Option<HashSet<String>> = config
+        .embeddings
+        .symbol_kinds()
+        .map(|kinds| kinds.into_iter().collect());
 
     let result: Result<()> = (|| {
-        if embeddings_force {
-            storage.clear_all()?;
-        }
-
         let current_paths: HashSet<&str> =
             index_metadata.files.keys().map(|p| p.as_str()).collect();
 
         // Clean embeddings for files that no longer exist in the repo.
-        let stored_files = storage.list_files()?;
-        for stored in stored_files {
-            if !current_paths.contains(stored.path.as_str()) {
-                let _ = storage.delete_file_chunks(&stored.path)?;
+        let stored_paths = storage.list_paths()?;
+        for stored_path in stored_paths {
+            if !current_paths.contains(stored_path.as_str()) {
+                let _ = storage.delete_file_symbols(&stored_path)?;
                 stats.files_deleted += 1;
             }
         }
-
-        let chunk_config = ChunkConfig::new(
-            config.embeddings.chunk_lines(),
-            config.embeddings.chunk_overlap(),
-        )?
-        .with_max_file_bytes(config.embeddings.max_file_bytes());
-        let chunker = EmbeddingChunker::new(chunk_config);
 
         let mut batch_texts: Vec<String> = Vec::new();
         let mut batch_entries: Vec<EmbeddingBatchEntry> = Vec::new();
@@ -257,7 +299,7 @@ fn index_embeddings(
 
             // If the file is binary, ensure any old embeddings are removed.
             if meta.is_binary || meta.hash.is_empty() {
-                let _ = storage.delete_file_chunks(path)?;
+                let _ = storage.delete_file_symbols(path)?;
                 continue;
             }
 
@@ -271,7 +313,7 @@ fn index_embeddings(
                 Ok(Some(text)) => text,
                 Ok(None) => {
                     // Binary/non-UTF8: ensure we don't keep stale embeddings.
-                    let _ = storage.delete_file_chunks(path)?;
+                    let _ = storage.delete_file_symbols(path)?;
                     continue;
                 }
                 Err(err) => {
@@ -284,30 +326,92 @@ fn index_embeddings(
             let file_hash = meta.hash.clone();
             let last_modified = (meta.mtime / 1_000_000_000) as i64;
 
-            if chunker.is_file_too_large(&text) {
-                storage.replace_file_embeddings(path, &file_hash, last_modified, &[])?;
+            if text.as_bytes().len() > max_file_bytes {
+                storage.replace_file_symbols(path, &file_hash, last_modified, &[])?;
                 stats.files_embedded += 1;
                 continue;
             }
 
-            let embedding_chunks = chunker.chunk_text(&text);
-            if embedding_chunks.is_empty() {
-                storage.replace_file_embeddings(path, &file_hash, last_modified, &[])?;
+            let lang_str = file_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .and_then(detect_language)
+                .unwrap_or_default();
+
+            if lang_str.is_empty() {
+                storage.replace_file_symbols(path, &file_hash, last_modified, &[])?;
                 stats.files_embedded += 1;
                 continue;
             }
 
-            let mut chunk_lines: Vec<(u32, u32)> = Vec::with_capacity(embedding_chunks.len());
-            let mut chunk_hashes: Vec<String> = Vec::with_capacity(embedding_chunks.len());
-            let mut texts: Vec<String> = Vec::with_capacity(embedding_chunks.len());
+            let symbols = match extractor.extract(&text, &lang_str) {
+                Ok(symbols) => symbols,
+                Err(_) => Vec::new(),
+            };
 
-            for chunk in embedding_chunks {
-                chunk_lines.push((chunk.start_line, chunk.end_line));
-                chunk_hashes.push(blake3::hash(chunk.text.as_bytes()).to_hex().to_string());
-                texts.push(chunk.text);
+            let symbols = filter_symbols(symbols, allowed_kinds.as_ref(), max_symbols_per_file);
+
+            if symbols.is_empty() {
+                storage.replace_file_symbols(path, &file_hash, last_modified, &[])?;
+                stats.files_embedded += 1;
+                continue;
             }
 
-            // Batch across files but keep each file's chunks contiguous.
+            let existing_hashes: HashMap<String, String> = storage
+                .list_symbol_hashes_for_path(path)?
+                .into_iter()
+                .collect();
+
+            let mut texts: Vec<String> = Vec::new();
+            let mut symbol_meta: Vec<SymbolEmbeddingMeta> = Vec::new();
+            let mut symbol_ids: Vec<String> = Vec::new();
+
+            for symbol in symbols {
+                let symbol_id = symbol_id_for(path, &lang_str, &symbol);
+                let start_line = (symbol.line.min(u32::MAX as usize)) as u32;
+                let end_line = (symbol.end_line.min(u32::MAX as usize)) as u32;
+                let content = build_symbol_content(&text, &symbol, preview_lines, symbol_max_chars);
+                if content.is_empty() {
+                    continue;
+                }
+
+                let content_hash = blake3::hash(content.as_bytes()).to_hex().to_string();
+                let unchanged = existing_hashes
+                    .get(&symbol_id)
+                    .map(|hash| hash == &content_hash)
+                    .unwrap_or(false);
+
+                symbol_ids.push(symbol_id.clone());
+
+                if unchanged {
+                    continue;
+                }
+
+                texts.push(content);
+                symbol_meta.push(SymbolEmbeddingMeta {
+                    symbol_id,
+                    lang: lang_str.to_string(),
+                    kind: symbol.kind.to_string(),
+                    name: symbol.name.clone(),
+                    start_line,
+                    end_line,
+                    content_hash,
+                });
+            }
+
+            if symbol_ids.is_empty() {
+                storage.replace_file_symbols(path, &file_hash, last_modified, &[])?;
+                stats.files_embedded += 1;
+                continue;
+            }
+
+            if texts.is_empty() {
+                storage.sync_file_symbols(path, &file_hash, last_modified, &symbol_ids, &[])?;
+                stats.files_embedded += 1;
+                continue;
+            }
+
+            // Batch across files but keep each file's symbols contiguous.
             if !batch_texts.is_empty() && batch_texts.len() + texts.len() > batch_size {
                 flush_embedding_batch(
                     provider.as_mut(),
@@ -325,10 +429,10 @@ fn index_embeddings(
                 path: path.clone(),
                 file_hash,
                 last_modified,
-                chunk_lines,
-                chunk_hashes,
                 start_idx,
                 count,
+                symbol_ids,
+                symbols: symbol_meta,
             });
         }
 
@@ -421,6 +525,8 @@ where
 const MAX_DOC_BYTES: usize = 64 * 1024;
 #[cfg(not(test))]
 const MAX_DOC_BYTES: usize = 1024 * 1024;
+const DEFAULT_SYMBOL_PREVIEW_LINES: usize = 12;
+const DEFAULT_SYMBOL_MAX_CHARS: usize = 1200;
 
 struct TextChunk {
     start_line: u64,
@@ -514,19 +620,127 @@ fn build_chunks(text: &str, max_doc_bytes: usize) -> Vec<TextChunk> {
     chunks
 }
 
-fn extract_symbols_from_chunks(chunks: &[TextChunk], lang: &str) -> String {
-    let extractor = SymbolExtractor::new();
-    let mut seen = HashSet::new();
-
+fn join_chunks(chunks: &[TextChunk]) -> String {
+    let mut text = String::new();
     for chunk in chunks {
-        if let Ok(symbols) = extractor.extract(&chunk.content, lang) {
-            for symbol in symbols {
-                seen.insert(symbol.name);
+        text.push_str(&chunk.content);
+    }
+    text
+}
+
+fn extract_symbols_from_text(text: &str, lang: &str) -> Vec<Symbol> {
+    let extractor = SymbolExtractor::new();
+    extractor.extract(text, lang).unwrap_or_default()
+}
+
+fn extract_symbol_names(symbols: &[Symbol]) -> String {
+    let mut seen = HashSet::new();
+    for symbol in symbols {
+        seen.insert(symbol.name.clone());
+    }
+    seen.into_iter().collect::<Vec<_>>().join(" ")
+}
+
+fn symbol_priority(kind: &SymbolKind) -> u8 {
+    match kind {
+        SymbolKind::Function | SymbolKind::Method => 0,
+        SymbolKind::Class | SymbolKind::Struct | SymbolKind::Trait | SymbolKind::Interface => 1,
+        SymbolKind::Enum | SymbolKind::Module | SymbolKind::Type => 2,
+        SymbolKind::Property | SymbolKind::Constant => 3,
+        SymbolKind::Variable => 4,
+        SymbolKind::Unknown => 5,
+    }
+}
+
+fn filter_symbols(
+    symbols: Vec<Symbol>,
+    allowed_kinds: Option<&HashSet<String>>,
+    max_symbols: usize,
+) -> Vec<Symbol> {
+    let mut filtered: Vec<(usize, Symbol, u8)> = symbols
+        .into_iter()
+        .enumerate()
+        .filter_map(|(idx, symbol)| {
+            if let Some(allowed) = allowed_kinds {
+                if !allowed.contains(&symbol.kind.to_string()) {
+                    return None;
+                }
             }
-        }
+            let priority = symbol_priority(&symbol.kind);
+            Some((idx, symbol, priority))
+        })
+        .collect();
+
+    if max_symbols > 0 && filtered.len() > max_symbols {
+        filtered.sort_by(|a, b| {
+            a.2.cmp(&b.2)
+                .then_with(|| a.1.line.cmp(&b.1.line))
+                .then_with(|| a.0.cmp(&b.0))
+        });
+        filtered.truncate(max_symbols);
+        filtered.sort_by(|a, b| a.0.cmp(&b.0));
     }
 
-    seen.into_iter().collect::<Vec<_>>().join(" ")
+    filtered.into_iter().map(|(_, symbol, _)| symbol).collect()
+}
+
+fn symbol_id_for(path: &str, lang: &str, symbol: &Symbol) -> String {
+    let range = if let (Some(start), Some(end)) = (symbol.byte_start, symbol.byte_end) {
+        format!("{}:{}", start, end)
+    } else {
+        format!("{}:{}", symbol.line, symbol.end_line)
+    };
+    let input = format!(
+        "{}:{}:{}:{}:{}",
+        path,
+        lang,
+        symbol.kind,
+        symbol.name,
+        range
+    );
+    let hash = blake3::hash(input.as_bytes());
+    hash.to_hex().to_string()
+}
+
+fn build_symbol_preview(source: &str, symbol: &Symbol, preview_lines: usize) -> String {
+    let lines: Vec<&str> = source.lines().collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    let start_idx = symbol.line.saturating_sub(1);
+    if start_idx >= lines.len() {
+        return String::new();
+    }
+
+    let symbol_end_excl = symbol.end_line.min(lines.len());
+    let preview_end = (start_idx + preview_lines).min(symbol_end_excl);
+    lines[start_idx..preview_end].join("\n")
+}
+
+fn build_symbol_content(source: &str, symbol: &Symbol, preview_lines: usize, max_chars: usize) -> String {
+    let header = format!("{} {}", symbol.name, symbol.kind);
+    let preview = build_symbol_preview(source, symbol, preview_lines);
+    let combined = if preview.is_empty() {
+        header
+    } else {
+        format!("{}\n{}", header, preview)
+    };
+    truncate_to_chars(&combined, max_chars)
+}
+
+fn truncate_to_chars(input: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let mut count = 0usize;
+    for (idx, _) in input.char_indices() {
+        if count == max_chars {
+            return input[..idx].to_string();
+        }
+        count += 1;
+    }
+    input.to_string()
 }
 
 fn should_skip_without_read(
@@ -558,6 +772,9 @@ pub struct IndexFields {
     pub content: Field,
     pub language: Field,
     pub symbols: Field,
+    pub doc_type: Field,
+    pub symbol_id: Field,
+    pub symbol_end_line: Field,
     #[allow(dead_code)]
     pub line_number: Field,
 }
@@ -568,6 +785,10 @@ pub struct IndexBuilder {
     schema: Schema,
     fields: IndexFields,
     exclude_patterns: Vec<String>,
+    symbol_preview_lines: usize,
+    symbol_max_chars: usize,
+    max_symbols_per_file: usize,
+    allowed_symbol_kinds: Option<HashSet<String>>,
 }
 
 impl IndexBuilder {
@@ -577,6 +798,29 @@ impl IndexBuilder {
 
     /// Create index builder with exclude patterns
     pub fn with_excludes(root: impl AsRef<Path>, excludes: Vec<String>) -> Result<Self> {
+        let preview_lines = DEFAULT_SYMBOL_PREVIEW_LINES;
+        let symbol_max_chars = DEFAULT_SYMBOL_MAX_CHARS;
+        let max_symbols_per_file = 500;
+        let allowed_symbol_kinds = None;
+        Self::with_excludes_and_symbols(
+            root,
+            excludes,
+            preview_lines,
+            symbol_max_chars,
+            max_symbols_per_file,
+            allowed_symbol_kinds,
+        )
+    }
+
+    /// Create index builder with symbol config overrides
+    pub fn with_excludes_and_symbols(
+        root: impl AsRef<Path>,
+        excludes: Vec<String>,
+        symbol_preview_lines: usize,
+        symbol_max_chars: usize,
+        max_symbols_per_file: usize,
+        allowed_symbol_kinds: Option<HashSet<String>>,
+    ) -> Result<Self> {
         let mut schema_builder = Schema::builder();
 
         let path = schema_builder.add_text_field("path", TEXT | STORED);
@@ -584,6 +828,9 @@ impl IndexBuilder {
         let content = schema_builder.add_text_field("content", TEXT | STORED);
         let language = schema_builder.add_text_field("language", TEXT | STORED);
         let symbols = schema_builder.add_text_field("symbols", TEXT | STORED);
+        let doc_type = schema_builder.add_text_field("doc_type", STRING | STORED);
+        let symbol_id = schema_builder.add_text_field("symbol_id", STRING | STORED);
+        let symbol_end_line = schema_builder.add_u64_field("symbol_end_line", STORED);
         let line_number =
             schema_builder.add_u64_field("line_number", tantivy::schema::INDEXED | STORED);
 
@@ -594,6 +841,9 @@ impl IndexBuilder {
             content,
             language,
             symbols,
+            doc_type,
+            symbol_id,
+            symbol_end_line,
             line_number,
         };
 
@@ -602,6 +852,10 @@ impl IndexBuilder {
             schema,
             fields,
             exclude_patterns: excludes,
+            symbol_preview_lines,
+            symbol_max_chars,
+            max_symbols_per_file,
+            allowed_symbol_kinds,
         })
     }
 
@@ -627,9 +881,13 @@ impl IndexBuilder {
         let index = if index_meta_exists && !force {
             let index = Index::open_in_dir(&index_path).context("Failed to open existing index")?;
             let schema = index.schema();
-            if schema.get_field("path_exact").is_err() {
+            if schema.get_field("path_exact").is_err()
+                || schema.get_field("doc_type").is_err()
+                || schema.get_field("symbol_id").is_err()
+                || schema.get_field("symbol_end_line").is_err()
+            {
                 anyhow::bail!(
-                    "Index schema upgrade required: missing 'path_exact'.\n\
+                    "Index schema upgrade required: missing symbol-level fields.\n\
                      Run 'cgrep index --force' to rebuild the index."
                 );
             }
@@ -696,6 +954,9 @@ impl IndexBuilder {
         let content_field = self.fields.content;
         let language_field = self.fields.language;
         let symbols_field = self.fields.symbols;
+        let doc_type_field = self.fields.doc_type;
+        let symbol_id_field = self.fields.symbol_id;
+        let symbol_end_line_field = self.fields.symbol_end_line;
         let line_number_field = self.fields.line_number;
 
         if !old_metadata.files.is_empty() {
@@ -817,19 +1078,22 @@ impl IndexBuilder {
                         .and_then(detect_language)
                         .unwrap_or_default();
 
+                    let full_text = join_chunks(&chunks);
+                    let symbol_list = if !lang_str.is_empty() {
+                        extract_symbols_from_text(&full_text, &lang_str)
+                    } else {
+                        Vec::new()
+                    };
                     let symbols = if !lang_str.is_empty() {
-                        if let Some(meta) = existing_meta.as_ref() {
-                            if meta.hash == hash {
-                                meta.symbols.clone()
-                            } else {
-                                extract_symbols_from_chunks(&chunks, &lang_str)
-                            }
-                        } else {
-                            extract_symbols_from_chunks(&chunks, &lang_str)
-                        }
+                        extract_symbol_names(&symbol_list)
                     } else {
                         String::new()
                     };
+                    let symbol_docs = filter_symbols(
+                        symbol_list.clone(),
+                        self.allowed_symbol_kinds.as_ref(),
+                        self.max_symbols_per_file,
+                    );
 
                     let meta = FileMetadata {
                         mtime,
@@ -849,7 +1113,8 @@ impl IndexBuilder {
                         return;
                     }
 
-                    let mut docs: Vec<TantivyDocument> = Vec::with_capacity(chunks.len());
+                    let mut docs: Vec<TantivyDocument> =
+                        Vec::with_capacity(chunks.len() + symbol_docs.len());
                     for chunk in &chunks {
                         let mut doc = TantivyDocument::default();
                         doc.add_text(path_field, &path_str);
@@ -857,7 +1122,33 @@ impl IndexBuilder {
                         doc.add_text(content_field, &chunk.content);
                         doc.add_text(language_field, &lang_str);
                         doc.add_text(symbols_field, &symbols);
+                        doc.add_text(doc_type_field, "file");
                         doc.add_u64(line_number_field, chunk.start_line);
+                        docs.push(doc);
+                    }
+
+                    for symbol in &symbol_docs {
+                        let symbol_id = symbol_id_for(&path_str, &lang_str, symbol);
+                        let content = build_symbol_content(
+                            &full_text,
+                            symbol,
+                            self.symbol_preview_lines,
+                            self.symbol_max_chars,
+                        );
+                        if content.is_empty() {
+                            continue;
+                        }
+
+                        let mut doc = TantivyDocument::default();
+                        doc.add_text(path_field, &path_str);
+                        doc.add_text(path_exact_field, &path_str);
+                        doc.add_text(content_field, &content);
+                        doc.add_text(language_field, &lang_str);
+                        doc.add_text(symbols_field, &symbol.name);
+                        doc.add_text(doc_type_field, "symbol");
+                        doc.add_text(symbol_id_field, &symbol_id);
+                        doc.add_u64(line_number_field, symbol.line as u64);
+                        doc.add_u64(symbol_end_line_field, symbol.end_line as u64);
                         docs.push(doc);
                     }
 
@@ -971,7 +1262,17 @@ pub fn run(
     let mut all_excludes = excludes;
     all_excludes.extend(config.index().exclude_paths().iter().cloned());
 
-    let builder = IndexBuilder::with_excludes(&root, all_excludes)?;
+    let builder = IndexBuilder::with_excludes_and_symbols(
+        &root,
+        all_excludes,
+        config.embeddings.symbol_preview_lines(),
+        config.embeddings.symbol_max_chars(),
+        config.embeddings.max_symbols_per_file(),
+        config
+            .embeddings
+            .symbol_kinds()
+            .map(|kinds| kinds.into_iter().collect()),
+    )?;
     let writer_budget_bytes = if high_memory {
         eprintln!("Using high-memory indexing: writer budget = 1GiB");
         HIGH_MEMORY_WRITER_BUDGET_BYTES
@@ -1000,9 +1301,9 @@ pub fn run(
         if stats.files_embedded > 0 || stats.files_skipped_up_to_date > 0 || stats.files_deleted > 0
         {
             println!(
-                "Embeddings: {} files embedded ({} chunks), {} up-to-date, {} removed",
+                "Embeddings: {} files embedded ({} symbols), {} up-to-date, {} removed",
                 stats.files_embedded,
-                stats.chunks_embedded,
+                stats.symbols_embedded,
                 stats.files_skipped_up_to_date,
                 stats.files_deleted
             );
@@ -1030,11 +1331,22 @@ mod tests {
         let index = Index::open_in_dir(&index_path).expect("open index");
         let schema = index.schema();
         let path_exact_field = schema.get_field("path_exact").expect("path_exact field");
+        let doc_type_field = schema.get_field("doc_type").expect("doc_type field");
         let reader = index.reader().expect("reader");
         let searcher = reader.searcher();
-        let term =
+        let path_term =
             Term::from_field_text(path_exact_field, &file_path.to_string_lossy().to_string());
-        let query = TermQuery::new(term, IndexRecordOption::Basic);
+        let doc_type_term = Term::from_field_text(doc_type_field, "file");
+        let query = tantivy::query::BooleanQuery::new(vec![
+            (
+                tantivy::query::Occur::Must,
+                Box::new(TermQuery::new(path_term, IndexRecordOption::Basic)),
+            ),
+            (
+                tantivy::query::Occur::Must,
+                Box::new(TermQuery::new(doc_type_term, IndexRecordOption::Basic)),
+            ),
+        ]);
         searcher.search(&query, &Count).expect("count")
     }
 
@@ -1235,6 +1547,35 @@ mod tests {
         let lib_key = root.join("lib.rs").to_string_lossy().to_string();
         let meta = metadata.files.get(&lib_key).expect("meta");
         assert!(meta.symbols.contains("cached_symbol"));
+    }
+
+    #[test]
+    fn symbol_id_is_stable() {
+        let symbol = Symbol {
+            name: "alpha".to_string(),
+            kind: crate::parser::symbols::SymbolKind::Function,
+            line: 10,
+            column: 1,
+            end_line: 20,
+            byte_start: Some(100),
+            byte_end: Some(200),
+            scope: None,
+        };
+
+        let id1 = symbol_id_for("src/lib.rs", "rust", &symbol);
+        let id2 = symbol_id_for("src/lib.rs", "rust", &symbol);
+        assert_eq!(id1, id2);
+
+        let mut symbol_changed = symbol.clone();
+        symbol_changed.byte_end = Some(201);
+        let id3 = symbol_id_for("src/lib.rs", "rust", &symbol_changed);
+        assert_ne!(id1, id3);
+
+        let mut symbol_line_range = symbol.clone();
+        symbol_line_range.byte_start = None;
+        symbol_line_range.byte_end = None;
+        let id4 = symbol_id_for("src/lib.rs", "rust", &symbol_line_range);
+        assert_ne!(id1, id4);
     }
 
     #[test]
