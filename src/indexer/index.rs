@@ -20,7 +20,7 @@ use tantivy::{
 };
 
 use crate::indexer::scanner::{detect_language, FileScanner};
-use crate::parser::symbols::{Symbol, SymbolExtractor};
+use crate::parser::symbols::{Symbol, SymbolExtractor, SymbolKind};
 use cgrep::config::{Config, EmbeddingProviderType};
 use cgrep::embedding::{
     CommandProvider, DummyProvider, EmbeddingProvider, EmbeddingProviderConfig, EmbeddingStorage,
@@ -55,8 +55,10 @@ impl EmbeddingsMode {
 struct EmbeddingBatchEntry {
     path: String,
     file_hash: String,
+    last_modified: i64,
     start_idx: usize,
     count: usize,
+    symbol_ids: Vec<String>,
     symbols: Vec<SymbolEmbeddingMeta>,
 }
 
@@ -68,6 +70,7 @@ struct SymbolEmbeddingMeta {
     name: String,
     start_line: u32,
     end_line: u32,
+    content_hash: String,
 }
 
 #[derive(Default)]
@@ -105,6 +108,10 @@ fn create_embedding_provider(
         || config.embeddings.chunk_overlap.is_some()
         || config.embeddings.max_file_bytes.is_some()
         || config.embeddings.semantic_max_chunks.is_some()
+        || config.embeddings.max_symbols_per_file.is_some()
+        || config.embeddings.symbol_preview_lines.is_some()
+        || config.embeddings.symbol_max_chars.is_some()
+        || config.embeddings.symbol_kinds.is_some()
         || EmbeddingProviderConfig::has_env_overrides();
 
     let provider_type = config.embeddings.provider();
@@ -199,11 +206,18 @@ fn flush_embedding_batch(
                 symbol_name: meta.name.as_str(),
                 start_line: meta.start_line,
                 end_line: meta.end_line,
+                content_hash: meta.content_hash.as_str(),
                 embedding: embedding.as_slice(),
             });
         }
 
-        storage.replace_file_symbols(&entry.path, &entry.file_hash, &inputs)?;
+        storage.sync_file_symbols(
+            &entry.path,
+            &entry.file_hash,
+            entry.last_modified,
+            &entry.symbol_ids,
+            &inputs,
+        )?;
 
         stats.files_embedded += 1;
         stats.symbols_embedded += entry.count;
@@ -248,7 +262,7 @@ fn index_embeddings(
         EmbeddingProviderType::Command => "command",
     };
 
-    let _ = storage.set_meta("schema_version", "2");
+    let _ = storage.set_meta("schema_version", "3");
     let _ = storage.set_meta("unit", "symbol");
     let _ = storage.set_meta("provider", provider_label);
     // Best-effort: record model early (dimension becomes known after first embed call).
@@ -256,6 +270,13 @@ fn index_embeddings(
     let batch_size = provider.batch_size();
     let max_file_bytes = config.embeddings.max_file_bytes();
     let extractor = SymbolExtractor::new();
+    let preview_lines = config.embeddings.symbol_preview_lines();
+    let symbol_max_chars = config.embeddings.symbol_max_chars();
+    let max_symbols_per_file = config.embeddings.max_symbols_per_file();
+    let allowed_kinds: Option<HashSet<String>> = config
+        .embeddings
+        .symbol_kinds()
+        .map(|kinds| kinds.into_iter().collect());
 
     let result: Result<()> = (|| {
         let current_paths: HashSet<&str> =
@@ -303,9 +324,10 @@ fn index_embeddings(
             };
 
             let file_hash = meta.hash.clone();
+            let last_modified = (meta.mtime / 1_000_000_000) as i64;
 
             if text.as_bytes().len() > max_file_bytes {
-                storage.replace_file_symbols(path, &file_hash, &[])?;
+                storage.replace_file_symbols(path, &file_hash, last_modified, &[])?;
                 stats.files_embedded += 1;
                 continue;
             }
@@ -317,7 +339,8 @@ fn index_embeddings(
                 .unwrap_or_default();
 
             if lang_str.is_empty() {
-                let _ = storage.delete_file_symbols(path)?;
+                storage.replace_file_symbols(path, &file_hash, last_modified, &[])?;
+                stats.files_embedded += 1;
                 continue;
             }
 
@@ -326,21 +349,41 @@ fn index_embeddings(
                 Err(_) => Vec::new(),
             };
 
+            let symbols = filter_symbols(symbols, allowed_kinds.as_ref(), max_symbols_per_file);
+
             if symbols.is_empty() {
-                storage.replace_file_symbols(path, &file_hash, &[])?;
+                storage.replace_file_symbols(path, &file_hash, last_modified, &[])?;
                 stats.files_embedded += 1;
                 continue;
             }
 
-            let mut texts: Vec<String> = Vec::with_capacity(symbols.len());
-            let mut symbol_meta: Vec<SymbolEmbeddingMeta> = Vec::with_capacity(symbols.len());
+            let existing_hashes: HashMap<String, String> = storage
+                .list_symbol_hashes_for_path(path)?
+                .into_iter()
+                .collect();
+
+            let mut texts: Vec<String> = Vec::new();
+            let mut symbol_meta: Vec<SymbolEmbeddingMeta> = Vec::new();
+            let mut symbol_ids: Vec<String> = Vec::new();
 
             for symbol in symbols {
                 let symbol_id = symbol_id_for(path, &lang_str, &symbol);
                 let start_line = (symbol.line.min(u32::MAX as usize)) as u32;
                 let end_line = (symbol.end_line.min(u32::MAX as usize)) as u32;
-                let content = build_symbol_content(&text, &symbol);
+                let content = build_symbol_content(&text, &symbol, preview_lines, symbol_max_chars);
                 if content.is_empty() {
+                    continue;
+                }
+
+                let content_hash = blake3::hash(content.as_bytes()).to_hex().to_string();
+                let unchanged = existing_hashes
+                    .get(&symbol_id)
+                    .map(|hash| hash == &content_hash)
+                    .unwrap_or(false);
+
+                symbol_ids.push(symbol_id.clone());
+
+                if unchanged {
                     continue;
                 }
 
@@ -352,11 +395,18 @@ fn index_embeddings(
                     name: symbol.name.clone(),
                     start_line,
                     end_line,
+                    content_hash,
                 });
             }
 
+            if symbol_ids.is_empty() {
+                storage.replace_file_symbols(path, &file_hash, last_modified, &[])?;
+                stats.files_embedded += 1;
+                continue;
+            }
+
             if texts.is_empty() {
-                storage.replace_file_symbols(path, &file_hash, &[])?;
+                storage.sync_file_symbols(path, &file_hash, last_modified, &symbol_ids, &[])?;
                 stats.files_embedded += 1;
                 continue;
             }
@@ -378,8 +428,10 @@ fn index_embeddings(
             batch_entries.push(EmbeddingBatchEntry {
                 path: path.clone(),
                 file_hash,
+                last_modified,
                 start_idx,
                 count,
+                symbol_ids,
                 symbols: symbol_meta,
             });
         }
@@ -473,8 +525,8 @@ where
 const MAX_DOC_BYTES: usize = 64 * 1024;
 #[cfg(not(test))]
 const MAX_DOC_BYTES: usize = 1024 * 1024;
-const SYMBOL_PREVIEW_MAX_LINES: usize = 20;
-const SYMBOL_CONTENT_MAX_CHARS: usize = 2000;
+const DEFAULT_SYMBOL_PREVIEW_LINES: usize = 12;
+const DEFAULT_SYMBOL_MAX_CHARS: usize = 1200;
 
 struct TextChunk {
     start_line: u64,
@@ -589,6 +641,49 @@ fn extract_symbol_names(symbols: &[Symbol]) -> String {
     seen.into_iter().collect::<Vec<_>>().join(" ")
 }
 
+fn symbol_priority(kind: &SymbolKind) -> u8 {
+    match kind {
+        SymbolKind::Function | SymbolKind::Method => 0,
+        SymbolKind::Class | SymbolKind::Struct | SymbolKind::Trait | SymbolKind::Interface => 1,
+        SymbolKind::Enum | SymbolKind::Module | SymbolKind::Type => 2,
+        SymbolKind::Property | SymbolKind::Constant => 3,
+        SymbolKind::Variable => 4,
+        SymbolKind::Unknown => 5,
+    }
+}
+
+fn filter_symbols(
+    symbols: Vec<Symbol>,
+    allowed_kinds: Option<&HashSet<String>>,
+    max_symbols: usize,
+) -> Vec<Symbol> {
+    let mut filtered: Vec<(usize, Symbol, u8)> = symbols
+        .into_iter()
+        .enumerate()
+        .filter_map(|(idx, symbol)| {
+            if let Some(allowed) = allowed_kinds {
+                if !allowed.contains(&symbol.kind.to_string()) {
+                    return None;
+                }
+            }
+            let priority = symbol_priority(&symbol.kind);
+            Some((idx, symbol, priority))
+        })
+        .collect();
+
+    if max_symbols > 0 && filtered.len() > max_symbols {
+        filtered.sort_by(|a, b| {
+            a.2.cmp(&b.2)
+                .then_with(|| a.1.line.cmp(&b.1.line))
+                .then_with(|| a.0.cmp(&b.0))
+        });
+        filtered.truncate(max_symbols);
+        filtered.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+
+    filtered.into_iter().map(|(_, symbol, _)| symbol).collect()
+}
+
 fn symbol_id_for(path: &str, lang: &str, symbol: &Symbol) -> String {
     let range = if let (Some(start), Some(end)) = (symbol.byte_start, symbol.byte_end) {
         format!("{}:{}", start, end)
@@ -607,7 +702,7 @@ fn symbol_id_for(path: &str, lang: &str, symbol: &Symbol) -> String {
     hash.to_hex().to_string()
 }
 
-fn build_symbol_preview(source: &str, symbol: &Symbol) -> String {
+fn build_symbol_preview(source: &str, symbol: &Symbol, preview_lines: usize) -> String {
     let lines: Vec<&str> = source.lines().collect();
     if lines.is_empty() {
         return String::new();
@@ -619,19 +714,19 @@ fn build_symbol_preview(source: &str, symbol: &Symbol) -> String {
     }
 
     let symbol_end_excl = symbol.end_line.min(lines.len());
-    let preview_end = (start_idx + SYMBOL_PREVIEW_MAX_LINES).min(symbol_end_excl);
+    let preview_end = (start_idx + preview_lines).min(symbol_end_excl);
     lines[start_idx..preview_end].join("\n")
 }
 
-fn build_symbol_content(source: &str, symbol: &Symbol) -> String {
+fn build_symbol_content(source: &str, symbol: &Symbol, preview_lines: usize, max_chars: usize) -> String {
     let header = format!("{} {}", symbol.name, symbol.kind);
-    let preview = build_symbol_preview(source, symbol);
+    let preview = build_symbol_preview(source, symbol, preview_lines);
     let combined = if preview.is_empty() {
         header
     } else {
         format!("{}\n{}", header, preview)
     };
-    truncate_to_chars(&combined, SYMBOL_CONTENT_MAX_CHARS)
+    truncate_to_chars(&combined, max_chars)
 }
 
 fn truncate_to_chars(input: &str, max_chars: usize) -> String {
@@ -690,6 +785,10 @@ pub struct IndexBuilder {
     schema: Schema,
     fields: IndexFields,
     exclude_patterns: Vec<String>,
+    symbol_preview_lines: usize,
+    symbol_max_chars: usize,
+    max_symbols_per_file: usize,
+    allowed_symbol_kinds: Option<HashSet<String>>,
 }
 
 impl IndexBuilder {
@@ -699,6 +798,29 @@ impl IndexBuilder {
 
     /// Create index builder with exclude patterns
     pub fn with_excludes(root: impl AsRef<Path>, excludes: Vec<String>) -> Result<Self> {
+        let preview_lines = DEFAULT_SYMBOL_PREVIEW_LINES;
+        let symbol_max_chars = DEFAULT_SYMBOL_MAX_CHARS;
+        let max_symbols_per_file = 500;
+        let allowed_symbol_kinds = None;
+        Self::with_excludes_and_symbols(
+            root,
+            excludes,
+            preview_lines,
+            symbol_max_chars,
+            max_symbols_per_file,
+            allowed_symbol_kinds,
+        )
+    }
+
+    /// Create index builder with symbol config overrides
+    pub fn with_excludes_and_symbols(
+        root: impl AsRef<Path>,
+        excludes: Vec<String>,
+        symbol_preview_lines: usize,
+        symbol_max_chars: usize,
+        max_symbols_per_file: usize,
+        allowed_symbol_kinds: Option<HashSet<String>>,
+    ) -> Result<Self> {
         let mut schema_builder = Schema::builder();
 
         let path = schema_builder.add_text_field("path", TEXT | STORED);
@@ -730,6 +852,10 @@ impl IndexBuilder {
             schema,
             fields,
             exclude_patterns: excludes,
+            symbol_preview_lines,
+            symbol_max_chars,
+            max_symbols_per_file,
+            allowed_symbol_kinds,
         })
     }
 
@@ -963,6 +1089,11 @@ impl IndexBuilder {
                     } else {
                         String::new()
                     };
+                    let symbol_docs = filter_symbols(
+                        symbol_list.clone(),
+                        self.allowed_symbol_kinds.as_ref(),
+                        self.max_symbols_per_file,
+                    );
 
                     let meta = FileMetadata {
                         mtime,
@@ -983,7 +1114,7 @@ impl IndexBuilder {
                     }
 
                     let mut docs: Vec<TantivyDocument> =
-                        Vec::with_capacity(chunks.len() + symbol_list.len());
+                        Vec::with_capacity(chunks.len() + symbol_docs.len());
                     for chunk in &chunks {
                         let mut doc = TantivyDocument::default();
                         doc.add_text(path_field, &path_str);
@@ -996,9 +1127,14 @@ impl IndexBuilder {
                         docs.push(doc);
                     }
 
-                    for symbol in &symbol_list {
+                    for symbol in &symbol_docs {
                         let symbol_id = symbol_id_for(&path_str, &lang_str, symbol);
-                        let content = build_symbol_content(&full_text, symbol);
+                        let content = build_symbol_content(
+                            &full_text,
+                            symbol,
+                            self.symbol_preview_lines,
+                            self.symbol_max_chars,
+                        );
                         if content.is_empty() {
                             continue;
                         }
@@ -1126,7 +1262,17 @@ pub fn run(
     let mut all_excludes = excludes;
     all_excludes.extend(config.index().exclude_paths().iter().cloned());
 
-    let builder = IndexBuilder::with_excludes(&root, all_excludes)?;
+    let builder = IndexBuilder::with_excludes_and_symbols(
+        &root,
+        all_excludes,
+        config.embeddings.symbol_preview_lines(),
+        config.embeddings.symbol_max_chars(),
+        config.embeddings.max_symbols_per_file(),
+        config
+            .embeddings
+            .symbol_kinds()
+            .map(|kinds| kinds.into_iter().collect()),
+    )?;
     let writer_budget_bytes = if high_memory {
         eprintln!("Using high-memory indexing: writer budget = 1GiB");
         HIGH_MEMORY_WRITER_BUDGET_BYTES

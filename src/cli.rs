@@ -203,7 +203,7 @@ pub enum Commands {
         force: bool,
 
         /// Embedding generation mode: auto, precompute, or off
-        #[arg(long, default_value = "auto")]
+        #[arg(long, default_value = "off")]
         embeddings: String,
 
         /// Force regeneration of all embeddings

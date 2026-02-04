@@ -105,6 +105,14 @@ pub struct EmbeddingConfig {
     pub max_file_bytes: Option<usize>,
     /// Maximum number of chunks for semantic search
     pub semantic_max_chunks: Option<usize>,
+    /// Maximum number of symbols per file to embed
+    pub max_symbols_per_file: Option<usize>,
+    /// Maximum preview lines per symbol when building embedding text
+    pub symbol_preview_lines: Option<usize>,
+    /// Maximum characters per symbol when building embedding text
+    pub symbol_max_chars: Option<usize>,
+    /// Allowlist of symbol kinds to embed (e.g., ["function","class"])
+    pub symbol_kinds: Option<Vec<String>>,
 }
 
 impl EmbeddingConfig {
@@ -146,6 +154,31 @@ impl EmbeddingConfig {
     /// Get semantic max chunks (defaults to 200000)
     pub fn semantic_max_chunks(&self) -> usize {
         self.semantic_max_chunks.unwrap_or(200_000)
+    }
+
+    /// Get max symbols per file (defaults to 500)
+    pub fn max_symbols_per_file(&self) -> usize {
+        self.max_symbols_per_file.unwrap_or(500)
+    }
+
+    /// Get symbol preview lines (defaults to 12)
+    pub fn symbol_preview_lines(&self) -> usize {
+        self.symbol_preview_lines.unwrap_or(12)
+    }
+
+    /// Get symbol max chars (defaults to 1200)
+    pub fn symbol_max_chars(&self) -> usize {
+        self.symbol_max_chars.unwrap_or(1200)
+    }
+
+    /// Get allowlist of symbol kinds (lowercased)
+    pub fn symbol_kinds(&self) -> Option<Vec<String>> {
+        self.symbol_kinds.as_ref().map(|kinds| {
+            kinds
+                .iter()
+                .map(|k| k.to_lowercase())
+                .collect::<Vec<_>>()
+        })
     }
 }
 
