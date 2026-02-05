@@ -17,6 +17,10 @@ pub struct Cli {
     #[arg(long, default_value = "text", global = true)]
     pub format: OutputFormat,
 
+    /// Compact JSON output (no pretty formatting)
+    #[arg(long, global = true)]
+    pub compact: bool,
+
     #[command(subcommand)]
     pub command: Commands,
 }

@@ -5,6 +5,19 @@
 //! Provides shared color functions respecting NO_COLOR environment variable.
 
 use colored::Colorize;
+use serde::Serialize;
+
+use anyhow::Result;
+
+/// Print JSON output, optionally compact (no pretty formatting).
+pub fn print_json<T: Serialize>(value: &T, compact: bool) -> Result<()> {
+    if compact {
+        println!("{}", serde_json::to_string(value)?);
+    } else {
+        println!("{}", serde_json::to_string_pretty(value)?);
+    }
+    Ok(())
+}
 
 /// Check if colors should be used (respects NO_COLOR env var)
 pub fn use_colors() -> bool {

@@ -16,7 +16,9 @@ use cgrep::config::Config;
 use cgrep::filters::{
     matches_file_type, matches_glob_compiled, should_exclude_compiled, CompiledGlob,
 };
-use cgrep::output::{colorize_kind, colorize_line_num, colorize_name, colorize_path, use_colors};
+use cgrep::output::{
+    colorize_kind, colorize_line_num, colorize_name, colorize_path, print_json, use_colors,
+};
 use cgrep::utils::get_root_with_index;
 
 /// Symbol result for JSON output
@@ -38,6 +40,7 @@ pub fn run(
     exclude_pattern: Option<&str>,
     quiet: bool,
     format: OutputFormat,
+    compact: bool,
 ) -> Result<()> {
     let start_time = Instant::now();
     let use_color = use_colors() && format == OutputFormat::Text;
@@ -137,7 +140,7 @@ pub fn run(
 
     match format {
         OutputFormat::Json | OutputFormat::Json2 => {
-            println!("{}", serde_json::to_string_pretty(&results)?);
+            print_json(&results, compact)?;
         }
         OutputFormat::Text => {
             if results.is_empty() {

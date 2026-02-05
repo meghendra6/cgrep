@@ -10,6 +10,7 @@ use crate::cli::OutputFormat;
 use crate::indexer::scanner::FileScanner;
 use crate::parser::symbols::{SymbolExtractor, SymbolKind};
 use crate::query::index_filter::{find_files_with_symbol, read_scanned_files};
+use cgrep::output::print_json;
 use cgrep::utils::get_root_with_index;
 
 /// Definition result for JSON output
@@ -23,7 +24,7 @@ struct DefinitionResult {
 }
 
 /// Run the definition command
-pub fn run(name: &str, format: OutputFormat) -> Result<()> {
+pub fn run(name: &str, format: OutputFormat, compact: bool) -> Result<()> {
     let root = get_root_with_index(std::env::current_dir()?);
     let extractor = SymbolExtractor::new();
 
@@ -93,7 +94,7 @@ pub fn run(name: &str, format: OutputFormat) -> Result<()> {
 
     match format {
         OutputFormat::Json | OutputFormat::Json2 => {
-            println!("{}", serde_json::to_string_pretty(&results)?);
+            print_json(&results, compact)?;
         }
         OutputFormat::Text => {
             if results.is_empty() {

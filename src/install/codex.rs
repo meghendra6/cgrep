@@ -46,6 +46,7 @@ cgrep dependents src/auth.rs
 - `-m, --max-results <n>` - Limit number of results (default: 20)
 - `--no-index` / `--regex` - Force scan mode or regex search
 - `--format json|json2` - Structured output (json2 matches json for now)
+- `--compact` - Compact JSON output (no pretty formatting)
 - `--semantic` / `--hybrid` - Optional; requires embeddings + index
 - `--agent-cache` / `--cache-ttl` - Cache hybrid/semantic sessions
 "#;

@@ -162,14 +162,16 @@ Watch:
 
 ## Output formats
 
-Global flag:
+Global flags:
 ```
 --format text|json|json2
+--compact
 ```
 
 - `text`: human-readable output
 - `json`: array of results
 - `json2`: currently identical to `json` (reserved for structured output)
+- `--compact`: compact JSON output (no pretty formatting)
 
 Search result JSON fields:
 ```
@@ -325,7 +327,7 @@ What gets updated:
 - OpenCode: `~/.config/opencode/tool/cgrep.ts` (you may need to add it to OpenCode config)
 
 Agent usage tips:
-- Use `--format json` or `--format json2` for structured output.
+- Use `--format json --compact` or `--format json2 --compact` for structured output.
 - Add `-C` for context lines.
 - For hybrid/semantic sessions, enable caching with `--agent-cache` and adjust `--cache-ttl`.
 

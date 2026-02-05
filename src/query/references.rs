@@ -10,6 +10,7 @@ use serde::Serialize;
 use crate::cli::OutputFormat;
 use crate::indexer::scanner::FileScanner;
 use crate::query::index_filter::{find_files_with_content, read_scanned_files};
+use cgrep::output::print_json;
 use cgrep::utils::get_root_with_index;
 
 /// Reference result for JSON output
@@ -22,7 +23,13 @@ struct ReferenceResult {
 }
 
 /// Run the references command
-pub fn run(name: &str, path: Option<&str>, max_results: usize, format: OutputFormat) -> Result<()> {
+pub fn run(
+    name: &str,
+    path: Option<&str>,
+    max_results: usize,
+    format: OutputFormat,
+    compact: bool,
+) -> Result<()> {
     let root = match path {
         Some(p) => get_root_with_index(std::path::PathBuf::from(p).canonicalize()?),
         None => get_root_with_index(std::env::current_dir()?),
@@ -71,7 +78,7 @@ pub fn run(name: &str, path: Option<&str>, max_results: usize, format: OutputFor
 
     match format {
         OutputFormat::Json | OutputFormat::Json2 => {
-            println!("{}", serde_json::to_string_pretty(&results)?);
+            print_json(&results, compact)?;
         }
         OutputFormat::Text => {
             if results.is_empty() {

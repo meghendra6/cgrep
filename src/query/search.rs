@@ -34,7 +34,7 @@ use cgrep::hybrid::{
     BM25Result, HybridConfig, HybridResult, HybridSearcher, SearchMode as HybridSearchMode,
 };
 use cgrep::output::{
-    colorize_context, colorize_line_num, colorize_match, colorize_path, use_colors,
+    colorize_context, colorize_line_num, colorize_match, colorize_path, print_json, use_colors,
 };
 use cgrep::utils::INDEX_DIR;
 const DEFAULT_CACHE_TTL_MS: u64 = 600_000; // 10 minutes
@@ -129,6 +129,7 @@ pub fn run(
     regex: bool,
     case_sensitive: bool,
     format: OutputFormat,
+    compact: bool,
     search_mode: Option<HybridSearchMode>,
     _context_pack: Option<usize>,
     use_cache: bool,
@@ -257,7 +258,7 @@ pub fn run(
                 .iter()
                 .map(SearchResultJson::from_result)
                 .collect();
-            println!("{}", serde_json::to_string_pretty(&json_results)?);
+            print_json(&json_results, compact)?;
         }
         OutputFormat::Text => {
             if outcome.results.is_empty() {
