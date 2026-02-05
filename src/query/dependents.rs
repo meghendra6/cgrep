@@ -11,6 +11,7 @@ use std::path::Path;
 use crate::cli::OutputFormat;
 use crate::indexer::scanner::FileScanner;
 use crate::query::index_filter::{find_files_with_content, read_scanned_files};
+use cgrep::output::print_json;
 use cgrep::utils::get_root_with_index;
 
 /// Dependent result for JSON output
@@ -22,7 +23,7 @@ struct DependentResult {
 }
 
 /// Run the dependents command
-pub fn run(file: &str, format: OutputFormat) -> Result<()> {
+pub fn run(file: &str, format: OutputFormat, compact: bool) -> Result<()> {
     let root = get_root_with_index(std::env::current_dir()?);
     let target_path = Path::new(file);
     let target_stem = target_path
@@ -93,7 +94,7 @@ pub fn run(file: &str, format: OutputFormat) -> Result<()> {
 
     match format {
         OutputFormat::Json | OutputFormat::Json2 => {
-            println!("{}", serde_json::to_string_pretty(&results)?);
+            print_json(&results, compact)?;
         }
         OutputFormat::Text => {
             if results.is_empty() {

@@ -27,6 +27,7 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
     let format = cli.format;
+    let compact = cli.compact;
 
     match cli.command {
         Commands::Search {
@@ -83,6 +84,7 @@ fn main() -> Result<()> {
                 regex,
                 case_sensitive,
                 format,
+                compact,
                 effective_mode,
                 context_pack,
                 agent_cache,
@@ -107,23 +109,24 @@ fn main() -> Result<()> {
                 exclude.as_deref(),
                 quiet,
                 format,
+                compact,
             )?;
         }
         Commands::Definition { name } => {
-            query::definition::run(&name, format)?;
+            query::definition::run(&name, format, compact)?;
         }
         Commands::Callers { function } => {
-            query::callers::run(&function, format)?;
+            query::callers::run(&function, format, compact)?;
         }
         Commands::References {
             name,
             path,
             max_results,
         } => {
-            query::references::run(&name, path.as_deref(), max_results, format)?;
+            query::references::run(&name, path.as_deref(), max_results, format, compact)?;
         }
         Commands::Dependents { file } => {
-            query::dependents::run(&file, format)?;
+            query::dependents::run(&file, format, compact)?;
         }
         Commands::Index {
             path,

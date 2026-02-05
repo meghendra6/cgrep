@@ -37,7 +37,7 @@ cgrep dependents src/auth.rs
 
 ### Tips
 
-- Use `--format json` or `--format json2` for structured output.
+- Use `--format json --compact` or `--format json2 --compact` for structured output.
 - Use `-p` to scope search when running from subdirectories.
 - `--semantic` / `--hybrid` are optional and require embeddings + index.
 "#;

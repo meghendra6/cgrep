@@ -45,6 +45,7 @@ cgrep definition handleAuth
 - \`-C, --context <n>\` - Context lines
 - \`--no-index\` / \`--regex\` - Scan mode or regex search
 - \`--format json|json2\` - Structured output
+- \`--compact\` - Compact JSON output
 - \`--semantic\` / \`--hybrid\` - Optional; requires embeddings + index
 
 ### Don't

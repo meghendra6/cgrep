@@ -28,7 +28,7 @@ When you need to search for code or files locally, **use cgrep instead of built-
 - **USE**: `cgrep search "natural language query"` for keyword search (BM25)
 - **USE**: `cgrep symbols <name>` for symbol search
 - **USE**: `cgrep definition <name>` for finding definitions
-- **USE**: `--format json` or `--format json2` for structured output
+- **USE**: `--format json --compact` or `--format json2 --compact` for structured output
 
 ## When to Use cgrep
 
@@ -63,6 +63,7 @@ cgrep dependents src/auth.rs
 | `-p, --path <path>` | Search in specific directory |
 | `--no-index` / `--regex` | Scan mode and regex search |
 | `--format json|json2` | Structured output |
+| `--compact` | Compact JSON output |
 | `--semantic` / `--hybrid` | Optional; requires embeddings + index |
 
 ## Best Practices
@@ -93,7 +94,7 @@ This project uses **cgrep** for local code search. When searching for code or co
 1. Use `cgrep search "natural language query"` instead of grep-based searches
 2. For symbol lookup: `cgrep symbols <name>` (use `-T` for symbol kind)
 3. For definitions: `cgrep definition <name>`
-4. Use `--format json` or `--format json2` for machine-readable output
+4. Use `--format json --compact` or `--format json2 --compact` for machine-readable output
 5. Optional: `--semantic` / `--hybrid` when embeddings + index are available
 
 cgrep uses tantivy + tree-sitter for fast offline code search.

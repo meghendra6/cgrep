@@ -162,22 +162,22 @@ Watch:
 
 ## Output formats
 
-Global flag:
+Global flags:
 ```
 --format text|json|json2
+--compact
 ```
 
 - `text`: human-readable output
 - `json`: array of results
 - `json2`: currently identical to `json` (reserved for structured output)
+- `--compact`: compact JSON output (no pretty formatting)
 
 Search result JSON fields:
 ```
-path, score, snippet, line, context_before, context_after
-text_score, vector_score, hybrid_score, result_id, chunk_start, chunk_end
+path, snippet, line
+context_before, context_after
 ```
-Optional fields appear only in hybrid/semantic mode.
-For symbol results, `result_id` is the symbol ID and `chunk_start`/`chunk_end` are the symbol start/end line numbers.
 
 ## Embeddings (optional)
 
@@ -327,7 +327,7 @@ What gets updated:
 - OpenCode: `~/.config/opencode/tool/cgrep.ts` (you may need to add it to OpenCode config)
 
 Agent usage tips:
-- Use `--format json` or `--format json2` for structured output.
+- Use `--format json --compact` or `--format json2 --compact` for structured output.
 - Add `-C` for context lines.
 - For hybrid/semantic sessions, enable caching with `--agent-cache` and adjust `--cache-ttl`.
 
