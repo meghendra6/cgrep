@@ -47,6 +47,7 @@ cgrep dependents src/auth.rs
 - `cgrep symbols`, `definition`, `callers`, `references` when you know the symbol name.
 - `cgrep dependents` to find files importing a given file.
 - `cgrep watch` to keep the index fresh while you code.
+- `--semantic` or `--hybrid` when embeddings are configured and you want semantic ranking.
 
 ## Commands
 
@@ -68,9 +69,9 @@ cgrep dependents src/auth.rs
 
 `cgrep search` supports three modes:
 
-- `keyword` (default): BM25 only
-- `semantic`: embeddings only (experimental)
-- `hybrid`: BM25 + embeddings (experimental)
+- `keyword` (default): BM25. Uses the index when available and falls back to scan mode.
+- `semantic`: embeddings-based ranking (experimental; requires an index).
+- `hybrid`: BM25 + embeddings (experimental; requires an index).
 
 Examples:
 ```bash
@@ -84,10 +85,9 @@ cgrep search "token refresh" --semantic
 cgrep search "token refresh" --hybrid
 ```
 
-Important notes:
-- Hybrid/semantic require a BM25 index. If the index is missing, cgrep returns
-  an error (no scan fallback for these modes).
-- If no embedding database exists, cgrep prints a warning and falls back to BM25.
+Notes:
+- Hybrid/semantic require a BM25 index; there is no scan fallback.
+- If the embedding database or provider is unavailable, hybrid/semantic return BM25-only results with a warning.
 
 ## Search flags
 
@@ -103,6 +103,14 @@ Common flags:
 -f, --fuzzy              Fuzzy BM25 matching (index mode only)
 ```
 
+Mode selection:
+```
+    --mode <mode>        keyword|semantic|hybrid
+    --keyword            Alias for --mode keyword
+    --semantic           Alias for --mode semantic
+    --hybrid             Alias for --mode hybrid
+```
+
 Scan mode:
 ```
     --no-index           Force scan mode (no index)
@@ -111,7 +119,7 @@ Scan mode:
 ```
 Note: In keyword mode, if no index exists, cgrep falls back to scan mode.
 
-Agent/experimental:
+Agent/cache:
 ```
     --agent-cache        Cache hybrid/semantic results
     --cache-ttl <ms>     Cache TTL in milliseconds (default: 600000)
@@ -128,6 +136,7 @@ Symbols:
 -t, --file-type <type>   File type filter
 -g, --glob <pattern>     Glob filter
     --exclude <pattern>  Exclude pattern
+-q, --quiet              Suppress statistics output
 ```
 
 References:
@@ -140,7 +149,7 @@ Index:
 ```
 -p, --path <path>        Path to index
 -f, --force              Force full reindex
- -e, --exclude <pattern>  Exclude path/pattern (repeatable)
+-e, --exclude <pattern>  Exclude path/pattern (repeatable)
     --high-memory        Use a 1GiB writer budget for faster indexing
     --embeddings <mode>  auto|precompute|off (default: off)
     --embeddings-force   Force regenerate embeddings
@@ -170,21 +179,15 @@ text_score, vector_score, hybrid_score, result_id, chunk_start, chunk_end
 Optional fields appear only in hybrid/semantic mode.
 For symbol results, `result_id` is the symbol ID and `chunk_start`/`chunk_end` are the symbol start/end line numbers.
 
-## Embeddings
+## Embeddings (optional)
 
-The repository includes:
-- Symbol-level embedding generation (AST symbols)
-- SQLite storage at `.cgrep/embeddings.sqlite`
-- Provider interface for generating embeddings
+Embeddings are only used for semantic/hybrid search. By default, `cgrep index`
+runs with embeddings disabled (`--embeddings off`).
 
-### Generating embeddings during indexing
-
-By default, `cgrep index` runs with embeddings disabled (`--embeddings off`).
-
-- `cgrep index --embeddings precompute`: generate embeddings for all indexed files (fails if the embedding provider is unavailable).
-- `cgrep index --embeddings auto`: best-effort (if the provider is unavailable, indexing continues without embeddings).
-- `cgrep index --embeddings off`: disable embedding generation.
-- `cgrep index --embeddings-force`: clear and regenerate all embeddings (useful when changing the embedding model/provider).
+Enable during indexing:
+- `cgrep index --embeddings auto`: best-effort (continues without embeddings if the provider is unavailable).
+- `cgrep index --embeddings precompute`: generate embeddings for all indexed files (fails if the provider is unavailable).
+- `cgrep index --embeddings-force`: clear and regenerate embeddings (useful when changing the model/provider).
 
 Embeddings are stored at `.cgrep/embeddings.sqlite` under the indexed root.
 
@@ -208,7 +211,6 @@ symbol_max_chars = 1200
 ```
 
 `provider = "dummy"` is intended for tests/dev only (returns zero vectors).
-
 `chunk_lines` and `chunk_overlap` are deprecated and ignored (embeddings are symbol-level).
 
 For the builtin provider, you can tune FastEmbed via environment variables:
@@ -221,19 +223,22 @@ FASTEMBED_NORMALIZE=true
 
 ### Using embeddings in search
 
-If `.cgrep/embeddings.sqlite` exists, `cgrep search --semantic/--hybrid` will use it for embedding-based reranking.
-Query embeddings are generated using the configured embedding provider.
-If the embedding DB or provider is unavailable, it falls back to BM25-only search.
+If `.cgrep/embeddings.sqlite` exists, `cgrep search --semantic/--hybrid` uses it
+for embedding-based scoring. Query embeddings are generated using the
+configured provider. If the DB or provider is unavailable, it falls back to
+BM25-only results with a warning.
 
 ## Indexing behavior
 
 - Index is stored under `.cgrep/`.
 - Search looks for the nearest parent `.cgrep` directory and uses that index
   when you run it from a subdirectory (it prints a notice when this happens).
+- Results are scoped to the current directory by default; use `-p` to change the scope.
 - Incremental indexing uses BLAKE3 hashes to skip unchanged files.
 - Binary files are skipped.
 - Large files are chunked (~1MB per document) to limit memory use.
-- `.gitignore` is respected.
+- Indexing does not respect `.gitignore`; use `--exclude` or `[index].exclude_paths`
+  to skip paths. Scan mode respects `.gitignore`.
 - `cgrep watch` debounces file events (default: 2s) and rate-limits reindexing
   (minimum 5s between reindexes).
 - `cgrep symbols` uses the index (when available) to narrow candidate files,
@@ -254,6 +259,7 @@ exclude_patterns = ["target/**", "node_modules/**"]
 exclude_paths = ["vendor/", "dist/"]
 
 [embeddings]
+enabled = "auto" # off|auto|on
 provider = "builtin"
 # provider = "command"
 # command = "embedder"
@@ -264,17 +270,18 @@ symbol_preview_lines = 12
 symbol_max_chars = 1200
 # symbol_kinds = ["function", "class", "method"]
 ```
-Note: `max_results` is read but the CLI always supplies a default value, so the
-config value currently has no effect unless the CLI defaults change.
-`[index].exclude_paths` is applied during indexing and is combined with any
-`cgrep index --exclude` flags (CLI flags take precedence by being applied first).
+Notes:
+- `max_results` is read but the CLI always supplies a default value, so the
+  config value has no effect unless the CLI defaults change.
+- `[index].exclude_paths` is applied during indexing and combined with
+  `cgrep index --exclude` (CLI flags are applied first).
 
-Parsed but not applied yet (reserved):
+Parsed but not applied yet:
 - `index.max_file_size`
-- `[search]` (mode, weights, candidate_k)
-- `[cache]` (enabled, ttl)
+- `[search]` (default_mode, weights, candidate_k)
+- `[cache]` (enabled, ttl_ms)
 - `[profile.*]` presets
-- `default_format` (only text/json supported in code path)
+- `default_format` (only text/json supported in parser)
 
 ## Supported languages
 
@@ -289,8 +296,7 @@ Files outside these extensions are ignored.
 
 ## Agent integrations
 
-These commands install local instruction files so your agent uses cgrep
-for code search:
+Install local instruction files so your agent uses cgrep for code search:
 ```
 cgrep install-claude-code
 cgrep install-codex
@@ -306,19 +312,29 @@ cgrep uninstall-copilot
 cgrep uninstall-opencode
 ```
 
+What gets updated:
+- Claude Code: `~/.claude/CLAUDE.md`
+- Codex: `~/.codex/AGENTS.md`
+- GitHub Copilot: `.github/instructions/cgrep.instructions.md` and optional append to `.github/copilot-instructions.md`
+- OpenCode: `~/.config/opencode/tool/cgrep.ts` (you may need to add it to OpenCode config)
+
+Agent usage tips:
+- Use `--format json` or `--format json2` for structured output.
+- Add `-C` for context lines.
+- For hybrid/semantic sessions, enable caching with `--agent-cache` and adjust `--cache-ttl`.
+
 ## Troubleshooting
 
-- Index not found:
-  - Run `cgrep index`
-- Hybrid/semantic search returns BM25-only results:
-  - Ensure `.cgrep/embeddings.sqlite` exists and contains embeddings
-- Symbols not found for a language:
-  - Only the AST-supported languages above provide symbol extraction
+- Index not found or hybrid/semantic error: run `cgrep index` (required for `--semantic/--hybrid`).
+- Results missing when running from a subdirectory: use `-p` to change the search scope.
+- Hybrid/semantic returns BM25-only results: ensure `.cgrep/embeddings.sqlite` exists and your embedding provider is configured.
+- Symbols not found for a language: only the AST-supported languages above provide symbol extraction.
 
 ## Known limitations
 
 - `--profile` and `--context-pack` are accepted by the CLI but not applied.
 - `--format json2` currently outputs the same structure as `json`.
+- `[search]`, `[cache]`, `[profile.*]`, `default_format`, and `index.max_file_size` are parsed but not applied yet.
 
 ## Development
 
