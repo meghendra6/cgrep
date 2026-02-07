@@ -72,9 +72,9 @@ pub struct SearchResult {
 #[derive(Debug, Serialize)]
 struct SearchResultJson<'a> {
     path: &'a str,
-    snippet: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     line: Option<usize>,
+    snippet: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     context_before: Option<&'a [String]>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -85,8 +85,8 @@ impl<'a> SearchResultJson<'a> {
     fn from_result(result: &'a SearchResult) -> Self {
         Self {
             path: result.path.as_str(),
-            snippet: result.snippet.as_str(),
             line: result.line,
+            snippet: result.snippet.as_str(),
             context_before: if result.context_before.is_empty() {
                 None
             } else {
@@ -97,6 +97,25 @@ impl<'a> SearchResultJson<'a> {
             } else {
                 Some(result.context_after.as_slice())
             },
+        }
+    }
+}
+
+/// Ultra-minimal search result for compact JSON output (AI agent optimized)
+#[derive(Debug, Serialize)]
+struct SearchResultCompactJson<'a> {
+    path: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<usize>,
+    snippet: &'a str,
+}
+
+impl<'a> SearchResultCompactJson<'a> {
+    fn from_result(result: &'a SearchResult) -> Self {
+        Self {
+            path: result.path.as_str(),
+            line: result.line,
+            snippet: result.snippet.as_str(),
         }
     }
 }
@@ -253,12 +272,21 @@ pub fn run(
     // Output based on format
     match format {
         OutputFormat::Json | OutputFormat::Json2 => {
-            let json_results: Vec<SearchResultJson<'_>> = outcome
-                .results
-                .iter()
-                .map(SearchResultJson::from_result)
-                .collect();
-            print_json(&json_results, compact)?;
+            if compact {
+                let json_results: Vec<SearchResultCompactJson<'_>> = outcome
+                    .results
+                    .iter()
+                    .map(SearchResultCompactJson::from_result)
+                    .collect();
+                print_json(&json_results, compact)?;
+            } else {
+                let json_results: Vec<SearchResultJson<'_>> = outcome
+                    .results
+                    .iter()
+                    .map(SearchResultJson::from_result)
+                    .collect();
+                print_json(&json_results, compact)?;
+            }
         }
         OutputFormat::Text => {
             if outcome.results.is_empty() {
@@ -330,37 +358,13 @@ pub fn run(
                         .unwrap_or_default();
 
                     if use_color {
-                        match outcome.mode {
-                            IndexMode::Index => {
-                                println!(
-                                    "{}{}  {} (score: {:.2})",
-                                    colorize_path(&result.path, use_color),
-                                    line_info,
-                                    "➜".blue(),
-                                    result.score
-                                );
-                            }
-                            IndexMode::Scan => {
-                                println!(
-                                    "{}{}  {} (match)",
-                                    colorize_path(&result.path, use_color),
-                                    line_info,
-                                    "➜".blue()
-                                );
-                            }
-                        }
+                        println!(
+                            "{}{}",
+                            colorize_path(&result.path, use_color),
+                            line_info
+                        );
                     } else {
-                        match outcome.mode {
-                            IndexMode::Index => {
-                                println!(
-                                    "{}{}  (score: {:.2})",
-                                    result.path, line_info, result.score
-                                );
-                            }
-                            IndexMode::Scan => {
-                                println!("{}{}  (match)", result.path, line_info);
-                            }
-                        }
+                        println!("{}{}", result.path, line_info);
                     }
 
                     if has_context {
