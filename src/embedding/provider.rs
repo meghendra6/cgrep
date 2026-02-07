@@ -106,9 +106,13 @@ pub trait EmbeddingProvider: Send {
     /// Generates an embedding for a single text.
     fn embed_one(&mut self, text: &str) -> Result<Vec<f32>> {
         let mut result = self.embed_texts(&[text.to_string()])?;
-        result
-            .pop()
-            .ok_or_else(|| anyhow::anyhow!("No embedding returned"))
+        if result.len() != 1 {
+            bail!(
+                "Embedding provider returned {} vectors for single input",
+                result.len()
+            );
+        }
+        Ok(result.remove(0))
     }
 }
 
@@ -200,9 +204,7 @@ impl EmbeddingProvider for FastEmbedder {
     }
 
     fn embed_texts(&mut self, _texts: &[String]) -> Result<Vec<Vec<f32>>> {
-        bail!(
-            "FastEmbed backend is not available on target x86_64-apple-darwin."
-        )
+        bail!("FastEmbed backend is not available on target x86_64-apple-darwin.")
     }
 }
 
@@ -362,12 +364,10 @@ fn truncate_to_chars<'a>(input: &'a str, max_chars: usize) -> Cow<'a, str> {
         return Cow::Borrowed("");
     }
 
-    let mut count = 0;
-    for (idx, _) in input.char_indices() {
+    for (count, (idx, _)) in input.char_indices().enumerate() {
         if count == max_chars {
             return Cow::Owned(input[..idx].to_string());
         }
-        count += 1;
     }
 
     Cow::Borrowed(input)
@@ -442,6 +442,24 @@ fn parse_bool_env(name: &str, default: bool) -> Result<bool> {
 mod tests {
     use super::*;
 
+    struct FixedSizeProvider {
+        size: usize,
+    }
+
+    impl EmbeddingProvider for FixedSizeProvider {
+        fn model_id(&self) -> &str {
+            "fixed"
+        }
+
+        fn batch_size(&self) -> usize {
+            1
+        }
+
+        fn embed_texts(&mut self, _texts: &[String]) -> Result<Vec<Vec<f32>>> {
+            Ok((0..self.size).map(|_| vec![1.0, 2.0]).collect())
+        }
+    }
+
     #[test]
     fn test_dummy_provider() {
         let mut provider = DummyProvider::new(384);
@@ -470,6 +488,24 @@ mod tests {
     }
 
     #[test]
+    fn test_embed_one_rejects_missing_vector() {
+        let mut provider = FixedSizeProvider { size: 0 };
+        let err = provider.embed_one("test").expect_err("expected error");
+        assert!(err
+            .to_string()
+            .contains("Embedding provider returned 0 vectors"));
+    }
+
+    #[test]
+    fn test_embed_one_rejects_multiple_vectors() {
+        let mut provider = FixedSizeProvider { size: 2 };
+        let err = provider.embed_one("test").expect_err("expected error");
+        assert!(err
+            .to_string()
+            .contains("Embedding provider returned 2 vectors"));
+    }
+
+    #[test]
     fn test_truncate_to_chars() {
         let input = "hello";
         assert_eq!(
@@ -477,5 +513,14 @@ mod tests {
             Cow::<str>::Owned("he".to_string())
         );
         assert_eq!(truncate_to_chars(input, 5), Cow::Borrowed(input));
+    }
+
+    #[test]
+    fn test_truncate_to_chars_unicode_boundary() {
+        let input = "가나다라마바사";
+        assert_eq!(
+            truncate_to_chars(input, 3),
+            Cow::<str>::Owned("가나다".to_string())
+        );
     }
 }
