@@ -123,8 +123,8 @@ Agent/cache:
 ```
     --agent-cache        Cache hybrid/semantic results
     --cache-ttl <ms>     Cache TTL in milliseconds (default: 600000)
-    --context-pack <n>   Accepted but not implemented yet
-    --profile <name>     Accepted but not implemented yet
+    --context-pack <n>   Merge overlapping/adjacent context windows
+    --profile <name>     Apply preset profile (human, agent, fast)
 ```
 
 ## Command-specific flags
@@ -170,7 +170,7 @@ Global flags:
 
 - `text`: human-readable output
 - `json`: array of results
-- `json2`: currently identical to `json` (reserved for structured output)
+- `json2`: structured object (`meta` + `results`) for AI agent workflows
 - `--compact`: compact JSON output (no pretty formatting)
 
 Search result JSON fields:
@@ -279,17 +279,15 @@ symbol_max_chars = 1200
 # symbol_kinds = ["function", "class", "method"]
 ```
 Notes:
-- `max_results` is read but the CLI always supplies a default value, so the
-  config value has no effect unless the CLI defaults change.
+- `max_results` is used as the default for search when `-m/--max-results` is not provided.
 - `[index].exclude_paths` is applied during indexing and combined with
   `cgrep index --exclude` (CLI flags are applied first).
 
-Parsed but not applied yet:
+Parsed but only partially applied:
 - `index.max_file_size`
-- `[search]` (default_mode, weights, candidate_k)
-- `[cache]` (enabled, ttl_ms)
-- `[profile.*]` presets
-- `default_format` (only text/json supported in parser)
+- `[search]` hybrid weights/candidate settings (default_mode is applied)
+- `[cache]` `enabled` (ttl_ms is used as default when `--cache-ttl` is omitted)
+- `[profile.*]` advanced settings outside search
 
 ## Supported languages
 
@@ -340,9 +338,9 @@ Agent usage tips:
 
 ## Known limitations
 
-- `--profile` and `--context-pack` are accepted by the CLI but not applied.
-- `--format json2` currently outputs the same structure as `json`.
-- `[search]`, `[cache]`, `[profile.*]`, `default_format`, and `index.max_file_size` are parsed but not applied yet.
+- `json2` schema currently focuses on `search`; other commands still use simpler JSON payloads.
+- `[search]` weight/candidate tuning and `index.max_file_size` are not wired yet.
+- `[cache].enabled` and non-search profile behaviors are not fully wired yet.
 
 ## Development
 
