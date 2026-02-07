@@ -279,8 +279,7 @@ symbol_max_chars = 1200
 # symbol_kinds = ["function", "class", "method"]
 ```
 Notes:
-- `max_results` is read but the CLI always supplies a default value, so the
-  config value has no effect unless the CLI defaults change.
+- `max_results` is used as the default for search when `-m/--max-results` is not provided.
 - `[index].exclude_paths` is applied during indexing and combined with
   `cgrep index --exclude` (CLI flags are applied first).
 
