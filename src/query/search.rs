@@ -453,6 +453,21 @@ fn get_context_lines(
     (before, after)
 }
 
+fn context_for_line(
+    file_path: &Path,
+    line_num: Option<usize>,
+    context: usize,
+) -> (Vec<String>, Vec<String>) {
+    if context == 0 {
+        return (vec![], vec![]);
+    }
+
+    match line_num {
+        Some(line) => get_context_lines(file_path, line, context),
+        None => (vec![], vec![]),
+    }
+}
+
 struct IndexCandidate {
     stored_path: String,
     full_path: PathBuf,
@@ -664,11 +679,8 @@ fn index_search(
     let mut results: Vec<SearchResult> = Vec::new();
 
     for candidate in candidates {
-        let (context_before, context_after) = if context > 0 && candidate.line.is_some() {
-            get_context_lines(&candidate.full_path, candidate.line.unwrap(), context)
-        } else {
-            (vec![], vec![])
-        };
+        let (context_before, context_after) =
+            context_for_line(&candidate.full_path, candidate.line, context);
 
         let display_path = candidate.display_path;
         files_with_matches.insert(display_path.clone());
@@ -1062,20 +1074,20 @@ fn hybrid_search(
                 eprintln!("Warning: No embedding storage found. Using BM25 only.");
                 bm25_results
                     .iter()
-                        .map(|r| HybridResult {
-                            path: r.path.clone(),
-                            score: r.score,
-                            text_score: r.score,
-                            vector_score: 0.0,
+                    .map(|r| HybridResult {
+                        path: r.path.clone(),
+                        score: r.score,
+                        text_score: r.score,
+                        vector_score: 0.0,
                         text_norm: r.score,
-                            vector_norm: 0.0,
-                            snippet: r.snippet.clone(),
-                            line: r.line,
-                            chunk_start: r.chunk_start,
-                            chunk_end: r.chunk_end,
-                            result_id: r.symbol_id.clone(),
-                        })
-                        .collect()
+                        vector_norm: 0.0,
+                        snippet: r.snippet.clone(),
+                        line: r.line,
+                        chunk_start: r.chunk_start,
+                        chunk_end: r.chunk_end,
+                        result_id: r.symbol_id.clone(),
+                    })
+                    .collect()
             }
         }
         HybridSearchMode::Keyword => {
@@ -1129,11 +1141,7 @@ fn hybrid_search(
         files_with_matches.insert(display_path.clone());
 
         // Get context lines if needed
-        let (context_before, context_after) = if context > 0 && hr.line.is_some() {
-            get_context_lines(&full_path, hr.line.unwrap(), context)
-        } else {
-            (vec![], vec![])
-        };
+        let (context_before, context_after) = context_for_line(&full_path, hr.line, context);
 
         results.push(SearchResult {
             path: display_path,
