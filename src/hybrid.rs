@@ -7,7 +7,7 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::embedding::EmbeddingStorage;
@@ -201,6 +201,23 @@ impl HybridSearcher {
         self.config.weight_text * text_norm + self.config.weight_vector * vector_norm
     }
 
+    fn load_symbol_embeddings(
+        storage: &EmbeddingStorage,
+        bm25_results: &[BM25Result],
+    ) -> HashMap<String, crate::embedding::SymbolEmbedding> {
+        let mut seen = HashSet::new();
+        let mut symbol_ids: Vec<String> = Vec::new();
+        for result in bm25_results {
+            if let Some(symbol_id) = result.symbol_id.as_ref() {
+                if seen.insert(symbol_id.clone()) {
+                    symbol_ids.push(symbol_id.clone());
+                }
+            }
+        }
+
+        storage.get_symbols_by_ids(&symbol_ids).unwrap_or_default()
+    }
+
     /// Perform hybrid search by reranking BM25 results with embeddings
     pub fn rerank_with_embeddings(
         &self,
@@ -214,6 +231,7 @@ impl HybridSearcher {
 
         // Normalize text scores
         let text_norms = Self::normalize_text_scores(&bm25_results);
+        let symbol_embeddings = Self::load_symbol_embeddings(storage, &bm25_results);
 
         // Build hybrid results with embedding lookup
         let mut hybrid_results: Vec<HybridResult> = Vec::with_capacity(bm25_results.len());
@@ -223,13 +241,12 @@ impl HybridSearcher {
 
             // Look up embedding for this symbol
             let (vector_score, vector_norm) = if let Some(ref symbol_id) = bm25.symbol_id {
-                match storage.get_symbol(symbol_id) {
-                    Ok(Some(symbol)) => {
-                        let cos_sim = Self::cosine_similarity(query_embedding, &symbol.embedding);
-                        let norm = Self::normalize_vector_score(cos_sim);
-                        (cos_sim, norm)
-                    }
-                    _ => (0.0, 0.5),
+                if let Some(symbol) = symbol_embeddings.get(symbol_id) {
+                    let cos_sim = Self::cosine_similarity(query_embedding, &symbol.embedding);
+                    let norm = Self::normalize_vector_score(cos_sim);
+                    (cos_sim, norm)
+                } else {
+                    (0.0, 0.5)
                 }
             } else {
                 (0.0, 0.5)
@@ -283,17 +300,17 @@ impl HybridSearcher {
         query_embedding: &[f32],
         storage: &EmbeddingStorage,
     ) -> Result<Vec<HybridResult>> {
+        let symbol_embeddings = Self::load_symbol_embeddings(storage, &bm25_results);
         let mut results = Vec::with_capacity(bm25_results.len());
 
         for bm25 in bm25_results {
             let (vector_score, vector_norm) = if let Some(ref symbol_id) = bm25.symbol_id {
-                match storage.get_symbol(symbol_id) {
-                    Ok(Some(symbol)) => {
-                        let cos_sim = Self::cosine_similarity(query_embedding, &symbol.embedding);
-                        let norm = Self::normalize_vector_score(cos_sim);
-                        (cos_sim, norm)
-                    }
-                    _ => (0.0, 0.5),
+                if let Some(symbol) = symbol_embeddings.get(symbol_id) {
+                    let cos_sim = Self::cosine_similarity(query_embedding, &symbol.embedding);
+                    let norm = Self::normalize_vector_score(cos_sim);
+                    (cos_sim, norm)
+                } else {
+                    (0.0, 0.5)
                 }
             } else {
                 (0.0, 0.5)
@@ -313,6 +330,20 @@ impl HybridSearcher {
                 result_id: bm25.symbol_id,
             });
         }
+
+        // Rank by semantic similarity (descending)
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    b.vector_norm
+                        .partial_cmp(&a.vector_norm)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then_with(|| a.path.cmp(&b.path))
+        });
+        results.truncate(self.config.max_results);
 
         Ok(results)
     }
@@ -452,6 +483,8 @@ impl ContextPackBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::embedding::SymbolEmbeddingInput;
+    use tempfile::tempdir;
 
     #[test]
     fn test_search_mode_parsing() {
@@ -538,5 +571,70 @@ mod tests {
 
         let c = vec![0.0, 1.0, 0.0];
         assert!(HybridSearcher::cosine_similarity(&a, &c).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_semantic_search_sorts_by_vector_score() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("embeddings.sqlite");
+        let mut storage = EmbeddingStorage::open(&db_path).expect("open storage");
+
+        let embedding_a = vec![1.0, 0.0, 0.0];
+        let embedding_b = vec![0.0, 1.0, 0.0];
+        let input_a = SymbolEmbeddingInput {
+            symbol_id: "sym_a",
+            lang: "rust",
+            symbol_kind: "function",
+            symbol_name: "alpha",
+            start_line: 10,
+            end_line: 12,
+            content_hash: "h1",
+            embedding: &embedding_a,
+        };
+        let input_b = SymbolEmbeddingInput {
+            symbol_id: "sym_b",
+            lang: "rust",
+            symbol_kind: "function",
+            symbol_name: "beta",
+            start_line: 20,
+            end_line: 22,
+            content_hash: "h2",
+            embedding: &embedding_b,
+        };
+        storage
+            .replace_file_symbols("src/lib.rs", "file_hash", 0, &[input_a, input_b])
+            .expect("insert symbols");
+
+        let bm25_results = vec![
+            BM25Result {
+                path: "src/lib.rs".into(),
+                score: 100.0,
+                snippet: "beta".into(),
+                line: Some(20),
+                chunk_start: Some(20),
+                chunk_end: Some(22),
+                symbol_id: Some("sym_b".into()),
+            },
+            BM25Result {
+                path: "src/lib.rs".into(),
+                score: 1.0,
+                snippet: "alpha".into(),
+                line: Some(10),
+                chunk_start: Some(10),
+                chunk_end: Some(12),
+                symbol_id: Some("sym_a".into()),
+            },
+        ];
+        let query_embedding = vec![1.0, 0.0, 0.0];
+        let searcher = HybridSearcher::new(HybridConfig::default().with_max_results(10));
+
+        let results = searcher
+            .semantic_search(bm25_results, &query_embedding, &storage)
+            .expect("semantic search");
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].result_id.as_deref(), Some("sym_a"));
+        assert_eq!(results[1].result_id.as_deref(), Some("sym_b"));
+        assert!(results[0].score >= results[1].score);
     }
 }

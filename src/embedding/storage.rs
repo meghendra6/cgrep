@@ -7,7 +7,8 @@
 //! hashes, and brute-force cosine similarity search.
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, ToSql};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Default embedding dimension for sentence-transformers/all-MiniLM-L6-v2.
@@ -468,6 +469,58 @@ impl EmbeddingStorage {
         Ok(symbol)
     }
 
+    /// Retrieves multiple symbol embeddings by ID in batched queries.
+    pub fn get_symbols_by_ids(&self, symbol_ids: &[String]) -> Result<HashMap<String, SymbolEmbedding>> {
+        if symbol_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let mut out: HashMap<String, SymbolEmbedding> = HashMap::with_capacity(symbol_ids.len());
+        let max_vars = 900usize;
+
+        for chunk in symbol_ids.chunks(max_vars) {
+            let placeholders = (1..=chunk.len())
+                .map(|idx| format!("?{}", idx))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let query = format!(
+                r#"
+                SELECT symbol_id, path, lang, symbol_kind, symbol_name, start_line, end_line,
+                       file_hash, content_hash, embedding, created_at
+                FROM symbol_embeddings
+                WHERE symbol_id IN ({})
+                "#,
+                placeholders
+            );
+
+            let mut stmt = self.conn.prepare(&query)?;
+            let params: Vec<&dyn ToSql> = chunk.iter().map(|id| id as &dyn ToSql).collect();
+            let rows = stmt.query_map(params_from_iter(params), |row| {
+                let embedding_blob: Vec<u8> = row.get(9)?;
+                Ok(SymbolEmbedding {
+                    symbol_id: row.get(0)?,
+                    path: row.get(1)?,
+                    lang: row.get(2)?,
+                    symbol_kind: row.get(3)?,
+                    symbol_name: row.get(4)?,
+                    start_line: row.get(5)?,
+                    end_line: row.get(6)?,
+                    file_hash: row.get(7)?,
+                    content_hash: row.get(8)?,
+                    embedding: Self::blob_to_embedding(&embedding_blob),
+                    created_at: row.get(10)?,
+                })
+            })?;
+
+            for row in rows {
+                let symbol = row?;
+                out.insert(symbol.symbol_id.clone(), symbol);
+            }
+        }
+
+        Ok(out)
+    }
+
     /// Deletes all symbol embeddings for a given file path.
     pub fn delete_file_symbols(&self, path: &str) -> Result<usize> {
         let deleted = self
@@ -731,6 +784,51 @@ mod tests {
         assert_eq!(symbol.start_line, 1);
         assert_eq!(symbol.end_line, 3);
         assert_eq!(symbol.embedding.len(), 384);
+    }
+
+    #[test]
+    fn test_get_symbols_by_ids() {
+        let dir = tempdir().unwrap();
+        let mut storage = EmbeddingStorage::open(dir.path().join("test.sqlite")).unwrap();
+
+        let emb_a = create_test_embedding(4, 0.1);
+        let emb_b = create_test_embedding(4, 0.2);
+        let input_a = SymbolEmbeddingInput {
+            symbol_id: "sym_a",
+            lang: "rust",
+            symbol_kind: "function",
+            symbol_name: "alpha",
+            start_line: 1,
+            end_line: 3,
+            content_hash: "h1",
+            embedding: &emb_a,
+        };
+        let input_b = SymbolEmbeddingInput {
+            symbol_id: "sym_b",
+            lang: "rust",
+            symbol_kind: "function",
+            symbol_name: "beta",
+            start_line: 10,
+            end_line: 12,
+            content_hash: "h2",
+            embedding: &emb_b,
+        };
+
+        storage
+            .replace_file_symbols("src/lib.rs", "hash", 1000, &[input_a, input_b])
+            .unwrap();
+
+        let ids = vec![
+            "sym_a".to_string(),
+            "sym_missing".to_string(),
+            "sym_b".to_string(),
+        ];
+        let symbols = storage.get_symbols_by_ids(&ids).unwrap();
+
+        assert_eq!(symbols.len(), 2);
+        assert!(symbols.contains_key("sym_a"));
+        assert!(symbols.contains_key("sym_b"));
+        assert!(!symbols.contains_key("sym_missing"));
     }
 
     #[test]
