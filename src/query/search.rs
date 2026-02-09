@@ -973,50 +973,57 @@ fn index_fingerprint(index_root: &Path) -> Option<String> {
     Some(blake3::hash(&bytes).to_hex()[..16].to_string())
 }
 
-/// Get context lines around a match
-fn get_context_lines(
-    file_path: &std::path::Path,
-    line_num: usize,
-    context: usize,
-) -> (Vec<String>, Vec<String>) {
-    let Ok(file) = fs::File::open(file_path) else {
-        return (vec![], vec![]);
-    };
-
-    let reader = BufReader::new(file);
-    let lines: Vec<String> = reader.lines().map_while(|line| line.ok()).collect();
-
-    let start = line_num.saturating_sub(context + 1);
-    let end = (line_num + context).min(lines.len());
-
-    let before: Vec<String> = if line_num > 1 {
-        lines[start..line_num.saturating_sub(1)].to_vec()
-    } else {
-        vec![]
-    };
-
-    let after: Vec<String> = if line_num < lines.len() {
-        lines[line_num..end].to_vec()
-    } else {
-        vec![]
-    };
-
-    (before, after)
-}
-
-fn context_for_line(
+fn context_for_line_cached(
     file_path: &Path,
     line_num: Option<usize>,
     context: usize,
+    cache: &mut HashMap<PathBuf, Vec<String>>,
 ) -> (Vec<String>, Vec<String>) {
     if context == 0 {
         return (vec![], vec![]);
     }
 
-    match line_num {
-        Some(line) => get_context_lines(file_path, line, context),
-        None => (vec![], vec![]),
+    let Some(line) = line_num else {
+        return (vec![], vec![]);
+    };
+
+    let lines = cache
+        .entry(file_path.to_path_buf())
+        .or_insert_with(|| read_file_lines(file_path).unwrap_or_default());
+    get_context_from_string_lines(lines, line, context)
+}
+
+fn read_file_lines(file_path: &Path) -> Option<Vec<String>> {
+    let file = fs::File::open(file_path).ok()?;
+    let reader = BufReader::new(file);
+    Some(reader.lines().map_while(|line| line.ok()).collect())
+}
+
+fn get_context_from_string_lines(
+    lines: &[String],
+    line_num: usize,
+    context: usize,
+) -> (Vec<String>, Vec<String>) {
+    if lines.is_empty() || context == 0 {
+        return (vec![], vec![]);
     }
+
+    let idx = line_num.saturating_sub(1);
+    let start = idx.saturating_sub(context);
+    let end = (idx + context + 1).min(lines.len());
+
+    let before = if idx > start {
+        lines[start..idx].to_vec()
+    } else {
+        vec![]
+    };
+    let after = if idx + 1 < end {
+        lines[idx + 1..end].to_vec()
+    } else {
+        vec![]
+    };
+
+    (before, after)
 }
 
 struct IndexCandidate {
@@ -1099,8 +1106,12 @@ fn collect_index_candidates(
 
         Box::new(BooleanQuery::new(fuzzy_queries))
     } else {
-        let query_parser = QueryParser::for_index(&index, vec![content_field, symbols_field]);
-        Box::new(query_parser.parse_query(query)?)
+        let mut query_parser =
+            QueryParser::for_index(&index, vec![content_field, symbols_field, path_field]);
+        query_parser.set_field_boost(symbols_field, 2.5);
+        query_parser.set_field_boost(path_field, 0.3);
+        let (parsed_query, _errors) = query_parser.parse_query_lenient(query);
+        parsed_query
     };
 
     let doc_type_term = Term::from_field_text(doc_type_field, doc_type);
@@ -1344,6 +1355,119 @@ fn parse_index_mode(mode: &str) -> IndexMode {
     }
 }
 
+fn normalized_hybrid_weights(weight_text: f32, weight_vector: f32) -> (f32, f32) {
+    let text = if weight_text.is_finite() {
+        weight_text.max(0.0)
+    } else {
+        0.0
+    };
+    let vector = if weight_vector.is_finite() {
+        weight_vector.max(0.0)
+    } else {
+        0.0
+    };
+    let total = text + vector;
+    if total <= f32::EPSILON {
+        return (0.7, 0.3);
+    }
+    (text / total, vector / total)
+}
+
+fn fallback_hybrid_results(bm25_results: &[BM25Result]) -> Vec<HybridResult> {
+    let max_text_score = bm25_results
+        .iter()
+        .map(|r| r.score)
+        .fold(f32::NEG_INFINITY, f32::max);
+
+    bm25_results
+        .iter()
+        .map(|r| {
+            let text_norm = if max_text_score > 0.0 {
+                r.score / max_text_score
+            } else {
+                0.0
+            };
+            HybridResult {
+                path: r.path.clone(),
+                score: text_norm,
+                text_score: r.score,
+                vector_score: 0.0,
+                text_norm,
+                vector_norm: 0.0,
+                snippet: r.snippet.clone(),
+                line: r.line,
+                chunk_start: r.chunk_start,
+                chunk_end: r.chunk_end,
+                result_id: r.symbol_id.clone(),
+            }
+        })
+        .collect()
+}
+
+fn semantic_backfill_results(
+    storage: &EmbeddingStorage,
+    query_embedding: &[f32],
+    top_k: usize,
+) -> Vec<HybridResult> {
+    if top_k == 0 {
+        return Vec::new();
+    }
+
+    storage
+        .search_similar(query_embedding, top_k)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|result| {
+            let vector_score = result.score;
+            let vector_norm = (vector_score + 1.0) / 2.0;
+            HybridResult {
+                path: result.symbol.path,
+                score: vector_norm,
+                text_score: 0.0,
+                vector_score,
+                text_norm: 0.0,
+                vector_norm,
+                snippet: format!("{} {}", result.symbol.symbol_name, result.symbol.symbol_kind),
+                line: Some(result.symbol.start_line as usize),
+                chunk_start: Some(result.symbol.start_line),
+                chunk_end: Some(result.symbol.end_line),
+                result_id: Some(result.symbol.symbol_id),
+            }
+        })
+        .collect()
+}
+
+fn hybrid_result_key(result: &HybridResult) -> String {
+    result.result_id.clone().unwrap_or_else(|| {
+        format!(
+            "{}:{}:{}",
+            result.path,
+            result.line.unwrap_or(0),
+            result.snippet
+        )
+    })
+}
+
+fn sort_hybrid_results(results: &mut [HybridResult]) {
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                b.vector_norm
+                    .partial_cmp(&a.vector_norm)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| {
+                b.text_norm
+                    .partial_cmp(&a.text_norm)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| a.path.cmp(&b.path))
+            .then_with(|| a.line.cmp(&b.line))
+    });
+}
+
 #[allow(clippy::too_many_arguments)]
 fn index_search(
     query: &str,
@@ -1374,10 +1498,15 @@ fn index_search(
 
     let mut files_with_matches: HashSet<String> = HashSet::new();
     let mut results: Vec<SearchResult> = Vec::new();
+    let mut context_cache: HashMap<PathBuf, Vec<String>> = HashMap::new();
 
     for candidate in candidates {
-        let (context_before, context_after) =
-            context_for_line(&candidate.full_path, candidate.line, context);
+        let (context_before, context_after) = context_for_line_cached(
+            &candidate.full_path,
+            candidate.line,
+            context,
+            &mut context_cache,
+        );
 
         let display_path = candidate.display_path;
         files_with_matches.insert(display_path.clone());
@@ -1595,11 +1724,22 @@ fn hybrid_search(
     let changed_component = changed_filter
         .map(|f| format!("{}:{}", f.rev(), f.signature()))
         .filter(|s| !s.is_empty());
+    let candidate_k = config.search().candidate_k().max(max_results).max(1);
+    let (weight_text, weight_vector) = normalized_hybrid_weights(
+        config.search().weight_text(),
+        config.search().weight_vector(),
+    );
+    let weight_text_milli = (weight_text * 1000.0).round() as i32;
+    let weight_vector_milli = (weight_vector * 1000.0).round() as i32;
+    let cache_mode = format!(
+        "{}:k{}:wt{}:wv{}",
+        mode, candidate_k, weight_text_milli, weight_vector_milli
+    );
 
     // Build cache key
     let cache_key = CacheKey {
         query: normalize_query(query, true, true),
-        mode: mode.to_string(),
+        mode: cache_mode,
         max_results,
         context,
         file_type: file_type.map(str::to_string),
@@ -1694,7 +1834,7 @@ fn hybrid_search(
         query,
         index_root,
         search_root,
-        max_results * 3, // Get more for reranking
+        candidate_k,
         "symbol",
         file_type,
         compiled_glob,
@@ -1723,7 +1863,9 @@ fn hybrid_search(
         .collect();
 
     // Create hybrid searcher
-    let hybrid_config = HybridConfig::default().with_max_results(max_results);
+    let hybrid_config = HybridConfig::new(weight_text, weight_vector)
+        .with_candidate_k(candidate_k)
+        .with_max_results(candidate_k);
     let hybrid_searcher = HybridSearcher::new(hybrid_config);
 
     // Perform hybrid search based on mode
@@ -1760,78 +1902,61 @@ fn hybrid_search(
 
                 if let Some(query_embedding) = query_embedding {
                     match mode {
-                        HybridSearchMode::Semantic => hybrid_searcher
-                            .semantic_search(bm25_results, &query_embedding, storage)
-                            .unwrap_or_default(),
+                        HybridSearchMode::Semantic => {
+                            let mut semantic_results = hybrid_searcher
+                                .semantic_search(bm25_results.clone(), &query_embedding, storage)
+                                .unwrap_or_default();
+
+                            if semantic_results.len() < max_results {
+                                let mut seen: HashSet<String> =
+                                    semantic_results.iter().map(hybrid_result_key).collect();
+                                for extra in
+                                    semantic_backfill_results(storage, &query_embedding, candidate_k)
+                                {
+                                    let key = hybrid_result_key(&extra);
+                                    if seen.insert(key) {
+                                        semantic_results.push(extra);
+                                    }
+                                    if semantic_results.len() >= candidate_k {
+                                        break;
+                                    }
+                                }
+                                sort_hybrid_results(&mut semantic_results);
+                                semantic_results.truncate(candidate_k);
+                            }
+
+                            semantic_results
+                        }
                         HybridSearchMode::Hybrid => hybrid_searcher
                             .rerank_with_embeddings(bm25_results, &query_embedding, storage)
                             .unwrap_or_default(),
                         HybridSearchMode::Keyword => Vec::new(),
                     }
                 } else {
-                    bm25_results
-                        .iter()
-                        .map(|r| HybridResult {
-                            path: r.path.clone(),
-                            score: r.score,
-                            text_score: r.score,
-                            vector_score: 0.0,
-                            text_norm: r.score,
-                            vector_norm: 0.0,
-                            snippet: r.snippet.clone(),
-                            line: r.line,
-                            chunk_start: r.chunk_start,
-                            chunk_end: r.chunk_end,
-                            result_id: r.symbol_id.clone(),
-                        })
-                        .collect()
+                    fallback_hybrid_results(&bm25_results)
                 }
             } else {
                 eprintln!("Warning: No embedding storage found. Using BM25 only.");
-                bm25_results
-                    .iter()
-                    .map(|r| HybridResult {
-                        path: r.path.clone(),
-                        score: r.score,
-                        text_score: r.score,
-                        vector_score: 0.0,
-                        text_norm: r.score,
-                        vector_norm: 0.0,
-                        snippet: r.snippet.clone(),
-                        line: r.line,
-                        chunk_start: r.chunk_start,
-                        chunk_end: r.chunk_end,
-                        result_id: r.symbol_id.clone(),
-                    })
-                    .collect()
+                fallback_hybrid_results(&bm25_results)
             }
         }
         HybridSearchMode::Keyword => {
             // Should not reach here
-            bm25_results
-                .iter()
-                .map(|r| HybridResult {
-                    path: r.path.clone(),
-                    score: r.score,
-                    text_score: r.score,
-                    vector_score: 0.0,
-                    text_norm: r.score,
-                    vector_norm: 0.0,
-                    snippet: r.snippet.clone(),
-                    line: r.line,
-                    chunk_start: r.chunk_start,
-                    chunk_end: r.chunk_end,
-                    result_id: r.symbol_id.clone(),
-                })
-                .collect()
+            fallback_hybrid_results(&bm25_results)
         }
     };
 
     // Convert to SearchResult with context
     let mut results: Vec<SearchResult> = Vec::with_capacity(max_results.min(hybrid_results.len()));
+    let mut filtered_hybrid_results: Vec<HybridResult> = Vec::with_capacity(max_results);
     let mut files_with_matches: HashSet<String> = HashSet::new();
+    let mut context_cache: HashMap<PathBuf, Vec<String>> = HashMap::new();
 
-    for hr in hybrid_results.iter().take(max_results) {
+    for hr in hybrid_results.iter() {
+        if results.len() >= max_results {
+            break;
+        }
+
         let full_path = resolve_full_path(&hr.path, index_root);
         let Some(display_path) = scoped_display_path(&full_path, search_root) else {
             continue;
@@ -1855,9 +1980,11 @@ fn hybrid_search(
         }
 
         files_with_matches.insert(display_path.clone());
+        filtered_hybrid_results.push(hr.clone());
 
         // Get context lines if needed
-        let (context_before, context_after) = context_for_line(&full_path, hr.line, context);
+        let (context_before, context_after) =
+            context_for_line_cached(&full_path, hr.line, context, &mut context_cache);
 
         results.push(SearchResult {
             path: display_path,
@@ -1878,9 +2005,7 @@ fn hybrid_search(
     // Store in cache
     if use_cache {
         if let Ok(cache) = SearchCache::new(index_root, cache_ttl_ms) {
-            let to_cache: Vec<HybridResult> =
-                hybrid_results.into_iter().take(max_results).collect();
-            let _ = cache.put(&cache_key, to_cache);
+            let _ = cache.put(&cache_key, filtered_hybrid_results);
         }
     }
 
@@ -1960,33 +2085,59 @@ fn highlight_matches(text: &str, query: &str, use_color: bool) -> String {
 /// Find a relevant snippet containing the query terms, also returning line number
 fn find_snippet_with_line(content: &str, query: &str, max_len: usize) -> (String, Option<usize>) {
     let query_lower = query.to_lowercase();
-    let terms: Vec<&str> = query_lower.split_whitespace().collect();
+    let mut terms: Vec<&str> = query_lower.split_whitespace().collect();
+    terms.sort_unstable();
+    terms.dedup();
 
-    for (line_num, line) in content.lines().enumerate() {
-        let line_lower = line.to_lowercase();
-        if terms.iter().any(|term| line_lower.contains(term)) {
-            let trimmed = line.trim();
-            let snippet = if trimmed.len() <= max_len {
-                trimmed.to_string()
-            } else {
-                format!("{}...", &trimmed[..max_len])
-            };
-            return (snippet, Some(line_num + 1));
+    let mut best_match: Option<(usize, usize, usize, usize, String)> = None;
+    for (line_idx, line) in content.lines().enumerate() {
+        if terms.is_empty() {
+            break;
         }
+        let line_lower = line.to_lowercase();
+        let mut matched_terms = 0usize;
+        let mut hit_count = 0usize;
+        for term in &terms {
+            if line_lower.contains(term) {
+                matched_terms += 1;
+                hit_count += line_lower.match_indices(term).count();
+            }
+        }
+        if matched_terms == 0 {
+            continue;
+        }
+
+        let trimmed = line.trim();
+        let line_len = char_count(trimmed);
+        let line_num = line_idx + 1;
+        let should_replace = match best_match.as_ref() {
+            None => true,
+            Some((best_terms, best_hits, best_len, best_line, _)) => {
+                matched_terms > *best_terms
+                    || (matched_terms == *best_terms && hit_count > *best_hits)
+                    || (matched_terms == *best_terms
+                        && hit_count == *best_hits
+                        && line_len < *best_len)
+                    || (matched_terms == *best_terms
+                        && hit_count == *best_hits
+                        && line_len == *best_len
+                        && line_num < *best_line)
+            }
+        };
+        if should_replace {
+            best_match = Some((matched_terms, hit_count, line_len, line_num, trimmed.to_string()));
+        }
+    }
+
+    if let Some((_, _, _, line_num, line_text)) = best_match {
+        return (truncate_with_ellipsis(&line_text, max_len), Some(line_num));
     }
 
     // Return first non-empty line if no match
     let snippet = content
         .lines()
         .find(|l| !l.trim().is_empty())
-        .map(|l| {
-            let trimmed = l.trim();
-            if trimmed.len() <= max_len {
-                trimmed.to_string()
-            } else {
-                format!("{}...", &trimmed[..max_len])
-            }
-        })
+        .map(|l| truncate_with_ellipsis(l.trim(), max_len))
         .unwrap_or_default();
 
     (snippet, None)
@@ -2046,6 +2197,7 @@ mod tests {
     use super::*;
     use crate::indexer::index::DEFAULT_WRITER_BUDGET_BYTES;
     use crate::indexer::IndexBuilder;
+    use cgrep::embedding::SymbolEmbeddingInput;
     use tempfile::TempDir;
 
     #[test]
@@ -2100,6 +2252,21 @@ mod tests {
         assert_eq!(outcome.results[0].path, "numbers.txt");
         assert_eq!(outcome.results[0].line, Some(1));
         assert_eq!(outcome.results[1].line, Some(3));
+    }
+
+    #[test]
+    fn find_snippet_with_line_prefers_high_term_coverage() {
+        let content = "foo only\nfoo bar matched\nbar only\n";
+        let (snippet, line) = find_snippet_with_line(content, "foo bar", 120);
+        assert_eq!(line, Some(2));
+        assert_eq!(snippet, "foo bar matched");
+    }
+
+    #[test]
+    fn find_snippet_with_line_truncates_on_char_boundaries() {
+        let content = "한글테스트라인";
+        let (snippet, _) = find_snippet_with_line(content, "없음", 5);
+        assert_eq!(snippet.chars().count(), 5);
     }
 
     #[test]
@@ -2305,5 +2472,85 @@ mod tests {
 
         assert_eq!(results[1].context_before, vec!["unique-2"]);
         assert_eq!(results[1].context_after, vec!["tail"]);
+    }
+
+    #[test]
+    fn normalized_hybrid_weights_handle_invalid_inputs() {
+        let (wt, wv) = normalized_hybrid_weights(2.0, 1.0);
+        assert!((wt - (2.0 / 3.0)).abs() < 0.001);
+        assert!((wv - (1.0 / 3.0)).abs() < 0.001);
+
+        let (wt, wv) = normalized_hybrid_weights(-10.0, -5.0);
+        assert!((wt - 0.7).abs() < 0.001);
+        assert!((wv - 0.3).abs() < 0.001);
+    }
+
+    #[test]
+    fn fallback_hybrid_results_normalize_bm25_scores() {
+        let bm25 = vec![
+            BM25Result {
+                path: "a.rs".to_string(),
+                score: 10.0,
+                snippet: "a".to_string(),
+                line: Some(1),
+                chunk_start: Some(1),
+                chunk_end: Some(1),
+                symbol_id: Some("a".to_string()),
+            },
+            BM25Result {
+                path: "b.rs".to_string(),
+                score: 5.0,
+                snippet: "b".to_string(),
+                line: Some(2),
+                chunk_start: Some(2),
+                chunk_end: Some(2),
+                symbol_id: Some("b".to_string()),
+            },
+        ];
+
+        let results = fallback_hybrid_results(&bm25);
+        assert_eq!(results.len(), 2);
+        assert!((results[0].score - 1.0).abs() < 0.001);
+        assert!((results[1].score - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn semantic_backfill_results_uses_vector_similarity() {
+        let dir = TempDir::new().expect("tempdir");
+        let db_path = dir.path().join("embeddings.sqlite");
+        let mut storage = EmbeddingStorage::open(&db_path).expect("open storage");
+
+        let emb_a = vec![1.0, 0.0, 0.0];
+        let emb_b = vec![0.0, 1.0, 0.0];
+        let input_a = SymbolEmbeddingInput {
+            symbol_id: "sym_a",
+            lang: "rust",
+            symbol_kind: "function",
+            symbol_name: "alpha",
+            start_line: 5,
+            end_line: 8,
+            content_hash: "h1",
+            embedding: &emb_a,
+        };
+        let input_b = SymbolEmbeddingInput {
+            symbol_id: "sym_b",
+            lang: "rust",
+            symbol_kind: "function",
+            symbol_name: "beta",
+            start_line: 15,
+            end_line: 18,
+            content_hash: "h2",
+            embedding: &emb_b,
+        };
+
+        storage
+            .replace_file_symbols("src/lib.rs", "hash", 0, &[input_a, input_b])
+            .expect("insert");
+
+        let query_embedding = vec![1.0, 0.0, 0.0];
+        let backfill = semantic_backfill_results(&storage, &query_embedding, 2);
+        assert_eq!(backfill.len(), 2);
+        assert_eq!(backfill[0].result_id.as_deref(), Some("sym_a"));
+        assert!(backfill[0].score >= backfill[1].score);
     }
 }
