@@ -23,11 +23,12 @@ struct CallerResult {
 
 /// Run the callers command
 pub fn run(function: &str, format: OutputFormat, compact: bool) -> Result<()> {
-    let root = get_root_with_index(std::env::current_dir()?);
-    let files = match find_files_with_content(&root, function)? {
+    let search_root = std::env::current_dir()?.canonicalize()?;
+    let index_root = get_root_with_index(&search_root);
+    let files = match find_files_with_content(&index_root, function, Some(&search_root))? {
         Some(indexed_paths) => read_scanned_files(&indexed_paths),
         None => {
-            let scanner = FileScanner::new(&root);
+            let scanner = FileScanner::new(&search_root);
             scanner.scan()?
         }
     };
@@ -42,7 +43,7 @@ pub fn run(function: &str, format: OutputFormat, compact: bool) -> Result<()> {
     for file in &files {
         let rel_path = file
             .path
-            .strip_prefix(&root)
+            .strip_prefix(&search_root)
             .unwrap_or(&file.path)
             .display()
             .to_string();

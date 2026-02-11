@@ -32,19 +32,20 @@ pub fn run(
     format: OutputFormat,
     compact: bool,
 ) -> Result<()> {
-    let root = match path {
-        Some(p) => get_root_with_index(std::path::PathBuf::from(p).canonicalize()?),
-        None => get_root_with_index(std::env::current_dir()?),
+    let search_root = match path {
+        Some(p) => std::path::PathBuf::from(p).canonicalize()?,
+        None => std::env::current_dir()?.canonicalize()?,
     };
-    let files = match find_files_with_content(&root, name)? {
+    let index_root = get_root_with_index(&search_root);
+    let files = match find_files_with_content(&index_root, name, Some(&search_root))? {
         Some(indexed_paths) => read_scanned_files(&indexed_paths),
         None => {
-            let scanner = FileScanner::new(&root);
+            let scanner = FileScanner::new(&search_root);
             scanner.scan()?
         }
     };
     let changed_filter = changed
-        .map(|rev| ChangedFiles::from_scope(&root, rev))
+        .map(|rev| ChangedFiles::from_scope(&search_root, rev))
         .transpose()?;
 
     // Pattern to match symbol with word boundaries
@@ -56,7 +57,7 @@ pub fn run(
     for file in &files {
         let rel_path = file
             .path
-            .strip_prefix(&root)
+            .strip_prefix(&search_root)
             .unwrap_or(&file.path)
             .display()
             .to_string();

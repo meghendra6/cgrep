@@ -24,17 +24,18 @@ struct DependentResult {
 
 /// Run the dependents command
 pub fn run(file: &str, format: OutputFormat, compact: bool) -> Result<()> {
-    let root = get_root_with_index(std::env::current_dir()?);
+    let search_root = std::env::current_dir()?.canonicalize()?;
+    let index_root = get_root_with_index(&search_root);
     let target_path = Path::new(file);
     let target_stem = target_path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(file);
 
-    let files = match find_files_with_content(&root, target_stem)? {
+    let files = match find_files_with_content(&index_root, target_stem, Some(&search_root))? {
         Some(indexed_paths) => read_scanned_files(&indexed_paths),
         None => {
-            let scanner = FileScanner::new(&root);
+            let scanner = FileScanner::new(&search_root);
             scanner.scan()?
         }
     };
@@ -70,7 +71,7 @@ pub fn run(file: &str, format: OutputFormat, compact: bool) -> Result<()> {
     for scanned_file in &files {
         let rel_path = scanned_file
             .path
-            .strip_prefix(&root)
+            .strip_prefix(&search_root)
             .unwrap_or(&scanned_file.path);
 
         // Skip the target file itself

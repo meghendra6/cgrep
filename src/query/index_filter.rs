@@ -4,10 +4,11 @@
 
 use anyhow::{Context, Result};
 use std::collections::HashSet;
+use std::path::MAIN_SEPARATOR;
 use std::path::{Path, PathBuf};
 use tantivy::{
     collector::DocSetCollector,
-    query::{BooleanQuery, Occur, Query, TermQuery},
+    query::{BooleanQuery, Occur, PhraseQuery, Query, RegexQuery, TermQuery},
     schema::{Field, FieldType, IndexRecordOption, Term, Value},
     Index, ReloadPolicy, TantivyDocument,
 };
@@ -16,13 +17,28 @@ use crate::indexer::scanner::{detect_language, ScannedFile};
 use cgrep::utils::INDEX_DIR;
 
 /// Find files that likely contain a symbol name using the index.
-pub fn find_files_with_symbol(root: &Path, symbol_name: &str) -> Result<Option<Vec<PathBuf>>> {
-    find_files_with_field(root, "symbols", symbol_name)
+pub fn find_files_with_symbol(
+    root: &Path,
+    symbol_name: &str,
+    scope: Option<&Path>,
+) -> Result<Option<Vec<PathBuf>>> {
+    let phrase_paths =
+        find_files_with_field(root, "symbols", symbol_name, scope, MatchMode::Phrase)?;
+    if let Some(paths) = phrase_paths.as_ref() {
+        if !paths.is_empty() {
+            return Ok(phrase_paths);
+        }
+    }
+    find_files_with_field(root, "symbols", symbol_name, scope, MatchMode::AllTokens)
 }
 
 /// Find files that likely contain a text term using the index.
-pub fn find_files_with_content(root: &Path, term: &str) -> Result<Option<Vec<PathBuf>>> {
-    find_files_with_field(root, "content", term)
+pub fn find_files_with_content(
+    root: &Path,
+    term: &str,
+    scope: Option<&Path>,
+) -> Result<Option<Vec<PathBuf>>> {
+    find_files_with_field(root, "content", term, scope, MatchMode::AllTokens)
 }
 
 /// Read a list of files into scanned-file structs.
@@ -48,6 +64,8 @@ fn find_files_with_field(
     root: &Path,
     field_name: &str,
     term: &str,
+    scope: Option<&Path>,
+    match_mode: MatchMode,
 ) -> Result<Option<Vec<PathBuf>>> {
     let index_path = root.join(INDEX_DIR);
     if !index_path.exists() {
@@ -68,13 +86,29 @@ fn find_files_with_field(
         Ok(field) => field,
         Err(_) => return Ok(None),
     };
+    let path_exact_field = schema.get_field("path_exact").ok();
 
     let tokens = tokenize_for_field(&index, field, term)?;
     if tokens.is_empty() {
         return Ok(None);
     }
 
-    let query = build_or_query(field, &tokens);
+    let effective_scope = match normalize_scope(root, scope)? {
+        ScopeNormalization::None => None,
+        ScopeNormalization::Filter(path) => Some(path),
+        ScopeNormalization::OutsideRoot => return Ok(Some(Vec::new())),
+    };
+
+    let mut clauses: Vec<(Occur, Box<dyn Query>)> =
+        vec![(Occur::Must, build_token_query(field, &tokens, match_mode))];
+
+    if let (Some(scope_path), Some(path_exact)) = (effective_scope.as_ref(), path_exact_field) {
+        if let Some(query) = build_scope_path_query(path_exact, root, scope_path) {
+            clauses.push((Occur::Must, query));
+        }
+    }
+
+    let query = BooleanQuery::new(clauses);
     let reader = index
         .reader_builder()
         .reload_policy(ReloadPolicy::Manual)
@@ -88,7 +122,17 @@ fn find_files_with_field(
     for doc_address in docset {
         if let Ok(doc) = searcher.doc::<TantivyDocument>(doc_address) {
             if let Some(path_value) = doc.get_first(path_field).and_then(|v| v.as_str()) {
-                unique_paths.insert(root.join(path_value));
+                let full_path = if Path::new(path_value).is_absolute() {
+                    PathBuf::from(path_value)
+                } else {
+                    root.join(path_value)
+                };
+                if let Some(scope_path) = effective_scope.as_ref() {
+                    if !full_path.starts_with(scope_path) {
+                        continue;
+                    }
+                }
+                unique_paths.insert(full_path);
             }
         }
     }
@@ -98,17 +142,27 @@ fn find_files_with_field(
     Ok(Some(paths))
 }
 
-fn build_or_query(field: Field, tokens: &[String]) -> BooleanQuery {
-    let subqueries = tokens
-        .iter()
-        .map(|token| {
-            let term = Term::from_field_text(field, token);
-            let query = TermQuery::new(term, IndexRecordOption::Basic);
-            (Occur::Should, Box::new(query) as Box<dyn Query>)
-        })
-        .collect();
-
-    BooleanQuery::new(subqueries)
+fn build_token_query(field: Field, tokens: &[String], match_mode: MatchMode) -> Box<dyn Query> {
+    match match_mode {
+        MatchMode::Phrase if tokens.len() > 1 => {
+            let terms: Vec<Term> = tokens
+                .iter()
+                .map(|token| Term::from_field_text(field, token))
+                .collect();
+            Box::new(PhraseQuery::new(terms))
+        }
+        MatchMode::Phrase | MatchMode::AllTokens => {
+            let subqueries = tokens
+                .iter()
+                .map(|token| {
+                    let term = Term::from_field_text(field, token);
+                    let query = TermQuery::new(term, IndexRecordOption::Basic);
+                    (Occur::Must, Box::new(query) as Box<dyn Query>)
+                })
+                .collect();
+            Box::new(BooleanQuery::new(subqueries))
+        }
+    }
 }
 
 fn tokenize_for_field(index: &Index, field: Field, text: &str) -> Result<Vec<String>> {
@@ -137,4 +191,131 @@ fn tokenize_for_field(index: &Index, field: Field, text: &str) -> Result<Vec<Str
     tokens.sort();
     tokens.dedup();
     Ok(tokens)
+}
+
+enum ScopeNormalization {
+    None,
+    Filter(PathBuf),
+    OutsideRoot,
+}
+
+#[derive(Clone, Copy)]
+enum MatchMode {
+    AllTokens,
+    Phrase,
+}
+
+fn normalize_scope(root: &Path, scope: Option<&Path>) -> Result<ScopeNormalization> {
+    let Some(scope) = scope else {
+        return Ok(ScopeNormalization::None);
+    };
+
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let scope = scope.canonicalize().unwrap_or_else(|_| scope.to_path_buf());
+    if !scope.starts_with(&root) {
+        return Ok(ScopeNormalization::OutsideRoot);
+    }
+    if scope == root {
+        return Ok(ScopeNormalization::None);
+    }
+    Ok(ScopeNormalization::Filter(scope))
+}
+
+fn build_scope_path_query(
+    path_exact_field: Field,
+    root: &Path,
+    scope_path: &Path,
+) -> Option<Box<dyn Query>> {
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let scope_path = scope_path
+        .canonicalize()
+        .unwrap_or_else(|_| scope_path.to_path_buf());
+    let mut scope_queries: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+
+    if scope_path.is_file() {
+        let absolute = scope_path.to_string_lossy().to_string();
+        let term = Term::from_field_text(path_exact_field, &absolute);
+        scope_queries.push((
+            Occur::Should,
+            Box::new(TermQuery::new(term, IndexRecordOption::Basic)),
+        ));
+    } else {
+        let mut absolute_prefix = scope_path.to_string_lossy().to_string();
+        if !absolute_prefix.ends_with(MAIN_SEPARATOR) {
+            absolute_prefix.push(MAIN_SEPARATOR);
+        }
+        let pattern = format!("{}.*", regex::escape(&absolute_prefix));
+        if let Ok(query) = RegexQuery::from_pattern(&pattern, path_exact_field) {
+            scope_queries.push((Occur::Should, Box::new(query)));
+        }
+    }
+
+    let rel_scope = scope_path
+        .strip_prefix(&root)
+        .ok()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default();
+    if !rel_scope.is_empty() {
+        if scope_path.is_file() {
+            for candidate in [rel_scope.clone(), format!("./{rel_scope}")] {
+                let term = Term::from_field_text(path_exact_field, &candidate);
+                scope_queries.push((
+                    Occur::Should,
+                    Box::new(TermQuery::new(term, IndexRecordOption::Basic)),
+                ));
+            }
+        } else {
+            let mut rel_prefix = rel_scope.clone();
+            if !rel_prefix.ends_with('/') {
+                rel_prefix.push('/');
+            }
+            for prefix in [rel_prefix.clone(), format!("./{rel_prefix}")] {
+                let pattern = format!("{}.*", regex::escape(&prefix));
+                if let Ok(query) = RegexQuery::from_pattern(&pattern, path_exact_field) {
+                    scope_queries.push((Occur::Should, Box::new(query)));
+                }
+            }
+        }
+    }
+
+    if scope_queries.is_empty() {
+        None
+    } else if scope_queries.len() == 1 {
+        Some(scope_queries.remove(0).1)
+    } else {
+        Some(Box::new(BooleanQuery::new(scope_queries)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::indexer::index::DEFAULT_WRITER_BUDGET_BYTES;
+    use crate::indexer::IndexBuilder;
+    use tempfile::TempDir;
+
+    #[test]
+    fn find_files_with_content_respects_scope() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let scoped = root.join("scoped");
+        std::fs::create_dir_all(&scoped).expect("mkdir");
+
+        let outside = root.join("outside.py");
+        let inside = scoped.join("inside.py");
+        std::fs::write(&outside, "cpu_fallback_path(0)\n").expect("write outside");
+        std::fs::write(&inside, "cpu_fallback_path(1)\n").expect("write inside");
+
+        let builder = IndexBuilder::new(root).expect("builder");
+        builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("build");
+
+        let paths = find_files_with_content(root, "cpu_fallback_path", Some(&scoped))
+            .expect("query")
+            .expect("index-backed");
+
+        assert!(paths.iter().any(|p| p.ends_with("inside.py")));
+        assert!(!paths.iter().any(|p| p.ends_with("outside.py")));
+    }
 }
