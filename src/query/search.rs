@@ -13,7 +13,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::Instant;
 use tantivy::{
     collector::TopDocs,
-    query::{BooleanQuery, FuzzyTermQuery, Occur, QueryParser, TermQuery},
+    query::{BooleanQuery, FuzzyTermQuery, Occur, QueryParser, RegexQuery, TermQuery},
     schema::{Term, Value},
     Index, TantivyDocument,
 };
@@ -1084,6 +1084,7 @@ fn collect_index_candidates(
     let line_offset_field = schema
         .get_field("line_number")
         .context("Missing line_number field")?;
+    let path_exact_field = schema.get_field("path_exact").ok();
 
     let text_query: Box<dyn tantivy::query::Query> = if fuzzy {
         let terms: Vec<&str> = query.split_whitespace().collect();
@@ -1116,10 +1117,16 @@ fn collect_index_candidates(
 
     let doc_type_term = Term::from_field_text(doc_type_field, doc_type);
     let doc_type_query = TermQuery::new(doc_type_term, tantivy::schema::IndexRecordOption::Basic);
-    let parsed_query: Box<dyn tantivy::query::Query> = Box::new(BooleanQuery::new(vec![
+    let mut clauses: Vec<(Occur, Box<dyn tantivy::query::Query>)> = vec![
         (Occur::Must, text_query),
         (Occur::Must, Box::new(doc_type_query)),
-    ]));
+    ];
+    if let Some(scope_query) =
+        path_exact_field.and_then(|f| build_search_scope_query(f, search_root, index_root))
+    {
+        clauses.push((Occur::Must, scope_query));
+    }
+    let parsed_query: Box<dyn tantivy::query::Query> = Box::new(BooleanQuery::new(clauses));
 
     let fetch_limit = max_candidates.saturating_mul(5).max(1);
     let top_docs = searcher.search(&parsed_query, &TopDocs::with_limit(fetch_limit))?;
@@ -1173,15 +1180,10 @@ fn collect_index_candidates(
             .and_then(|v| v.as_u64())
             .unwrap_or(1) as usize;
 
-        let (snippet, line_num) = find_snippet_with_line(content_value, query, 150);
         let doc_type_value = doc
             .get_first(doc_type_field)
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let mut line_num = line_num.map(|l| l + line_offset.saturating_sub(1));
-        if line_num.is_none() && doc_type_value == "symbol" {
-            line_num = Some(line_offset);
-        }
 
         let symbol_id = if doc_type_value == "symbol" {
             doc.get_first(symbol_id_field)
@@ -1198,6 +1200,36 @@ fn collect_index_candidates(
         } else {
             None
         };
+
+        if doc_type_value == "file" {
+            let matches = find_snippets_with_lines(content_value, query, 150);
+            if !matches.is_empty() {
+                for (snippet, rel_line) in matches {
+                    if candidates.len() >= max_candidates {
+                        break;
+                    }
+
+                    candidates.push(IndexCandidate {
+                        stored_path: path_value.to_string(),
+                        full_path: full_path.clone(),
+                        display_path: display_path.clone(),
+                        score: *score,
+                        snippet,
+                        line: Some(line_offset + rel_line.saturating_sub(1)),
+                        symbol_id: None,
+                        symbol_start: None,
+                        symbol_end: None,
+                    });
+                }
+                continue;
+            }
+        }
+
+        let (snippet, line_num) = find_snippet_with_line(content_value, query, 150);
+        let mut line_num = line_num.map(|l| l + line_offset.saturating_sub(1));
+        if line_num.is_none() && doc_type_value == "symbol" {
+            line_num = Some(line_offset);
+        }
 
         candidates.push(IndexCandidate {
             stored_path: path_value.to_string(),
@@ -1427,7 +1459,10 @@ fn semantic_backfill_results(
                 vector_score,
                 text_norm: 0.0,
                 vector_norm,
-                snippet: format!("{} {}", result.symbol.symbol_name, result.symbol.symbol_kind),
+                snippet: format!(
+                    "{} {}",
+                    result.symbol.symbol_name, result.symbol.symbol_kind
+                ),
                 line: Some(result.symbol.start_line as usize),
                 chunk_start: Some(result.symbol.start_line),
                 chunk_end: Some(result.symbol.end_line),
@@ -1910,9 +1945,11 @@ fn hybrid_search(
                             if semantic_results.len() < max_results {
                                 let mut seen: HashSet<String> =
                                     semantic_results.iter().map(hybrid_result_key).collect();
-                                for extra in
-                                    semantic_backfill_results(storage, &query_embedding, candidate_k)
-                                {
+                                for extra in semantic_backfill_results(
+                                    storage,
+                                    &query_embedding,
+                                    candidate_k,
+                                ) {
                                     let key = hybrid_result_key(&extra);
                                     if seen.insert(key) {
                                         semantic_results.push(extra);
@@ -2125,7 +2162,13 @@ fn find_snippet_with_line(content: &str, query: &str, max_len: usize) -> (String
             }
         };
         if should_replace {
-            best_match = Some((matched_terms, hit_count, line_len, line_num, trimmed.to_string()));
+            best_match = Some((
+                matched_terms,
+                hit_count,
+                line_len,
+                line_num,
+                trimmed.to_string(),
+            ));
         }
     }
 
@@ -2141,6 +2184,112 @@ fn find_snippet_with_line(content: &str, query: &str, max_len: usize) -> (String
         .unwrap_or_default();
 
     (snippet, None)
+}
+
+fn find_snippets_with_lines(content: &str, query: &str, max_len: usize) -> Vec<(String, usize)> {
+    let query_lower = query.to_lowercase();
+    let mut terms: Vec<&str> = query_lower.split_whitespace().collect();
+    terms.sort_unstable();
+    terms.dedup();
+
+    if terms.is_empty() {
+        return Vec::new();
+    }
+
+    let mut matches = Vec::new();
+    for (line_idx, line) in content.lines().enumerate() {
+        let line_lower = line.to_lowercase();
+        if !terms.iter().any(|term| line_lower.contains(term)) {
+            continue;
+        }
+
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        matches.push((truncate_with_ellipsis(trimmed, max_len), line_idx + 1));
+    }
+
+    matches
+}
+
+fn build_search_scope_query(
+    path_exact_field: tantivy::schema::Field,
+    search_root: &Path,
+    index_root: &Path,
+) -> Option<Box<dyn tantivy::query::Query>> {
+    let search_root = search_root
+        .canonicalize()
+        .unwrap_or_else(|_| search_root.to_path_buf());
+    let index_root = index_root
+        .canonicalize()
+        .unwrap_or_else(|_| index_root.to_path_buf());
+    if search_root == index_root || !search_root.starts_with(&index_root) {
+        return None;
+    }
+
+    let mut scope_queries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
+
+    if search_root.is_file() {
+        let absolute = search_root.to_string_lossy().to_string();
+        let term = Term::from_field_text(path_exact_field, &absolute);
+        scope_queries.push((
+            Occur::Should,
+            Box::new(TermQuery::new(
+                term,
+                tantivy::schema::IndexRecordOption::Basic,
+            )),
+        ));
+    } else {
+        let mut absolute_prefix = search_root.to_string_lossy().to_string();
+        if !absolute_prefix.ends_with(std::path::MAIN_SEPARATOR) {
+            absolute_prefix.push(std::path::MAIN_SEPARATOR);
+        }
+        let pattern = format!("{}.*", regex::escape(&absolute_prefix));
+        if let Ok(query) = RegexQuery::from_pattern(&pattern, path_exact_field) {
+            scope_queries.push((Occur::Should, Box::new(query)));
+        }
+    }
+
+    let rel_scope = search_root
+        .strip_prefix(&index_root)
+        .ok()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default();
+    if !rel_scope.is_empty() {
+        if search_root.is_file() {
+            for candidate in [rel_scope.clone(), format!("./{rel_scope}")] {
+                let term = Term::from_field_text(path_exact_field, &candidate);
+                scope_queries.push((
+                    Occur::Should,
+                    Box::new(TermQuery::new(
+                        term,
+                        tantivy::schema::IndexRecordOption::Basic,
+                    )),
+                ));
+            }
+        } else {
+            let mut rel_prefix = rel_scope.clone();
+            if !rel_prefix.ends_with('/') {
+                rel_prefix.push('/');
+            }
+            for prefix in [rel_prefix.clone(), format!("./{rel_prefix}")] {
+                let pattern = format!("{}.*", regex::escape(&prefix));
+                if let Ok(query) = RegexQuery::from_pattern(&pattern, path_exact_field) {
+                    scope_queries.push((Occur::Should, Box::new(query)));
+                }
+            }
+        }
+    }
+
+    if scope_queries.is_empty() {
+        None
+    } else if scope_queries.len() == 1 {
+        Some(scope_queries.remove(0).1)
+    } else {
+        Some(Box::new(BooleanQuery::new(scope_queries)))
+    }
 }
 
 fn resolve_search_root(path: Option<&str>) -> Result<PathBuf> {
@@ -2303,6 +2452,81 @@ mod tests {
 
         assert_eq!(outcome.results.len(), 1);
         assert_eq!(outcome.results[0].path, "sub.rs");
+    }
+
+    #[test]
+    fn index_search_scope_filter_applies_before_top_docs() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let scoped = root.join("scoped");
+        std::fs::create_dir_all(&scoped).expect("create scoped");
+
+        for i in 0..20 {
+            let outside = root.join(format!("outside_{i}.txt"));
+            std::fs::write(&outside, format!("{}\n", "needle ".repeat(200)))
+                .expect("write outside");
+        }
+        let scoped_file = scoped.join("target.txt");
+        std::fs::write(&scoped_file, "needle only in scoped file\n").expect("write scoped");
+
+        let builder = IndexBuilder::new(root).expect("builder");
+        builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("build");
+
+        let outcome = index_search(
+            "needle",
+            root,
+            &scoped,
+            1,
+            0,
+            None,
+            None,
+            None,
+            &[],
+            None,
+            false,
+        )
+        .expect("index search");
+
+        assert_eq!(outcome.results.len(), 1);
+        assert_eq!(outcome.results[0].path, "target.txt");
+    }
+
+    #[test]
+    fn index_search_returns_multiple_matches_from_single_chunk() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let file = root.join("sample.py");
+        std::fs::write(
+            &file,
+            "def cpu_fallback_path(target):\n    return target\ncpu_fallback_path(1)\n",
+        )
+        .expect("write sample");
+
+        let builder = IndexBuilder::new(root).expect("builder");
+        builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("build");
+
+        let outcome = index_search(
+            "cpu_fallback_path",
+            root,
+            root,
+            10,
+            0,
+            None,
+            None,
+            None,
+            &[],
+            None,
+            false,
+        )
+        .expect("index search");
+
+        let lines: Vec<usize> = outcome.results.iter().filter_map(|r| r.line).collect();
+        assert!(lines.contains(&1));
+        assert!(lines.contains(&3));
     }
 
     #[test]

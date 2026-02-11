@@ -25,13 +25,14 @@ struct DefinitionResult {
 
 /// Run the definition command
 pub fn run(name: &str, format: OutputFormat, compact: bool) -> Result<()> {
-    let root = get_root_with_index(std::env::current_dir()?);
+    let search_root = std::env::current_dir()?.canonicalize()?;
+    let index_root = get_root_with_index(&search_root);
     let extractor = SymbolExtractor::new();
 
-    let files = match find_files_with_symbol(&root, name)? {
+    let files = match find_files_with_symbol(&index_root, name, Some(&search_root))? {
         Some(indexed_paths) => read_scanned_files(&indexed_paths),
         None => {
-            let scanner = FileScanner::new(&root);
+            let scanner = FileScanner::new(&search_root);
             scanner.scan()?
         }
     };
@@ -78,7 +79,7 @@ pub fn run(name: &str, format: OutputFormat, compact: bool) -> Result<()> {
         .iter()
         .map(|(path, symbol)| {
             let rel_path = path
-                .strip_prefix(&root)
+                .strip_prefix(&search_root)
                 .unwrap_or(path)
                 .display()
                 .to_string();
@@ -109,7 +110,7 @@ pub fn run(name: &str, format: OutputFormat, compact: bool) -> Result<()> {
             );
 
             for (path, symbol) in &matches {
-                let rel_path = path.strip_prefix(&root).unwrap_or(path).display();
+                let rel_path = path.strip_prefix(&search_root).unwrap_or(path).display();
                 let kind_str = format!("[{}]", symbol.kind);
 
                 println!(

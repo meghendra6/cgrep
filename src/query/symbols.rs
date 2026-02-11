@@ -48,8 +48,10 @@ pub fn run(
     let start_time = Instant::now();
     let use_color = use_colors() && format == OutputFormat::Text;
 
+    let search_root = std::env::current_dir()?.canonicalize()?;
+    let index_root = get_root_with_index(&search_root);
     // Load config for exclude patterns
-    let config = Config::load();
+    let config = Config::load_for_dir(&index_root);
 
     // Precompile glob patterns for efficient repeated matching
     let compiled_glob = glob_pattern.and_then(CompiledGlob::new);
@@ -62,21 +64,21 @@ pub fn run(
         .filter_map(|p| CompiledGlob::new(p.as_str()))
         .collect();
 
-    let root = get_root_with_index(std::env::current_dir()?);
     let extractor = SymbolExtractor::new();
     let name_lower = name.to_lowercase();
     let changed_filter = changed
-        .map(|rev| ChangedFiles::from_scope(&root, rev))
+        .map(|rev| ChangedFiles::from_scope(&search_root, rev))
         .transpose()?;
 
     // Try to use index for fast file filtering first
-    let files: Vec<ScannedFile> = match find_files_with_symbol(&root, name)? {
-        Some(indexed_paths) => read_scanned_files(&indexed_paths),
-        None => {
-            let scanner = FileScanner::new(&root);
-            scanner.scan()?
-        }
-    };
+    let files: Vec<ScannedFile> =
+        match find_files_with_symbol(&index_root, name, Some(&search_root))? {
+            Some(indexed_paths) => read_scanned_files(&indexed_paths),
+            None => {
+                let scanner = FileScanner::new(&search_root);
+                scanner.scan()?
+            }
+        };
 
     let mut results: Vec<SymbolResult> = Vec::new();
     let mut files_searched: HashSet<String> = HashSet::new();
@@ -84,7 +86,7 @@ pub fn run(
     for file in files {
         let rel_path = file
             .path
-            .strip_prefix(&root)
+            .strip_prefix(&search_root)
             .unwrap_or(&file.path)
             .display()
             .to_string();
