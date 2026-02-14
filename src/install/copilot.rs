@@ -84,6 +84,7 @@ cgrep agent expand --id "$ID" -C 8 --compact
 - Use `--regex --no-index` for regex-only scans
 - Use `cgrep read` and `cgrep map` before broad scans when you need focused context
 - Use `agent locate` then `agent expand` when you need compact multi-step retrieval
+- Treat this as a harness: structured calls + compact JSON + scoped queries first
 
 ### Don't
 
@@ -108,6 +109,7 @@ This project uses **cgrep** for local code search. When searching for code or co
 5. Use `cgrep agent locate` then `cgrep agent expand --id <id>` for low-token retrieval
 6. Use `--format json --compact` or `--format json2 --compact` for machine-readable output
 7. Optional: `--mode semantic|hybrid` when embeddings + index are available
+8. MCP mode available: `cgrep mcp serve` (or `cgrep mcp install <host>`)
 
 cgrep uses tantivy + tree-sitter for fast offline code search.
 "#;

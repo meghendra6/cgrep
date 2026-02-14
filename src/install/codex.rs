@@ -56,6 +56,13 @@ cgrep agent expand --id "$ID" -C 8 --compact
 - `--agent-cache` / `--cache-ttl` - Cache hybrid/semantic sessions
 - `cgrep read` / `cgrep map` - Read focused regions and generate structure maps
 - `cgrep agent locate/expand` - Two-stage low-token agent retrieval flow
+
+### Harness Rules
+
+- Prefer structured calls: `map -> search -> read -> symbols/definition/references`.
+- Use `--format json --compact` or `--format json2 --compact` for deterministic output.
+- Narrow scope early (`-p`, `--glob`, `--changed`) to avoid redundant retries.
+- For MCP workflows, use `cgrep mcp serve` and cgrep tools instead of host built-ins.
 "#;
 
 fn get_agents_md_path() -> Result<PathBuf> {

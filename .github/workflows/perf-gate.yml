@@ -1,0 +1,23 @@
+name: perf-gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  perf-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Run performance regression gate
+        run: python3 scripts/perf_gate.py
+

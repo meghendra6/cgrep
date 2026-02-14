@@ -11,7 +11,7 @@ use rayon::ThreadPoolBuilder;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::SystemTime;
 use tantivy::{
@@ -851,6 +851,16 @@ fn should_skip_without_read(
     None
 }
 
+fn path_matches_exclude_patterns(path: &Path, patterns: &[String]) -> bool {
+    if patterns.is_empty() {
+        return false;
+    }
+    let path_str = path.to_string_lossy();
+    patterns
+        .iter()
+        .any(|pattern| !pattern.is_empty() && path_str.contains(pattern))
+}
+
 /// Tantivy field handles
 pub struct IndexFields {
     pub path: Field,
@@ -1335,6 +1345,272 @@ impl IndexBuilder {
         Ok(indexed)
     }
 
+    /// Update only the provided paths in an existing index.
+    ///
+    /// This is designed for watch-mode incremental updates where we already
+    /// know which files changed.
+    pub fn update_paths_with_io_threads(
+        &self,
+        changed_paths: &[PathBuf],
+        writer_budget_bytes: usize,
+        _io_threads_override: Option<usize>,
+    ) -> Result<usize> {
+        if changed_paths.is_empty() {
+            return Ok(0);
+        }
+
+        let index_path = self.root.join(INDEX_DIR);
+        let metadata_path = self.root.join(METADATA_FILE);
+        if !index_path.join("meta.json").exists() || !metadata_path.exists() {
+            return self.build_with_io_threads(false, writer_budget_bytes, None);
+        }
+
+        let content = std::fs::read_to_string(&metadata_path).unwrap_or_default();
+        let old_metadata: IndexMetadata = serde_json::from_str(&content).unwrap_or_default();
+        let mut new_metadata = old_metadata;
+
+        let index = Index::open_in_dir(&index_path).context("Failed to open existing index")?;
+        let schema = index.schema();
+        if schema.get_field("path_exact").is_err()
+            || schema.get_field("doc_type").is_err()
+            || schema.get_field("symbol_id").is_err()
+            || schema.get_field("symbol_end_line").is_err()
+        {
+            anyhow::bail!(
+                "Index schema upgrade required: missing symbol-level fields.\n\
+                 Run 'cgrep index --force' to rebuild the index."
+            );
+        }
+
+        let mut writer: IndexWriter = index
+            .writer(writer_budget_bytes)
+            .context("Failed to create index writer")?;
+
+        let path_field = self.fields.path;
+        let path_exact_field = self.fields.path_exact;
+        let content_field = self.fields.content;
+        let language_field = self.fields.language;
+        let symbols_field = self.fields.symbols;
+        let doc_type_field = self.fields.doc_type;
+        let symbol_id_field = self.fields.symbol_id;
+        let symbol_end_line_field = self.fields.symbol_end_line;
+        let line_number_field = self.fields.line_number;
+
+        let mut seen_paths: HashSet<String> = HashSet::new();
+        let mut indexed_count = 0usize;
+        let mut skipped_count = 0usize;
+        let mut deleted_count = 0usize;
+        let mut error_count = 0usize;
+
+        for raw_path in changed_paths {
+            let path = if raw_path.is_absolute() {
+                raw_path.clone()
+            } else {
+                self.root.join(raw_path)
+            };
+            let path_str = path.to_string_lossy().to_string();
+            if !seen_paths.insert(path_str.clone()) {
+                continue;
+            }
+
+            if !path.starts_with(&self.root) {
+                continue;
+            }
+
+            if !path.exists() || !path.is_file() {
+                writer.delete_term(Term::from_field_text(path_exact_field, &path_str));
+                if new_metadata.files.remove(&path_str).is_some() {
+                    deleted_count += 1;
+                }
+                continue;
+            }
+
+            if path_matches_exclude_patterns(&path, &self.exclude_patterns) {
+                writer.delete_term(Term::from_field_text(path_exact_field, &path_str));
+                if new_metadata.files.remove(&path_str).is_some() {
+                    deleted_count += 1;
+                }
+                continue;
+            }
+
+            let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+                writer.delete_term(Term::from_field_text(path_exact_field, &path_str));
+                if new_metadata.files.remove(&path_str).is_some() {
+                    deleted_count += 1;
+                }
+                continue;
+            };
+            if !crate::indexer::scanner::is_indexable_extension(ext) {
+                writer.delete_term(Term::from_field_text(path_exact_field, &path_str));
+                if new_metadata.files.remove(&path_str).is_some() {
+                    deleted_count += 1;
+                }
+                continue;
+            }
+
+            let metadata = match std::fs::metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(_) => {
+                    error_count += 1;
+                    eprintln!("Warning: failed to read {}", path_str);
+                    continue;
+                }
+            };
+
+            let mtime = metadata
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0);
+            let size = metadata.len();
+            let existing_meta = new_metadata.files.get(&path_str).cloned();
+
+            if let Some(meta) = should_skip_without_read(existing_meta.as_ref(), mtime, size, false)
+            {
+                skipped_count += 1;
+                new_metadata.files.insert(path_str, meta);
+                continue;
+            }
+
+            let outcome = match read_text_chunks(&path, MAX_DOC_BYTES) {
+                Ok(outcome) => outcome,
+                Err(_) => {
+                    error_count += 1;
+                    eprintln!("Warning: failed to read {}", path_str);
+                    if let Some(meta) = existing_meta {
+                        new_metadata.files.insert(path_str, meta);
+                    }
+                    continue;
+                }
+            };
+
+            let (chunks, hash) = match outcome {
+                ReadOutcome::Text { chunks, hash } => (chunks, hash),
+                ReadOutcome::Binary { hash } => {
+                    writer.delete_term(Term::from_field_text(path_exact_field, &path_str));
+                    skipped_count += 1;
+                    new_metadata.files.insert(
+                        path_str,
+                        FileMetadata {
+                            mtime,
+                            size,
+                            hash: hash.unwrap_or_default(),
+                            symbols: String::new(),
+                            is_binary: true,
+                        },
+                    );
+                    continue;
+                }
+            };
+
+            if let Some(meta) = existing_meta.as_ref() {
+                if !hash.is_empty() && meta.hash == hash {
+                    let mut updated = meta.clone();
+                    updated.mtime = mtime;
+                    updated.size = size;
+                    skipped_count += 1;
+                    new_metadata.files.insert(path_str, updated);
+                    continue;
+                }
+            }
+
+            let lang_str = detect_language(ext).unwrap_or_default();
+            let full_text = join_chunks(&chunks);
+            let symbol_list = if !lang_str.is_empty() {
+                extract_symbols_from_text(&full_text, &lang_str)
+            } else {
+                Vec::new()
+            };
+            let symbols = if !lang_str.is_empty() {
+                extract_symbol_names(&symbol_list)
+            } else {
+                String::new()
+            };
+            let symbol_docs = filter_symbols(
+                symbol_list.clone(),
+                self.allowed_symbol_kinds.as_ref(),
+                self.max_symbols_per_file,
+            );
+
+            let meta = FileMetadata {
+                mtime,
+                size,
+                hash,
+                symbols: symbols.clone(),
+                is_binary: false,
+            };
+
+            writer.delete_term(Term::from_field_text(path_exact_field, &path_str));
+
+            if chunks.is_empty() {
+                skipped_count += 1;
+                new_metadata.files.insert(path_str, meta);
+                continue;
+            }
+
+            for chunk in &chunks {
+                let mut doc = TantivyDocument::default();
+                doc.add_text(path_field, &path_str);
+                doc.add_text(path_exact_field, &path_str);
+                doc.add_text(content_field, &chunk.content);
+                doc.add_text(language_field, &lang_str);
+                doc.add_text(symbols_field, &symbols);
+                doc.add_text(doc_type_field, "file");
+                doc.add_u64(line_number_field, chunk.start_line);
+                writer.add_document(doc)?;
+            }
+
+            for symbol in &symbol_docs {
+                let symbol_id = symbol_id_for(&path_str, &lang_str, symbol);
+                let symbol_content = build_symbol_content(
+                    &full_text,
+                    symbol,
+                    self.symbol_preview_lines,
+                    self.symbol_max_chars,
+                );
+                if symbol_content.is_empty() {
+                    continue;
+                }
+
+                let mut doc = TantivyDocument::default();
+                doc.add_text(path_field, &path_str);
+                doc.add_text(path_exact_field, &path_str);
+                doc.add_text(content_field, &symbol_content);
+                doc.add_text(language_field, &lang_str);
+                doc.add_text(symbols_field, &symbol.name);
+                doc.add_text(doc_type_field, "symbol");
+                doc.add_text(symbol_id_field, &symbol_id);
+                doc.add_u64(line_number_field, symbol.line as u64);
+                doc.add_u64(symbol_end_line_field, symbol.end_line as u64);
+                writer.add_document(doc)?;
+            }
+
+            indexed_count += 1;
+            new_metadata.files.insert(path_str, meta);
+        }
+
+        writer.commit()?;
+
+        let metadata_json = serde_json::to_string_pretty(&new_metadata)?;
+        std::fs::write(&metadata_path, metadata_json)?;
+
+        if error_count > 0 {
+            eprintln!("Warning: {} files could not be read", error_count);
+        }
+
+        println!(
+            "{} Incremental index update: {} indexed ({} unchanged, {} removed, {} paths)",
+            "✓".green(),
+            indexed_count.to_string().cyan(),
+            skipped_count.to_string().dimmed(),
+            deleted_count.to_string().dimmed(),
+            seen_paths.len()
+        );
+
+        Ok(indexed_count)
+    }
+
     /// Open existing index
     #[allow(dead_code)]
     pub fn open(root: impl AsRef<Path>) -> Result<Index> {
@@ -1574,6 +1850,90 @@ mod tests {
         assert_eq!(second, 0);
         assert_eq!(count_docs_for_path(root, &drop_path), 0);
         assert_eq!(count_docs_for_path(root, &keep_path), 1);
+    }
+
+    #[test]
+    fn incremental_path_update_reindexes_only_changed_files() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let one = root.join("one.rs");
+        let two = root.join("two.rs");
+        std::fs::write(&one, "fn one() {}").expect("write one");
+        std::fs::write(&two, "fn two() {}").expect("write two");
+
+        let builder = IndexBuilder::new(root).expect("builder");
+        let first = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("first build");
+        assert_eq!(first, 2);
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        std::fs::write(&one, "fn one_changed() {}").expect("rewrite one");
+
+        let updated = builder
+            .update_paths_with_io_threads(
+                std::slice::from_ref(&one),
+                DEFAULT_WRITER_BUDGET_BYTES,
+                None,
+            )
+            .expect("incremental update");
+        assert_eq!(updated, 1);
+        assert_eq!(count_docs_for_path(root, &one), 1);
+        assert_eq!(count_docs_for_path(root, &two), 1);
+    }
+
+    #[test]
+    fn incremental_path_update_deletes_removed_files() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let keep = root.join("keep.rs");
+        let drop = root.join("drop.rs");
+        std::fs::write(&keep, "fn keep() {}").expect("write keep");
+        std::fs::write(&drop, "fn drop() {}").expect("write drop");
+
+        let builder = IndexBuilder::new(root).expect("builder");
+        builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("initial build");
+        assert_eq!(count_docs_for_path(root, &drop), 1);
+
+        std::fs::remove_file(&drop).expect("remove drop");
+        let updated = builder
+            .update_paths_with_io_threads(
+                std::slice::from_ref(&drop),
+                DEFAULT_WRITER_BUDGET_BYTES,
+                None,
+            )
+            .expect("incremental delete");
+        assert_eq!(updated, 0);
+        assert_eq!(count_docs_for_path(root, &drop), 0);
+        assert_eq!(count_docs_for_path(root, &keep), 1);
+    }
+
+    #[test]
+    fn incremental_path_update_skips_when_content_hash_is_same() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let file_path = root.join("same.rs");
+        std::fs::write(&file_path, "fn same() {}").expect("write");
+
+        let builder = IndexBuilder::new(root).expect("builder");
+        builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("initial build");
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        std::fs::write(&file_path, "fn same() {}").expect("rewrite same");
+
+        let updated = builder
+            .update_paths_with_io_threads(
+                std::slice::from_ref(&file_path),
+                DEFAULT_WRITER_BUDGET_BYTES,
+                None,
+            )
+            .expect("incremental update");
+        assert_eq!(updated, 0);
+        assert_eq!(count_docs_for_path(root, &file_path), 1);
     }
 
     #[test]

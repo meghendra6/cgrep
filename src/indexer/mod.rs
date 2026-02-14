@@ -2,6 +2,7 @@
 
 //! Indexer module - handles file scanning, indexing, and watching
 
+pub mod daemon;
 pub mod index;
 pub mod scanner;
 pub mod watch;

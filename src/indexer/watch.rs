@@ -182,7 +182,8 @@ impl Watcher {
                 };
 
                 if (should_reindex || force_flush) && can_reindex {
-                    let num_changes = pending_paths.len();
+                    let changed_paths: Vec<PathBuf> = pending_paths.iter().cloned().collect();
+                    let num_changes = changed_paths.len();
                     println!(
                         "{} {} file(s) changed, reindexing... (debounce={}s min_interval={}s)",
                         "🔄".yellow(),
@@ -197,8 +198,8 @@ impl Watcher {
                     last_event_time = None;
 
                     let start = Instant::now();
-                    if let Err(e) = self.builder.build_with_io_threads(
-                        false,
+                    if let Err(e) = self.builder.update_paths_with_io_threads(
+                        &changed_paths,
                         crate::indexer::index::DEFAULT_WRITER_BUDGET_BYTES,
                         Some(WATCH_IO_THREADS),
                     ) {
@@ -206,9 +207,10 @@ impl Watcher {
                     } else {
                         let elapsed = start.elapsed();
                         println!(
-                            "{} Reindex complete in {:.1}s",
+                            "{} Reindex complete in {:.1}s ({} paths)",
                             "✓".green(),
-                            elapsed.as_secs_f64()
+                            elapsed.as_secs_f64(),
+                            num_changes
                         );
                         last_reindex_duration = Some(elapsed);
                     }
