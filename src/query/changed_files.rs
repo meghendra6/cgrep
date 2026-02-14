@@ -31,28 +31,7 @@ impl ChangedFiles {
             }
         });
 
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(&repo_root)
-            .args(["diff", "--name-only", rev, "--"])
-            .output()
-            .context("Failed to run git diff for changed-files filter")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!(
-                "Failed to resolve changed files from git diff: {}",
-                stderr.trim()
-            );
-        }
-
-        let mut paths = HashSet::new();
-        for line in String::from_utf8_lossy(&output.stdout).lines() {
-            let normalized = normalize_rel_path_str(line);
-            if !normalized.is_empty() {
-                paths.insert(normalized);
-            }
-        }
+        let paths = collect_changed_paths(&repo_root, rev)?;
 
         let signature = signature_for(rev, scope_prefix.as_deref(), &paths);
 
@@ -124,6 +103,55 @@ fn git_repo_root(path: &Path) -> Result<PathBuf> {
     }
 
     Ok(PathBuf::from(top))
+}
+
+fn collect_changed_paths(repo_root: &Path, rev: &str) -> Result<HashSet<String>> {
+    let diff_output = run_git_collect_paths(
+        repo_root,
+        &["diff", "--name-only", rev, "--"],
+        "Failed to run git diff for changed-files filter",
+        "Failed to resolve changed files from git diff",
+    )?;
+    let untracked_output = run_git_collect_paths(
+        repo_root,
+        &["ls-files", "--others", "--exclude-standard", "--"],
+        "Failed to run git ls-files for changed-files filter",
+        "Failed to resolve untracked files from git ls-files",
+    )?;
+
+    let mut paths = HashSet::new();
+    extend_paths_from_stdout(&mut paths, &diff_output.stdout);
+    extend_paths_from_stdout(&mut paths, &untracked_output.stdout);
+    Ok(paths)
+}
+
+fn run_git_collect_paths(
+    repo_root: &Path,
+    args: &[&str],
+    context_message: &str,
+    failure_prefix: &str,
+) -> Result<std::process::Output> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(args)
+        .output()
+        .with_context(|| context_message.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("{}: {}", failure_prefix, stderr.trim());
+    }
+    Ok(output)
+}
+
+fn extend_paths_from_stdout(paths: &mut HashSet<String>, stdout: &[u8]) {
+    for line in String::from_utf8_lossy(stdout).lines() {
+        let normalized = normalize_rel_path_str(line);
+        if !normalized.is_empty() {
+            paths.insert(normalized);
+        }
+    }
 }
 
 fn signature_for(rev: &str, scope_prefix: Option<&str>, paths: &HashSet<String>) -> String {
@@ -199,6 +227,26 @@ mod tests {
         let changed = ChangedFiles::from_scope(&src, "HEAD").expect("changed");
         assert!(changed.matches_rel_path("nested/util.rs"));
         assert!(!changed.matches_rel_path("lib.rs"));
+    }
+
+    #[test]
+    fn changed_files_include_untracked_paths() {
+        let dir = TempDir::new().expect("tempdir");
+        run(dir.path(), &["init"]);
+        run(dir.path(), &["config", "user.email", "test@example.com"]);
+        run(dir.path(), &["config", "user.name", "test"]);
+
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(&src).expect("mkdir");
+        std::fs::write(src.join("tracked.rs"), "pub fn tracked() {}\n").expect("write tracked");
+        run(dir.path(), &["add", "."]);
+        run(dir.path(), &["commit", "-m", "initial"]);
+
+        std::fs::write(src.join("new_file.rs"), "pub fn newly_added() {}\n").expect("write new");
+
+        let changed = ChangedFiles::from_scope(&src, "HEAD").expect("changed");
+        assert!(changed.matches_rel_path("new_file.rs"));
+        assert!(!changed.matches_rel_path("tracked.rs"));
     }
 
     #[test]

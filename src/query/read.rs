@@ -344,30 +344,20 @@ fn code_outline(content: &str, language: &str) -> String {
 
 fn markdown_outline(content: &str) -> String {
     let mut headings: Vec<(usize, usize, String)> = Vec::new();
-    let mut in_code_block = false;
+    let mut active_fence = None;
     let lines: Vec<&str> = content.lines().collect();
 
     for (idx, raw) in lines.iter().enumerate() {
         let trimmed = raw.trim_end();
-        if trimmed.starts_with("```") {
-            in_code_block = !in_code_block;
+        if update_code_fence_state(trimmed, &mut active_fence) {
             continue;
         }
-        if in_code_block {
+        if active_fence.is_some() {
             continue;
         }
-        if !trimmed.starts_with('#') {
+        let Some((level, title)) = parse_markdown_heading(trimmed) else {
             continue;
-        }
-
-        let level = trimmed.chars().take_while(|c| *c == '#').count();
-        if level == 0 || level > 6 {
-            continue;
-        }
-        let title = trimmed[level..].trim().to_string();
-        if title.is_empty() {
-            continue;
-        }
+        };
         headings.push((idx + 1, level, title));
     }
 
@@ -631,48 +621,114 @@ fn parse_line_range(input: &str) -> Option<(usize, usize)> {
     Some((start, end))
 }
 
-fn resolve_heading_range(lines: &[&str], heading: &str) -> Option<(usize, usize)> {
-    let target = heading.trim_end();
-    let level = target.chars().take_while(|c| *c == '#').count();
-    if level == 0 {
+fn update_code_fence_state(line: &str, active_fence: &mut Option<char>) -> bool {
+    let trimmed = line.trim_start();
+    let marker = if trimmed.starts_with("```") {
+        Some('`')
+    } else if trimmed.starts_with("~~~") {
+        Some('~')
+    } else {
+        None
+    };
+
+    if let Some(ch) = marker {
+        if active_fence.is_none() {
+            *active_fence = Some(ch);
+            return true;
+        }
+        if *active_fence == Some(ch) {
+            *active_fence = None;
+            return true;
+        }
+    }
+
+    false
+}
+
+fn parse_markdown_heading(line: &str) -> Option<(usize, String)> {
+    let trimmed = line.trim_start();
+    if !trimmed.starts_with('#') {
         return None;
     }
 
-    let mut in_code_block = false;
+    let level = trimmed.chars().take_while(|c| *c == '#').count();
+    if level == 0 || level > 6 {
+        return None;
+    }
+
+    let body = trimmed[level..].trim();
+    if body.is_empty() {
+        return None;
+    }
+
+    let title = strip_optional_closing_hashes(body).trim();
+    if title.is_empty() {
+        return None;
+    }
+
+    Some((level, title.to_string()))
+}
+
+fn strip_optional_closing_hashes(input: &str) -> &str {
+    let trimmed = input.trim_end();
+    let bytes = trimmed.as_bytes();
+
+    let mut hash_start = bytes.len();
+    while hash_start > 0 && bytes[hash_start - 1] == b'#' {
+        hash_start -= 1;
+    }
+
+    if hash_start == bytes.len() {
+        return trimmed;
+    }
+    if hash_start == 0 {
+        return "";
+    }
+    if bytes[hash_start - 1].is_ascii_whitespace() {
+        return trimmed[..hash_start - 1].trim_end();
+    }
+
+    trimmed
+}
+
+fn resolve_heading_range(lines: &[&str], heading: &str) -> Option<(usize, usize)> {
+    let (target_level, target_title) = parse_markdown_heading(heading)?;
+    let mut active_fence = None;
     let mut start_idx = None;
 
     for (idx, line) in lines.iter().enumerate() {
         let trimmed = line.trim_end();
-        if trimmed.starts_with("```") {
-            in_code_block = !in_code_block;
+        if update_code_fence_state(trimmed, &mut active_fence) {
             continue;
         }
-        if in_code_block {
+        if active_fence.is_some() {
             continue;
         }
-        if trimmed == target {
+        let Some((level, title)) = parse_markdown_heading(trimmed) else {
+            continue;
+        };
+        if level == target_level && title == target_title {
             start_idx = Some(idx);
             break;
         }
     }
 
     let start_idx = start_idx?;
-    in_code_block = false;
+    active_fence = None;
 
     for (idx, line) in lines.iter().enumerate().skip(start_idx + 1) {
         let trimmed = line.trim_end();
-        if trimmed.starts_with("```") {
-            in_code_block = !in_code_block;
+        if update_code_fence_state(trimmed, &mut active_fence) {
             continue;
         }
-        if in_code_block {
+        if active_fence.is_some() {
             continue;
         }
-        if trimmed.starts_with('#') {
-            let next_level = trimmed.chars().take_while(|c| *c == '#').count();
-            if next_level > 0 && next_level <= level {
-                return Some((start_idx + 1, idx));
-            }
+        let Some((next_level, _)) = parse_markdown_heading(trimmed) else {
+            continue;
+        };
+        if next_level <= target_level {
+            return Some((start_idx + 1, idx));
         }
     }
 
@@ -789,6 +845,29 @@ mod tests {
         assert_eq!(resolve_heading_range(&lines, "## B"), None);
         assert_eq!(resolve_heading_range(&lines, "# A"), Some((1, 5)));
         assert_eq!(resolve_heading_range(&lines, "## C"), Some((5, 5)));
+    }
+
+    #[test]
+    fn resolve_heading_matches_indented_and_closing_hashes() {
+        let lines = vec!["   ## Config ##   ", "value: true", "## Next"];
+        assert_eq!(resolve_heading_range(&lines, "## Config"), Some((1, 2)));
+        assert_eq!(resolve_heading_range(&lines, "## Config ##"), Some((1, 2)));
+    }
+
+    #[test]
+    fn resolve_heading_ignores_tilde_fence() {
+        let lines = vec!["# A", "~~~", "## B", "~~~", "## C"];
+        assert_eq!(resolve_heading_range(&lines, "## B"), None);
+        assert_eq!(resolve_heading_range(&lines, "## C"), Some((5, 5)));
+    }
+
+    #[test]
+    fn markdown_outline_ignores_tilde_fenced_headings() {
+        let input = "# A\n~~~\n## B\n~~~\n## C\n";
+        let out = markdown_outline(input);
+        assert!(out.contains("# A"));
+        assert!(!out.contains("## B"));
+        assert!(out.contains("## C"));
     }
 
     #[test]

@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 const INDEXABLE_EXTENSIONS: &[&str] = &[
-    "rs", "ts", "tsx", "js", "jsx", "py", "go", "java", "c", "cpp", "h", "hpp", "cs", "rb", "php",
-    "swift", "kt", "scala", "lua", "md", "txt", "json", "yaml", "toml",
+    "rs", "ts", "tsx", "js", "jsx", "py", "go", "java", "c", "cpp", "cc", "h", "hpp", "cs", "rb",
+    "php", "swift", "kt", "kts", "scala", "lua", "md", "txt", "json", "yaml", "toml",
 ];
 
 /// Scanned file with content
@@ -204,5 +204,28 @@ pub fn detect_language(ext: &str) -> Option<String> {
         "scala" => Some("scala".into()),
         "lua" => Some("lua".into()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{detect_language, is_indexable_extension};
+
+    #[test]
+    fn detectable_code_extensions_are_indexable() {
+        for ext in [
+            "rs", "ts", "tsx", "js", "jsx", "py", "go", "java", "c", "h", "cpp", "cc", "hpp",
+            "cs", "rb", "php", "swift", "kt", "kts", "scala", "lua",
+        ] {
+            assert!(is_indexable_extension(ext), "{ext} should be indexable");
+        }
+    }
+
+    #[test]
+    fn extension_aliases_map_to_expected_languages() {
+        assert_eq!(detect_language("cc").as_deref(), Some("cpp"));
+        assert_eq!(detect_language("kts").as_deref(), Some("kotlin"));
+        assert!(is_indexable_extension("CC"));
+        assert!(is_indexable_extension("KTS"));
     }
 }
