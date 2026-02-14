@@ -73,6 +73,15 @@ struct SymbolEmbeddingMeta {
     content_hash: String,
 }
 
+struct LargeEmbeddingFile<'a> {
+    path: &'a str,
+    file_hash: &'a str,
+    last_modified: i64,
+    symbol_ids: &'a [String],
+    texts: &'a [String],
+    symbols: &'a [SymbolEmbeddingMeta],
+}
+
 #[derive(Default)]
 struct EmbeddingIndexStats {
     files_total: usize,
@@ -235,19 +244,14 @@ fn flush_embedding_batch(
 
 fn embed_large_file_symbols(
     provider: &mut dyn EmbeddingProvider,
-    path: &str,
-    file_hash: &str,
-    last_modified: i64,
-    symbol_ids: &[String],
-    texts: &[String],
-    symbols: &[SymbolEmbeddingMeta],
+    file: LargeEmbeddingFile<'_>,
     storage: &mut EmbeddingStorage,
     stats: &mut EmbeddingIndexStats,
 ) -> Result<()> {
     let embed_batch_size = provider.batch_size().max(1);
-    let mut vectors: Vec<Vec<f32>> = Vec::with_capacity(texts.len());
+    let mut vectors: Vec<Vec<f32>> = Vec::with_capacity(file.texts.len());
 
-    for chunk in texts.chunks(embed_batch_size) {
+    for chunk in file.texts.chunks(embed_batch_size) {
         let chunk_vectors = provider.embed_texts(chunk)?;
         if chunk_vectors.len() != chunk.len() {
             anyhow::bail!(
@@ -259,11 +263,11 @@ fn embed_large_file_symbols(
         vectors.extend(chunk_vectors);
     }
 
-    if vectors.len() != symbols.len() {
+    if vectors.len() != file.symbols.len() {
         anyhow::bail!(
             "Embedding provider returned {} vectors for {} symbol texts",
             vectors.len(),
-            symbols.len()
+            file.symbols.len()
         );
     }
 
@@ -274,8 +278,8 @@ fn embed_large_file_symbols(
         }
     }
 
-    let mut inputs: Vec<SymbolEmbeddingInput<'_>> = Vec::with_capacity(symbols.len());
-    for (meta, embedding) in symbols.iter().zip(vectors.iter()) {
+    let mut inputs: Vec<SymbolEmbeddingInput<'_>> = Vec::with_capacity(file.symbols.len());
+    for (meta, embedding) in file.symbols.iter().zip(vectors.iter()) {
         inputs.push(SymbolEmbeddingInput {
             symbol_id: meta.symbol_id.as_str(),
             lang: meta.lang.as_str(),
@@ -288,7 +292,13 @@ fn embed_large_file_symbols(
         });
     }
 
-    storage.sync_file_symbols(path, file_hash, last_modified, symbol_ids, &inputs)?;
+    storage.sync_file_symbols(
+        file.path,
+        file.file_hash,
+        file.last_modified,
+        file.symbol_ids,
+        &inputs,
+    )?;
     stats.files_embedded += 1;
     stats.symbols_embedded += inputs.len();
     Ok(())
@@ -484,12 +494,14 @@ fn index_embeddings(
                 )?;
                 embed_large_file_symbols(
                     provider.as_mut(),
-                    path,
-                    &file_hash,
-                    last_modified,
-                    &symbol_ids,
-                    &texts,
-                    &symbol_meta,
+                    LargeEmbeddingFile {
+                        path,
+                        file_hash: &file_hash,
+                        last_modified,
+                        symbol_ids: &symbol_ids,
+                        texts: &texts,
+                        symbols: &symbol_meta,
+                    },
                     &mut storage,
                     &mut stats,
                 )?;
