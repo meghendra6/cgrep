@@ -22,7 +22,18 @@ Run the performance gate after search/indexing changes to catch regressions.
 python3 scripts/benchmark_agent_token_efficiency.py --repo /path/to/pytorch
 ```
 
-Baseline side uses plain `grep` + snippet expansion to model non-cgrep agent workflows.
+This benchmark measures **tokens-to-complete** for each scenario:
+- baseline: `grep` locate + incremental file-snippet tiers
+- cgrep: `agent locate` + incremental `agent expand` ID tiers
+
+Tier controls:
+
+```bash
+python3 scripts/benchmark_agent_token_efficiency.py \
+  --repo /path/to/pytorch \
+  --baseline-file-tiers 2,4,6,8,12 \
+  --cgrep-expand-tiers 1,2,4,6,8
+```
 
 This writes:
 - `docs/benchmarks/pytorch-agent-token-efficiency.md`

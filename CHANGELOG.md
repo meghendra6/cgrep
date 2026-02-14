@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - No unreleased changes yet.
 
+## [1.4.1] - 2026-02-14
+
+### Added
+- Shortcut-first CLI aliases for high-frequency commands (`s`, `d`, `r`, `c`, `dep`, `i`, `w`, `a`) and ergonomic subcommand aliases (`agent l/x`, `daemon up/st/down`, `mcp run/add/rm`).
+- Short flag variants for common options (for example `-u`, `-M`, `-B`, `-P`, `-x`) to reduce typing overhead during iterative coding-agent workflows.
+- CLI parser regression tests covering alias + short-flag usage patterns.
+
+### Changed
+- Agent token benchmark now reports **tokens-to-complete per scenario** using iterative retrieval tiers with explicit completion markers, not only single-shot payload size.
+- Documentation (README + docs site EN/KO) updated for v1.4.1 shortcut usage and revised benchmark methodology.
+
+### Fixed
+- Formatting-only consistency update in embedding storage helper signatures (no behavior change).
+
 ## [1.4.0] - 2026-02-14
 
 ### Added
