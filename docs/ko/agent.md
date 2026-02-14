@@ -33,6 +33,7 @@ cgrep agent expand --id "$ID" -C 8 --compact
 cgrep agent install claude-code
 cgrep agent install codex
 cgrep agent install copilot
+cgrep agent install cursor
 cgrep agent install opencode
 ```
 
@@ -42,7 +43,12 @@ cgrep agent install opencode
 cgrep agent uninstall claude-code
 cgrep agent uninstall codex
 cgrep agent uninstall copilot
+cgrep agent uninstall cursor
 cgrep agent uninstall opencode
 ```
 
 기존 `install-*`, `uninstall-*` 명령도 호환성 때문에 유지됩니다.
+
+Cursor 참고:
+- `agent install cursor`는 프로젝트 로컬 규칙 파일 `.cursor/rules/cgrep.mdc`를 생성합니다.
+- Cursor용 MCP도 지원합니다: `cgrep mcp install cursor`
