@@ -32,11 +32,16 @@ cgrep index
 cgrep search "authentication flow"
 cgrep search "auth middleware" -C 2 -p src/
 cgrep search "validate_token" --regex --no-index
+cgrep read src/auth.rs
+cgrep map --depth 2
 cgrep symbols UserService -T class
 cgrep definition handleAuth
 cgrep callers validateToken
 cgrep references MyClass
 cgrep dependents src/auth.rs
+cgrep agent locate "token validation" --compact
+ID=$(cgrep agent locate "token validation" --compact | jq -r '.results[0].id')
+cgrep agent expand --id "$ID" -C 8 --compact
 ```
 
 ### Options
@@ -49,6 +54,8 @@ cgrep dependents src/auth.rs
 - `--compact` - Compact JSON output (no pretty formatting)
 - `--mode semantic|hybrid` - Optional; requires embeddings + index
 - `--agent-cache` / `--cache-ttl` - Cache hybrid/semantic sessions
+- `cgrep read` / `cgrep map` - Read focused regions and generate structure maps
+- `cgrep agent locate/expand` - Two-stage low-token agent retrieval flow
 "#;
 
 fn get_agents_md_path() -> Result<PathBuf> {

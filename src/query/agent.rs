@@ -54,7 +54,6 @@ struct AgentHintEntry {
     id: String,
     path: String,
     line: usize,
-    snippet: String,
     updated_at: u64,
 }
 
@@ -69,45 +68,55 @@ struct AgentHintCacheFile {
 pub fn run_expand(ids: &[String], path: Option<&str>, context: usize, compact: bool) -> Result<()> {
     let search_root = resolve_search_root(path)?;
     let wanted: HashSet<String> = ids.iter().cloned().collect();
+    let mut unresolved: HashSet<String> = wanted.iter().cloned().collect();
     let mut results: Vec<AgentExpandResult> = Vec::new();
-    let mut resolved: HashSet<String> = HashSet::new();
     let mut hint_resolved_ids = 0usize;
     let mut scan_resolved_ids = 0usize;
 
     let hint_map = load_hint_map(&search_root).unwrap_or_default();
     let mut line_cache: HashMap<String, Vec<String>> = HashMap::new();
     for id in ids {
+        if !unresolved.contains(id) {
+            continue;
+        }
         if let Some(hint) = hint_map.get(id) {
             if let Some(result) = resolve_from_hint(&search_root, hint, context, &mut line_cache) {
                 results.push(result);
-                resolved.insert(id.clone());
+                unresolved.remove(id);
                 hint_resolved_ids += 1;
             }
         }
     }
 
-    let unresolved: HashSet<String> = wanted.difference(&resolved).cloned().collect();
     if !unresolved.is_empty() {
         let scanner = FileScanner::new(&search_root);
-        let files = scanner.scan()?;
-        for file in files {
-            let rel_path = file
-                .path
+        let files = scanner.list_files()?;
+        for file_path in files {
+            if unresolved.is_empty() {
+                break;
+            }
+
+            let content = match fs::read_to_string(&file_path) {
+                Ok(content) => content,
+                Err(_) => continue,
+            };
+            let rel_path = file_path
                 .strip_prefix(&search_root)
-                .unwrap_or(&file.path)
+                .unwrap_or(&file_path)
                 .display()
                 .to_string();
 
-            let lines: Vec<&str> = file.content.lines().collect();
+            let lines: Vec<String> = content.lines().map(|line| line.to_string()).collect();
             for (idx, line) in lines.iter().enumerate() {
                 let line_num = idx + 1;
                 let snippet = line_to_snippet(line);
                 let id = stable_result_id(&rel_path, line_num, &snippet);
-                if !unresolved.contains(&id) {
+                if !unresolved.remove(&id) {
                     continue;
                 }
 
-                let (context_before, context_after) = context_from_lines(&lines, line_num, context);
+                let (context_before, context_after) =
+                    context_from_string_lines(&lines, line_num, context);
                 let start_line = line_num.saturating_sub(context_before.len());
                 let end_line = line_num + context_after.len();
 
@@ -121,8 +130,11 @@ pub fn run_expand(ids: &[String], path: Option<&str>, context: usize, compact: b
                     context_before,
                     context_after,
                 });
-                resolved.insert(id);
                 scan_resolved_ids += 1;
+
+                if unresolved.is_empty() {
+                    break;
+                }
             }
         }
     }
@@ -175,17 +187,22 @@ pub(crate) fn persist_expand_hints(
     }
 
     for hint in hints {
-        if hint.line == 0 || hint.path.is_empty() || hint.snippet.is_empty() {
+        if hint.line == 0 || hint.path.is_empty() {
             continue;
         }
-        let id = hint
-            .id
-            .unwrap_or_else(|| stable_result_id(&hint.path, hint.line, &hint.snippet));
+        let id = match hint.id {
+            Some(id) => id,
+            None => {
+                if hint.snippet.is_empty() {
+                    continue;
+                }
+                stable_result_id(&hint.path, hint.line, &hint.snippet)
+            }
+        };
         let entry = AgentHintEntry {
             id: id.clone(),
             path: hint.path,
             line: hint.line,
-            snippet: hint.snippet,
             updated_at: now,
         };
         by_id.insert(id, entry);
@@ -345,31 +362,6 @@ fn stable_result_id(path: &str, line: usize, snippet: &str) -> String {
     let payload = format!("{}:{}:{}", path, line, snippet);
     let hash = blake3::hash(payload.as_bytes());
     hash.to_hex()[..16].to_string()
-}
-
-fn context_from_lines(
-    lines: &[&str],
-    line_num: usize,
-    context: usize,
-) -> (Vec<String>, Vec<String>) {
-    if context == 0 || lines.is_empty() {
-        return (vec![], vec![]);
-    }
-
-    let idx = line_num.saturating_sub(1);
-    let start = idx.saturating_sub(context);
-    let end = (idx + context + 1).min(lines.len());
-
-    let before = lines[start..idx].iter().map(|l| (*l).to_string()).collect();
-    let after = if idx + 1 < end {
-        lines[idx + 1..end]
-            .iter()
-            .map(|l| (*l).to_string())
-            .collect()
-    } else {
-        vec![]
-    };
-    (before, after)
 }
 
 fn context_from_string_lines(

@@ -28,11 +28,16 @@ cgrep index
 cgrep search "authentication flow"
 cgrep search "error handling" -m 10 -C 2
 cgrep search "validate_token" --regex --no-index
+cgrep read src/auth.rs
+cgrep map --depth 2
 cgrep symbols UserService -T class
 cgrep definition handleClick
 cgrep callers validateToken
 cgrep references MyClass
 cgrep dependents src/auth.rs
+cgrep agent locate "token validation" --compact
+ID=$(cgrep agent locate "token validation" --compact | jq -r '.results[0].id')
+cgrep agent expand --id "$ID" -C 8 --compact
 ```
 
 ### Tips
@@ -40,6 +45,8 @@ cgrep dependents src/auth.rs
 - Use `--format json --compact` or `--format json2 --compact` for structured output.
 - Use `-p` to scope search when running from subdirectories.
 - `--semantic` / `--hybrid` are optional and require embeddings + index.
+- Use `cgrep read` and `cgrep map` before broad scans when you need focused context.
+- Use `agent locate` + `agent expand` for low-token multi-step retrieval.
 "#;
 
 fn get_claude_md_path() -> Result<PathBuf> {

@@ -150,7 +150,6 @@ impl FileScanner {
     }
 
     /// Get list of file paths only (faster)
-    #[allow(dead_code)]
     pub fn list_files(&self) -> Result<Vec<PathBuf>> {
         let (tx, rx) = mpsc::channel();
 

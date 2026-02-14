@@ -47,11 +47,16 @@ cgrep index
 cgrep search "authentication flow implementation"
 cgrep search "error handling patterns" -p src/ -C 2
 cgrep search "validate_token" --regex --no-index
+cgrep read src/auth.rs
+cgrep map --depth 2
 cgrep symbols handleAuth -T function
 cgrep definition UserService
 cgrep callers process_request
 cgrep references MyClass
 cgrep dependents src/auth.rs
+cgrep agent locate "token validation" --compact
+ID=$(cgrep agent locate "token validation" --compact | jq -r '.results[0].id')
+cgrep agent expand --id "$ID" -C 8 --compact
 ```
 
 ## Options Reference
@@ -65,6 +70,9 @@ cgrep dependents src/auth.rs
 | `--format json|json2` | Structured output |
 | `--compact` | Compact JSON output |
 | `--mode semantic|hybrid` | Optional; requires embeddings + index |
+| `cgrep read <path>` | Read specific file/section context |
+| `cgrep map --depth <n>` | Structural map for quick codebase orientation |
+| `cgrep agent locate/expand` | Two-stage low-token retrieval flow |
 
 ## Best Practices
 
@@ -74,6 +82,8 @@ cgrep dependents src/auth.rs
 - Specify subdirectories for focused search: `cgrep search "validation logic" -p src/lib/`
 - Run `cgrep index` for repeated searches and large repos
 - Use `--regex --no-index` for regex-only scans
+- Use `cgrep read` and `cgrep map` before broad scans when you need focused context
+- Use `agent locate` then `agent expand` when you need compact multi-step retrieval
 
 ### Don't
 
@@ -94,8 +104,10 @@ This project uses **cgrep** for local code search. When searching for code or co
 1. Use `cgrep search "natural language query"` instead of grep-based searches
 2. For symbol lookup: `cgrep symbols <name>` (use `-T` for symbol kind)
 3. For definitions: `cgrep definition <name>`
-4. Use `--format json --compact` or `--format json2 --compact` for machine-readable output
-5. Optional: `--mode semantic|hybrid` when embeddings + index are available
+4. Use `cgrep read <path>` and `cgrep map --depth <n>` for focused context
+5. Use `cgrep agent locate` then `cgrep agent expand --id <id>` for low-token retrieval
+6. Use `--format json --compact` or `--format json2 --compact` for machine-readable output
+7. Optional: `--mode semantic|hybrid` when embeddings + index are available
 
 cgrep uses tantivy + tree-sitter for fast offline code search.
 "#;

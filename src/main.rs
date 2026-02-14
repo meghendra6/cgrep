@@ -285,6 +285,7 @@ fn main() -> Result<()> {
                 effective_dedupe_context,
                 effective_path_alias,
                 effective_suppress_boilerplate,
+                false,
             )?;
         }
         Commands::Read {
@@ -339,6 +340,7 @@ fn main() -> Result<()> {
                     defaults.max_chars_per_snippet,
                     defaults.max_total_chars,
                     defaults.max_context_chars,
+                    true,
                     true,
                     true,
                     true,
