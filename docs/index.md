@@ -1,23 +1,24 @@
 # cgrep Documentation
 
-문서를 빠르게 탐색하려면 아래 두 가지 중 하나를 사용하세요.
+Use one of the entry points below.
 
-- Sidebar 문서 사이트: <https://meghendra6.github.io/cgrep/>
-- Repository 진입점: [README.md](https://github.com/meghendra6/cgrep/blob/main/README.md)
+- Docs site: <https://meghendra6.github.io/cgrep/>
+- Repository README: [README.md](https://github.com/meghendra6/cgrep/blob/main/README.md)
+- Korean docs: [ko/index.md](./ko/index.md)
 
 ## Overview
 
 | Section | Description |
 |---|---|
-| [Installation](./installation.md) | 설치와 초기 실행 |
-| [Usage](./usage.md) | 검색/탐색 명령 전체 가이드 |
-| [Agent Workflow](./agent.md) | `locate`/`expand` 기반 에이전트 검색 흐름 |
-| [MCP](./mcp.md) | MCP 서버 실행, host 설정, harness 원칙 |
-| [Indexing and Watch](./indexing-watch.md) | 인덱싱, watch, daemon 운용 |
-| [Configuration](./configuration.md) | `.cgreprc.toml` 설정 항목 |
-| [Embeddings](./embeddings.md) | semantic/hybrid 검색 운용과 튜닝 |
-| [Troubleshooting](./troubleshooting.md) | 자주 발생하는 문제와 해결 |
-| [Development](./development.md) | 개발/검증 명령 |
+| [Installation](./installation.md) | Install and first run |
+| [Usage](./usage.md) | CLI commands and search options |
+| [Agent Workflow](./agent.md) | Two-stage `locate` / `expand` flow |
+| [MCP](./mcp.md) | MCP server mode and harness usage |
+| [Indexing and Watch](./indexing-watch.md) | Indexing, watch, and daemon operations |
+| [Configuration](./configuration.md) | `.cgreprc.toml` and config precedence |
+| [Embeddings](./embeddings.md) | Semantic/hybrid mode setup and tuning |
+| [Troubleshooting](./troubleshooting.md) | Common issues and fixes |
+| [Development](./development.md) | Build, test, and validation commands |
 
 ## Quick Links
 

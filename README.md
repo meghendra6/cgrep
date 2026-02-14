@@ -59,6 +59,7 @@ cgrep agent expand --id "$ID" -C 8 --compact
 
 - Docs hub (GitHub): `docs/index.md`
 - Docs site: <https://meghendra6.github.io/cgrep/>
+- Korean docs: `docs/ko/index.md`
 - Getting started: `docs/installation.md`
 - CLI usage and search options: `docs/usage.md`
 - Agent workflow and integration install: `docs/agent.md`

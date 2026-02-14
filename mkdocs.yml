@@ -28,3 +28,14 @@ nav:
   - Embeddings: embeddings.md
   - Troubleshooting: troubleshooting.md
   - Development: development.md
+  - Korean:
+      - 개요: ko/index.md
+      - 설치: ko/installation.md
+      - 사용법: ko/usage.md
+      - 에이전트 워크플로: ko/agent.md
+      - MCP: ko/mcp.md
+      - 인덱싱과 Watch: ko/indexing-watch.md
+      - 설정: ko/configuration.md
+      - 임베딩: ko/embeddings.md
+      - 문제 해결: ko/troubleshooting.md
+      - 개발: ko/development.md
