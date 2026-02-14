@@ -1,8 +1,11 @@
 /target
 .cgrep/
+/site
 
 # Development directories (not for public repo)
 .github/
+!.github/workflows/
+!.github/workflows/*.yml
 .vscode/
 local/
 
