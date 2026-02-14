@@ -182,9 +182,7 @@ impl FileScanner {
 /// True when a file extension is included in indexing/scanning.
 pub fn is_indexable_extension(ext: &str) -> bool {
     let lower = ext.to_ascii_lowercase();
-    INDEXABLE_EXTENSIONS
-        .iter()
-        .any(|candidate| *candidate == lower.as_str())
+    INDEXABLE_EXTENSIONS.contains(&lower.as_str())
 }
 
 /// Detect language from file extension
