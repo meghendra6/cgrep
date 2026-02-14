@@ -79,6 +79,22 @@ Notes:
 - `agent locate/expand` are optimized for low-token loops.
 - `agent locate` applies caching + payload minimization defaults.
 
+## Recent Updates
+
+- `watch` defaults are now background-friendly (`--min-interval 180`, adaptive backoff on).
+- New watch controls: `--min-interval`, `--max-batch-delay`, `--no-adaptive`.
+- `definition` lookup now uses a tighter index-first candidate path for faster responses.
+
+## Scope Notes (vs tilth)
+
+Included from the same problem space:
+- Smart read flow: `read`, `read --section`, `map`
+- Agent 2-stage retrieval: `agent locate` + `agent expand`
+- Definition-first symbol lookup improvements
+
+Not currently in cgrep:
+- Hash-anchored edit workflow (`tilth_edit`-style edit mode)
+
 ## Command Overview
 
 | Command | Description |
@@ -169,6 +185,7 @@ Examples of advanced flags:
 - `--agent-cache`, `--cache-ttl`
 - `--context-pack`
 - `--max-chars-per-snippet`, `--max-context-chars`, `--max-total-chars`
+- `--path-alias`, `--dedupe-context`, `--suppress-boilerplate`
 
 ## Output Formats
 
@@ -183,30 +200,6 @@ Format summary:
 - `text`: human-readable
 - `json`: simple array/object payload
 - `json2`: structured payload for automation/agents
-
-`search --format json2` shape:
-- `meta`: query/mode/timing/truncation/cache metadata
-- `results`: deterministic list with stable `id`, path/snippet/lines/scores
-
-`read --format json` shape:
-- `path`, `mode`, `size_bytes`, `line_count`, `tokens_estimate`, `content`
-
-`map --format json2` shape:
-- `meta`: schema/command/root/depth
-- `entries`: deterministic file list with token estimates and optional `symbols`
-
-## Symbols / References Examples
-
-```bash
-# Symbols
-cgrep symbols AuthService -T class -t typescript
-
-# References in changed files only
-cgrep references validate_token --changed
-
-# Limit reference payload
-cgrep references validate_token -m 20
-```
 
 ## Indexing & Watch
 
@@ -226,6 +219,9 @@ cgrep watch
 
 # Large repos (ex: pytorch): even lower background pressure
 cgrep watch --debounce 30 --min-interval 180 --max-batch-delay 240
+
+# Disable adaptive mode if you want fixed timing behavior
+cgrep watch --no-adaptive
 ```
 
 Behavior notes:
@@ -234,6 +230,36 @@ Behavior notes:
 - Indexing ignores `.gitignore`; scan mode respects `.gitignore`
 - Watch mode uses adaptive backoff by default (disable with `--no-adaptive`)
 - Watch defaults are tuned for background operation: `--min-interval 180` (about 3 minutes)
+- Watch only reacts to indexable source extensions and skips common temp/swap files
+- Watch respects `[index].exclude_paths` from config for both initial and incremental indexing
+
+Watch option defaults:
+
+| Option | Default | Purpose |
+|---|---:|---|
+| `--debounce` | `15` | wait for event bursts to settle |
+| `--min-interval` | `180` | minimum interval between reindex runs |
+| `--max-batch-delay` | `180` | force a run if events keep streaming |
+| adaptive mode | `on` | auto-backoff based on change volume/reindex cost |
+
+### Background Watch (Recommended)
+
+```bash
+# Run in background and write logs
+nohup cgrep watch > .cgrep/watch.log 2>&1 &
+
+# Check process/log
+pgrep -fl "cgrep watch"
+tail -f .cgrep/watch.log
+
+# Stop
+pkill -f "cgrep watch"
+```
+
+For very large repositories, prefer:
+- `--min-interval 180` or higher
+- `--debounce 30` or higher
+- keeping adaptive mode enabled (default)
 
 ## Agent Integration Install
 
