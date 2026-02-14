@@ -1,12 +1,32 @@
 # cgrep Documentation
 
-Use one of the entry points below.
+`grep` finds text. `cgrep` finds code intent.
+
+Local-first code search for humans and AI agents working in real repositories.
 
 - Docs site: <https://meghendra6.github.io/cgrep/>
 - Repository README: [README.md](https://github.com/meghendra6/cgrep/blob/main/README.md)
 - Korean docs: [ko/index.md](./ko/index.md)
 
-## Overview
+## Why cgrep
+
+- Built for AI coding loops: compact, deterministic `json2` output and two-stage `agent locate/expand`.
+- Code-aware navigation: `definition`, `references`, `callers`, `dependents`, `map`, and `read`.
+- Local-first operations: fast retrieval, private code, no cloud dependency.
+
+## Benchmark Snapshot (PyTorch)
+
+Measured on February 14, 2026 across 6 implementation-tracing scenarios.
+
+| Metric | Baseline (`grep`) | cgrep (`agent locate/expand`) | Improvement |
+|---|---:|---:|---:|
+| Total agent context tokens | 164,961 | 11,293 | **93.2% less** |
+| Avg tokens per task | 27,494 | 1,882 | **14.61x smaller** |
+| Avg retrieval latency per task | 1,244.2 ms | 20.8 ms | **~59.7x faster** |
+
+Details: [Benchmark: Agent Token Efficiency](./benchmarks/pytorch-agent-token-efficiency.md)
+
+## Start Here
 
 | Section | Description |
 |---|---|
@@ -17,6 +37,7 @@ Use one of the entry points below.
 | [Indexing and Watch](./indexing-watch.md) | Indexing, watch, and daemon operations |
 | [Configuration](./configuration.md) | `.cgreprc.toml` and config precedence |
 | [Embeddings](./embeddings.md) | Semantic/hybrid mode setup and tuning |
+| [Benchmark: Agent Token Efficiency](./benchmarks/pytorch-agent-token-efficiency.md) | AI coding workflow token reduction benchmark on PyTorch (`grep` baseline) |
 | [Troubleshooting](./troubleshooting.md) | Common issues and fixes |
 | [Development](./development.md) | Build, test, and validation commands |
 

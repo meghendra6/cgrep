@@ -1,0 +1,3 @@
+# Keep benchmark reports, but do not commit raw JSON artifacts
+*.json
+history/

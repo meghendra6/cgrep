@@ -1,5 +1,5 @@
 site_name: cgrep Docs
-site_description: Local code search for humans and AI agents
+site_description: grep finds text. cgrep finds code intent.
 site_url: https://meghendra6.github.io/cgrep/
 repo_url: https://github.com/meghendra6/cgrep
 repo_name: meghendra6/cgrep
@@ -26,6 +26,8 @@ nav:
   - Indexing and Watch: indexing-watch.md
   - Configuration: configuration.md
   - Embeddings: embeddings.md
+  - Benchmark:
+      - Agent Token Efficiency: benchmarks/pytorch-agent-token-efficiency.md
   - Troubleshooting: troubleshooting.md
   - Development: development.md
   - Korean:

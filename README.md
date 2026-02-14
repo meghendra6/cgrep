@@ -1,6 +1,8 @@
 # cgrep
 
-Local code search for humans and AI agents.
+`grep` finds text. `cgrep` finds code intent.
+
+Built for humans and AI agents working in real repositories.
 
 `cgrep` combines:
 - BM25 full-text search (Tantivy)
@@ -10,13 +12,35 @@ Local code search for humans and AI agents.
 
 Everything runs locally.
 
-## Why cgrep
+## Why Teams Choose cgrep
 
-- Fast search in medium/large codebases
-- Better code-aware lookup than plain grep for symbols/definitions
-- Agent-friendly output (`json2`) and payload controls
-- Background-friendly indexing/watch for large repositories
-- MCP server mode for tool-call based AI workflows
+- Proven on large codebases: in PyTorch agent workflows, cgrep cut context tokens by **93.2%** (**14.61x**) and reduced retrieval loop latency by about **59.7x** after indexing.
+- Get answers, not just matching lines: `definition`, `references`, `callers`, `dependents`, `map`, `read`.
+- Keep AI-agent loops small with `agent locate` + `agent expand` and compact `json2` output.
+- Stay local-first for speed and privacy (no cloud index required).
+- Scale safely on large repos with indexing, watch/daemon, and MCP server mode.
+
+## grep vs cgrep (Practical)
+
+| You need to... | Plain grep workflow | cgrep workflow |
+|---|---|---|
+| Find where logic is implemented | Iterate patterns + open many files manually | `cgrep definition/references/callers` directly |
+| Feed context to AI coding agents | Large, noisy payloads | Budgeted, structured payloads (`agent`, `json2`) |
+| Keep retrieval stable over time | Ad-hoc scripts per repo | Built-in index/watch/daemon + MCP integration |
+
+## Benchmark Snapshot (PyTorch)
+
+- Measured on February 14, 2026 across 6 AI-coding scenarios (implementation/structure tracing on PyTorch).
+- One-time index build: **4.93s**.
+
+| Metric | Baseline (`grep`) | cgrep (`agent locate/expand`) | Improvement |
+|---|---:|---:|---:|
+| Total agent context tokens | 164,961 | 11,293 | **93.2% less** |
+| Avg tokens per task | 27,494 | 1,882 | **14.61x smaller** |
+| Avg retrieval latency per task | 1,244.2 ms | 20.8 ms | **~59.7x faster** |
+
+- Practical meaning: for the same tasks, cgrep sends only **6.8%** of the context that a plain `grep` workflow sends.
+- Full methodology and raw data: `docs/benchmarks/pytorch-agent-token-efficiency.md`.
 
 ## Install
 
@@ -67,6 +91,7 @@ cgrep agent expand --id "$ID" -C 8 --compact
 - Indexing, watch, and daemon: `docs/indexing-watch.md`
 - Configuration: `docs/configuration.md`
 - Embeddings mode: `docs/embeddings.md`
+- Agent token benchmark: `docs/benchmarks/pytorch-agent-token-efficiency.md`
 - Troubleshooting: `docs/troubleshooting.md`
 - Development and validation: `docs/development.md`
 
