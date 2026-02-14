@@ -47,6 +47,13 @@ cgrep agent expand --id "$ID" -C 8 --compact
 - `--semantic` / `--hybrid` are optional and require embeddings + index.
 - Use `cgrep read` and `cgrep map` before broad scans when you need focused context.
 - Use `agent locate` + `agent expand` for low-token multi-step retrieval.
+
+### Harness Rules
+
+- Follow `map -> search -> read -> symbol-navigation` to reduce retries.
+- Keep output deterministic with compact JSON formats.
+- Scope early (`-p`, `--glob`, `--changed`) in large repositories.
+- In MCP mode (`cgrep mcp serve`), prefer cgrep tools over host-native search/read tools.
 "#;
 
 fn get_claude_md_path() -> Result<PathBuf> {

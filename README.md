@@ -45,8 +45,8 @@ cgrep search "retry logic" --changed
 # 5) Symbol/navigation commands
 cgrep symbols UserService -T class
 cgrep definition handle_auth
-cgrep callers validate_token
-cgrep references UserService
+cgrep callers validate_token --mode auto
+cgrep references UserService --mode auto
 
 # 6) Dependency lookup
 cgrep dependents src/auth.rs
@@ -84,6 +84,11 @@ Notes:
 - `watch` defaults are now background-friendly (`--min-interval 180`, adaptive backoff on).
 - New watch controls: `--min-interval`, `--max-batch-delay`, `--no-adaptive`.
 - `definition` lookup now uses a tighter index-first candidate path for faster responses.
+- Watch reindex now applies changed-path incremental updates (no full rebuild per cycle).
+- `callers`/`references` now support `--mode auto|regex|ast`.
+- New daemon management command: `cgrep daemon start|status|stop`.
+- New MCP server mode: `cgrep mcp serve` + host config install/uninstall.
+- Added harness guidance for deterministic tool-call workflows.
 
 ## Scope Notes (vs tilth)
 
@@ -111,6 +116,8 @@ Not currently in cgrep:
 | `cgrep dependents <file>` (`deps`) | Reverse dependency lookup |
 | `cgrep index` | Build/rebuild index |
 | `cgrep watch` | Reindex on file changes |
+| `cgrep daemon <start|status|stop>` | Manage background watch daemon |
+| `cgrep mcp <serve|install|uninstall>` | MCP server + host config integration |
 | `cgrep agent install <provider>` | Install agent instructions |
 | `cgrep agent uninstall <provider>` | Uninstall agent instructions |
 | `cgrep completions <shell>` | Generate shell completions |
@@ -201,6 +208,61 @@ Format summary:
 - `json`: simple array/object payload
 - `json2`: structured payload for automation/agents
 
+## MCP & Harness
+
+Run as MCP stdio server:
+
+```bash
+cgrep mcp serve
+```
+
+Install MCP config (host-specific):
+
+```bash
+cgrep mcp install claude-code
+cgrep mcp install cursor
+cgrep mcp install windsurf
+cgrep mcp install vscode
+cgrep mcp install claude-desktop
+```
+
+Remove MCP config:
+
+```bash
+cgrep mcp uninstall claude-code
+```
+
+Harness principles used by MCP mode:
+- Use structured tool calls (`search -> read -> symbol navigation`) instead of ad-hoc grep loops.
+- Keep responses deterministic (`json/json2 + compact`) to reduce retry churn.
+- Narrow `path`/scope early for stable, low-token retrieval.
+- cgrep MCP is read/search oriented (no file mutation tools).
+- Rationale: [The Harness Problem](https://blog.can.ac/2026/02/12/the-harness-problem/).
+
+MCP tools exposed by `cgrep mcp serve`:
+- `cgrep_search`
+- `cgrep_read`
+- `cgrep_map`
+- `cgrep_symbols`
+- `cgrep_definition`
+- `cgrep_references`
+- `cgrep_callers`
+- `cgrep_dependents`
+- `cgrep_index`
+
+MCP config file targets:
+
+| Host | Path | Key |
+|---|---|---|
+| `claude-code` | `~/.claude.json` | `mcpServers` |
+| `cursor` | `~/.cursor/mcp.json` | `mcpServers` |
+| `windsurf` | `~/.codeium/windsurf/mcp_config.json` | `mcpServers` |
+| `vscode` | `.vscode/mcp.json` | `servers` |
+| `claude-desktop` | OS-specific desktop config path | `mcpServers` |
+
+Note:
+- `claude-desktop` auto-path is currently implemented for macOS/Windows.
+
 ## Indexing & Watch
 
 ```bash
@@ -217,6 +279,11 @@ cgrep index --embeddings precompute
 # Watch mode
 cgrep watch
 
+# Daemon mode (managed background watch)
+cgrep daemon start
+cgrep daemon status
+cgrep daemon stop
+
 # Large repos (ex: pytorch): even lower background pressure
 cgrep watch --debounce 30 --min-interval 180 --max-batch-delay 240
 
@@ -232,6 +299,7 @@ Behavior notes:
 - Watch defaults are tuned for background operation: `--min-interval 180` (about 3 minutes)
 - Watch only reacts to indexable source extensions and skips common temp/swap files
 - Watch respects `[index].exclude_paths` from config for both initial and incremental indexing
+- Watch reindex is changed-path incremental (updates/removes only touched files)
 
 Watch option defaults:
 
@@ -260,6 +328,14 @@ For very large repositories, prefer:
 - `--min-interval 180` or higher
 - `--debounce 30` or higher
 - keeping adaptive mode enabled (default)
+
+Or use daemon management commands:
+
+```bash
+cgrep daemon start
+cgrep daemon status
+cgrep daemon stop
+```
 
 ## Agent Integration Install
 

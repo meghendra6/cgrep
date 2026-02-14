@@ -58,6 +58,13 @@ cgrep agent expand --id "$ID" -C 8 --compact
 - \`cgrep read\` / \`cgrep map\` - Focused file reading + structure mapping
 - \`cgrep agent locate/expand\` - Two-stage low-token retrieval flow
 
+### Harness Rules
+
+- Run structured flows (\`map -> search -> read -> symbol tools\`) over ad-hoc grep loops.
+- Keep output deterministic via compact JSON.
+- Scope queries early for stability.
+- MCP mode is available via \`cgrep mcp serve\` and \`cgrep mcp install <host>\`.
+
 ### Don't
 
 \`\`\`bash
