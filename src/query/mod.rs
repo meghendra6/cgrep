@@ -11,5 +11,6 @@ pub mod index_filter;
 pub mod map;
 pub mod read;
 pub mod references;
+pub mod scope_query;
 pub mod search;
 pub mod symbols;

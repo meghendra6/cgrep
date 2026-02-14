@@ -4,16 +4,16 @@
 
 use anyhow::{Context, Result};
 use std::collections::HashSet;
-use std::path::MAIN_SEPARATOR;
 use std::path::{Path, PathBuf};
 use tantivy::{
     collector::DocSetCollector,
-    query::{BooleanQuery, Occur, PhraseQuery, Query, RegexQuery, TermQuery},
+    query::{BooleanQuery, Occur, PhraseQuery, Query, TermQuery},
     schema::{Field, FieldType, IndexRecordOption, Term, Value},
     Index, ReloadPolicy, TantivyDocument,
 };
 
 use crate::indexer::scanner::{detect_language, ScannedFile};
+use crate::query::scope_query::{build_scope_path_query, normalize_scope, ScopeNormalization};
 use cgrep::utils::INDEX_DIR;
 
 /// Find files that likely contain a symbol name using the index.
@@ -93,7 +93,7 @@ fn find_files_with_field(
         return Ok(None);
     }
 
-    let effective_scope = match normalize_scope(root, scope)? {
+    let effective_scope = match normalize_scope(root, scope) {
         ScopeNormalization::None => None,
         ScopeNormalization::Filter(path) => Some(path),
         ScopeNormalization::OutsideRoot => return Ok(Some(Vec::new())),
@@ -193,138 +193,10 @@ fn tokenize_for_field(index: &Index, field: Field, text: &str) -> Result<Vec<Str
     Ok(tokens)
 }
 
-enum ScopeNormalization {
-    None,
-    Filter(PathBuf),
-    OutsideRoot,
-}
-
 #[derive(Clone, Copy)]
 enum MatchMode {
     AllTokens,
     Phrase,
-}
-
-fn normalize_scope(root: &Path, scope: Option<&Path>) -> Result<ScopeNormalization> {
-    let Some(scope) = scope else {
-        return Ok(ScopeNormalization::None);
-    };
-
-    let root = root.to_path_buf();
-    let scope = if scope.is_absolute() {
-        scope.to_path_buf()
-    } else {
-        root.join(scope)
-    };
-
-    if scope == root {
-        return Ok(ScopeNormalization::None);
-    }
-    if scope.starts_with(&root) {
-        return Ok(ScopeNormalization::Filter(scope));
-    }
-
-    // Canonical fallback covers symlink aliases (/var vs /private/var on macOS).
-    let root_canonical = root.canonicalize().unwrap_or_else(|_| root.clone());
-    let scope_canonical = scope.canonicalize().unwrap_or_else(|_| scope.clone());
-    if scope_canonical == root_canonical {
-        return Ok(ScopeNormalization::None);
-    }
-    if scope_canonical.starts_with(&root_canonical) {
-        return Ok(ScopeNormalization::Filter(scope));
-    }
-
-    Ok(ScopeNormalization::OutsideRoot)
-}
-
-fn build_scope_path_query(
-    path_exact_field: Field,
-    root: &Path,
-    scope_path: &Path,
-) -> Option<Box<dyn Query>> {
-    let mut scope_queries: Vec<(Occur, Box<dyn Query>)> = Vec::new();
-    let mut seen_terms: HashSet<String> = HashSet::new();
-    let mut seen_patterns: HashSet<String> = HashSet::new();
-
-    let mut root_variants = vec![root.to_path_buf()];
-    if let Ok(canonical) = root.canonicalize() {
-        if !root_variants.iter().any(|v| v == &canonical) {
-            root_variants.push(canonical);
-        }
-    }
-    let mut scope_variants = vec![scope_path.to_path_buf()];
-    if let Ok(canonical) = scope_path.canonicalize() {
-        if !scope_variants.iter().any(|v| v == &canonical) {
-            scope_variants.push(canonical);
-        }
-    }
-
-    for scope_variant in &scope_variants {
-        if scope_variant.is_file() {
-            let value = scope_variant.to_string_lossy().to_string();
-            if seen_terms.insert(value.clone()) {
-                let term = Term::from_field_text(path_exact_field, &value);
-                scope_queries.push((
-                    Occur::Should,
-                    Box::new(TermQuery::new(term, IndexRecordOption::Basic)),
-                ));
-            }
-        } else {
-            let mut absolute_prefix = scope_variant.to_string_lossy().to_string();
-            if !absolute_prefix.ends_with(MAIN_SEPARATOR) {
-                absolute_prefix.push(MAIN_SEPARATOR);
-            }
-            let pattern = format!("{}.*", regex::escape(&absolute_prefix));
-            if seen_patterns.insert(pattern.clone()) {
-                if let Ok(query) = RegexQuery::from_pattern(&pattern, path_exact_field) {
-                    scope_queries.push((Occur::Should, Box::new(query)));
-                }
-            }
-        }
-        for root_variant in &root_variants {
-            let rel_scope = scope_variant
-                .strip_prefix(root_variant)
-                .ok()
-                .map(|p| p.to_string_lossy().replace('\\', "/"))
-                .unwrap_or_default();
-            if rel_scope.is_empty() {
-                continue;
-            }
-
-            if scope_variant.is_file() {
-                for candidate in [rel_scope.clone(), format!("./{rel_scope}")] {
-                    if seen_terms.insert(candidate.clone()) {
-                        let term = Term::from_field_text(path_exact_field, &candidate);
-                        scope_queries.push((
-                            Occur::Should,
-                            Box::new(TermQuery::new(term, IndexRecordOption::Basic)),
-                        ));
-                    }
-                }
-            } else {
-                let mut rel_prefix = rel_scope.clone();
-                if !rel_prefix.ends_with('/') {
-                    rel_prefix.push('/');
-                }
-                for prefix in [rel_prefix.clone(), format!("./{rel_prefix}")] {
-                    let pattern = format!("{}.*", regex::escape(&prefix));
-                    if seen_patterns.insert(pattern.clone()) {
-                        if let Ok(query) = RegexQuery::from_pattern(&pattern, path_exact_field) {
-                            scope_queries.push((Occur::Should, Box::new(query)));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if scope_queries.is_empty() {
-        None
-    } else if scope_queries.len() == 1 {
-        Some(scope_queries.remove(0).1)
-    } else {
-        Some(Box::new(BooleanQuery::new(scope_queries)))
-    }
 }
 
 #[cfg(test)]
