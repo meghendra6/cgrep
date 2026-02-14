@@ -105,6 +105,7 @@ fn install_for_provider(provider: AgentProvider) -> Result<()> {
         AgentProvider::ClaudeCode => install::claude_code::install(),
         AgentProvider::Codex => install::codex::install(),
         AgentProvider::Copilot => install::copilot::install(),
+        AgentProvider::Cursor => install::cursor::install(),
         AgentProvider::Opencode => install::opencode::install(),
     }
 }
@@ -114,6 +115,7 @@ fn uninstall_for_provider(provider: AgentProvider) -> Result<()> {
         AgentProvider::ClaudeCode => install::claude_code::uninstall(),
         AgentProvider::Codex => install::codex::uninstall(),
         AgentProvider::Copilot => install::copilot::uninstall(),
+        AgentProvider::Cursor => install::cursor::uninstall(),
         AgentProvider::Opencode => install::opencode::uninstall(),
     }
 }

@@ -72,6 +72,7 @@ pub enum AgentProvider {
     ClaudeCode,
     Codex,
     Copilot,
+    Cursor,
     Opencode,
 }
 

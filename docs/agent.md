@@ -33,6 +33,7 @@ Install instructions into supported agents:
 cgrep agent install claude-code
 cgrep agent install codex
 cgrep agent install copilot
+cgrep agent install cursor
 cgrep agent install opencode
 ```
 
@@ -42,7 +43,12 @@ Uninstall:
 cgrep agent uninstall claude-code
 cgrep agent uninstall codex
 cgrep agent uninstall copilot
+cgrep agent uninstall cursor
 cgrep agent uninstall opencode
 ```
 
 Legacy `install-*` and `uninstall-*` commands remain for compatibility.
+
+Cursor note:
+- `agent install cursor` writes a project-local rule file: `.cursor/rules/cgrep.mdc`
+- MCP is also supported for Cursor via `cgrep mcp install cursor`

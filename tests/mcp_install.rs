@@ -68,3 +68,36 @@ fn mcp_install_vscode_uses_servers_key() {
     let json: Value = serde_json::from_str(&raw).expect("parse config");
     assert!(json["servers"]["cgrep"].is_null());
 }
+
+#[test]
+fn mcp_install_cursor_updates_cursor_config() {
+    let dir = TempDir::new().expect("tempdir");
+    let home = dir.path().join("home");
+    fs::create_dir_all(&home).expect("home");
+    let config_path = home.join(".cursor").join("mcp.json");
+
+    let mut install_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    install_cmd
+        .current_dir(dir.path())
+        .env("HOME", &home)
+        .args(["mcp", "install", "cursor"])
+        .assert()
+        .success();
+
+    let raw = fs::read_to_string(&config_path).expect("read config");
+    let json: Value = serde_json::from_str(&raw).expect("parse config");
+    assert!(json["mcpServers"]["cgrep"].is_object());
+    assert_eq!(json["mcpServers"]["cgrep"]["command"], "cgrep");
+
+    let mut uninstall_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    uninstall_cmd
+        .current_dir(dir.path())
+        .env("HOME", &home)
+        .args(["mcp", "uninstall", "cursor"])
+        .assert()
+        .success();
+
+    let raw = fs::read_to_string(&config_path).expect("read config");
+    let json: Value = serde_json::from_str(&raw).expect("parse config");
+    assert!(json["mcpServers"]["cgrep"].is_null());
+}
