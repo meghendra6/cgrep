@@ -19,17 +19,26 @@ cgrep index --embeddings precompute
 ```bash
 # Foreground watch
 cgrep watch
+cgrep w
 
 # Daemon mode (managed background watch)
 cgrep daemon start
 cgrep daemon status
 cgrep daemon stop
+
+# Short alias form
+cgrep bg up
+cgrep bg st
+cgrep bg down
 ```
 
 Large-repo low-pressure example:
 
 ```bash
 cgrep watch --debounce 30 --min-interval 180 --max-batch-delay 240
+
+# Short flag form
+cgrep w -d 30 -i 180 -b 240
 ```
 
 Disable adaptive mode (fixed timing behavior):

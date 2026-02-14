@@ -3,6 +3,7 @@
 `grep` finds text. `cgrep` finds code intent.
 
 Built for humans and AI agents working in real repositories.
+Current release: **v1.4.1**.
 
 `cgrep` combines:
 - BM25 full-text search (Tantivy)
@@ -14,9 +15,10 @@ Everything runs locally.
 
 ## Why Teams Choose cgrep
 
-- Proven on large codebases: in PyTorch agent workflows, cgrep cut context tokens by **93.2%** (**14.61x**) and reduced retrieval loop latency by about **59.7x** after indexing.
+- Proven on large codebases: in PyTorch scenario-completion workflows, cgrep cut tokens-to-complete by **95.2%** (**20.75x**) and reduced retrieval loop latency by about **58.2x** after indexing.
 - Get answers, not just matching lines: `definition`, `references`, `callers`, `dependents`, `map`, `read`.
 - Keep AI-agent loops small with `agent locate` + `agent expand` and compact `json2` output.
+- Ergonomic CLI shortcuts: `s`, `d`, `r`, `c`, `dep`, `i`, `a l`, plus short flags like `-u`, `-M`, `-B`, `-P`.
 - Stay local-first for speed and privacy (no cloud index required).
 - Scale safely on large repos with indexing, watch/daemon, and MCP server mode.
 
@@ -31,15 +33,16 @@ Everything runs locally.
 ## Benchmark Snapshot (PyTorch)
 
 - Measured on February 14, 2026 across 6 AI-coding scenarios (implementation/structure tracing on PyTorch).
-- One-time index build: **4.93s**.
+- Completion model: iterative retrieval loops run until each scenario’s completion criteria is satisfied.
+- One-time index build: **5.31s**.
 
 | Metric | Baseline (`grep`) | cgrep (`agent locate/expand`) | Improvement |
 |---|---:|---:|---:|
-| Total agent context tokens | 164,961 | 11,293 | **93.2% less** |
-| Avg tokens per task | 27,494 | 1,882 | **14.61x smaller** |
-| Avg retrieval latency per task | 1,244.2 ms | 20.8 ms | **~59.7x faster** |
+| Total tokens-to-complete | 127,665 | 6,153 | **95.2% less** |
+| Avg tokens-to-complete per task | 21,278 | 1,026 | **20.75x smaller** |
+| Avg retrieval latency to completion | 1,321.3 ms | 22.7 ms | **~58.2x faster** |
 
-- Practical meaning: for the same tasks, cgrep sends only **6.8%** of the context that a plain `grep` workflow sends.
+- Practical meaning: for the same completed scenarios, cgrep used only **4.8%** of the token volume of a plain `grep` workflow.
 - Full methodology and raw data: `docs/benchmarks/pytorch-agent-token-efficiency.md`.
 
 ## Install
@@ -70,6 +73,17 @@ cgrep references UserService --mode auto
 # Smart read/map
 cgrep read src/auth.rs
 cgrep map --depth 2
+```
+
+Shortcut-first equivalents:
+
+```bash
+cgrep i                       # index
+cgrep s "authentication flow" # search
+cgrep d handle_auth           # definition
+cgrep r UserService           # references
+cgrep c validate_token        # callers
+cgrep dep src/auth.rs         # dependents
 ```
 
 Agent workflow example:

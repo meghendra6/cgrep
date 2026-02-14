@@ -4,12 +4,14 @@
 
 ```bash
 cgrep mcp serve
+cgrep mcp run
 ```
 
 ## Install host config
 
 ```bash
 cgrep mcp install claude-code
+cgrep mcp add claude-code
 cgrep mcp install cursor
 cgrep mcp install windsurf
 cgrep mcp install vscode
@@ -20,6 +22,7 @@ cgrep mcp install claude-desktop
 
 ```bash
 cgrep mcp uninstall claude-code
+cgrep mcp rm claude-code
 ```
 
 ## Harness guidance

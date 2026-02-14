@@ -11,6 +11,9 @@
 # 1단계: locate (json2 중심 출력)
 cgrep agent locate "where token validation happens" --changed --budget balanced --compact
 
+# 단축 별칭 형태:
+cgrep a l "where token validation happens" -u -B balanced --compact
+
 # 첫 번째 결과 ID 선택 예시
 ID=$(cgrep agent locate "token validation" --compact | jq -r '.results[0].id')
 

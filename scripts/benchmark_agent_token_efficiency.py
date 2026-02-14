@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT OR Apache-2.0
 
-"""Benchmark AI-agent token efficiency on a local PyTorch checkout.
+"""Benchmark AI-agent token efficiency to scenario completion on a local PyTorch checkout.
 
 Compares two workflows for common coding-agent tasks:
-1) Baseline (no cgrep): grep locate + manual file snippet extraction
-2) cgrep workflow: agent locate + agent expand
+1) Baseline (no cgrep): grep locate + incremental snippet expansion
+2) cgrep workflow: agent locate + incremental agent expand
 
 Outputs machine-readable JSON and a Markdown report.
 """
@@ -31,6 +31,7 @@ class Scenario:
     objective: str
     grep_pattern: str
     cgrep_query: str
+    completion_groups: tuple[tuple[str, ...], ...]
 
 
 @dataclasses.dataclass
@@ -47,37 +48,46 @@ SCENARIOS: list[Scenario] = [
         id="autograd_evaluate_function",
         objective="Find where autograd engine evaluate_function is implemented and inspected.",
         grep_pattern="evaluate_function",
-        cgrep_query="where evaluate_function is implemented in autograd engine",
+        cgrep_query="evaluate_function engine.cpp autograd",
+        completion_groups=(("evaluate_function",), ("engine.cpp", "autograd/")),
     ),
     Scenario(
         id="tensor_iterator_impl",
         objective="Find TensorIterator definition and major implementation usage points.",
         grep_pattern="TensorIterator",
-        cgrep_query="where TensorIterator is defined and used in native ops",
+        cgrep_query="TensorIterator TensorIterator.h TensorIterator.cpp",
+        completion_groups=(("TensorIterator",), ("TensorIterator.h", "TensorIterator.cpp")),
     ),
     Scenario(
         id="python_arg_parser_impl",
         objective="Locate PythonArgParser implementation and usage points.",
         grep_pattern="PythonArgParser",
-        cgrep_query="where PythonArgParser is implemented and used",
+        cgrep_query="PythonArgParser python_arg_parser.h python_arg_parser.cpp",
+        completion_groups=(
+            ("PythonArgParser",),
+            ("python_arg_parser.h", "python_arg_parser.cpp"),
+        ),
     ),
     Scenario(
         id="dispatch_key_set",
         objective="Understand DispatchKeySet representation and references.",
         grep_pattern="DispatchKeySet",
         cgrep_query="where DispatchKeySet is defined and referenced",
+        completion_groups=(("DispatchKeySet",), ("DispatchKeySet.h", "c10/core/")),
     ),
     Scenario(
         id="cuda_graph",
         objective="Locate CUDAGraph implementation-related code quickly.",
         grep_pattern="CUDAGraph",
         cgrep_query="where CUDAGraph is implemented",
+        completion_groups=(("CUDAGraph",), ("CUDAGraph.cpp", "cuda/")),
     ),
     Scenario(
         id="addmm_path",
         objective="Find addmm implementation and call sites.",
         grep_pattern=r"addmm\(",
-        cgrep_query="where addmm is implemented and called",
+        cgrep_query="addmm LinearAlgebra.cpp addmm_out",
+        completion_groups=(("addmm(", "addmm"), ("LinearAlgebra.cpp", "addmm_out", "native/")),
     ),
 ]
 
@@ -146,43 +156,65 @@ def safe_read_lines(path: Path) -> list[str] | None:
         return None
 
 
-def build_baseline_payload(
+def parse_tiers(raw: str) -> list[int]:
+    values: list[int] = []
+    seen: set[int] = set()
+    for chunk in raw.split(","):
+        item = chunk.strip()
+        if not item:
+            continue
+        n = int(item)
+        if n <= 0:
+            raise ValueError(f"tier value must be > 0 (got {n})")
+        if n not in seen:
+            seen.add(n)
+            values.append(n)
+    if not values:
+        raise ValueError("at least one tier value is required")
+    return values
+
+
+def missing_completion_groups(text: str, groups: tuple[tuple[str, ...], ...]) -> list[str]:
+    normalized = text.lower()
+    missing: list[str] = []
+    for group in groups:
+        if not any(marker.lower() in normalized for marker in group):
+            missing.append(" | ".join(group))
+    return missing
+
+
+def prepare_baseline_snippets(
     repo_path: Path,
-    scenario: Scenario,
     grep_run: CommandRun,
     grep_max_matches: int,
-    max_unique_files: int,
     max_windows_per_file: int,
     context_lines: int,
-    max_payload_chars: int,
-) -> tuple[str, dict[str, Any]]:
+    max_unique_files: int,
+) -> tuple[list[str], dict[str, str], dict[str, int], dict[str, Any]]:
     matches = parse_grep_matches(grep_run.stdout, max_matches=grep_max_matches)
 
-    unique_files: list[str] = []
+    ordered_files: list[str] = []
     lines_by_file: dict[str, list[int]] = {}
     for rel, line_no, _snippet in matches:
         if rel not in lines_by_file:
-            if len(unique_files) >= max_unique_files:
+            if len(ordered_files) >= max_unique_files:
                 continue
-            unique_files.append(rel)
+            ordered_files.append(rel)
             lines_by_file[rel] = []
         if len(lines_by_file[rel]) < max_windows_per_file:
             lines_by_file[rel].append(line_no)
 
-    sections: list[str] = []
-    sections.append(f"Task: {scenario.objective}")
-    sections.append("")
-    sections.append("=== Baseline locate output (grep) ===")
-    sections.append("\n".join(grep_run.stdout.splitlines()[:200]))
-    sections.append("")
-    sections.append("=== Baseline snippet expansion ===")
-
-    snippet_count = 0
-    for rel in unique_files:
+    sections_by_file: dict[str, str] = {}
+    windows_by_file: dict[str, int] = {}
+    for rel in ordered_files:
         abs_path = repo_path / rel
         lines = safe_read_lines(abs_path)
         if not lines:
+            sections_by_file[rel] = ""
+            windows_by_file[rel] = 0
             continue
+        sections: list[str] = []
+        snippet_count = 0
         for line_no in lines_by_file.get(rel, []):
             start = max(1, line_no - context_lines)
             end = min(len(lines), line_no + context_lines)
@@ -191,20 +223,64 @@ def build_baseline_payload(
             sections.append(body)
             sections.append("")
             snippet_count += 1
+        sections_by_file[rel] = "\n".join(sections)
+        windows_by_file[rel] = snippet_count
 
-    payload = "\n".join(sections)
-    truncated = False
-    if len(payload) > max_payload_chars:
-        payload = payload[:max_payload_chars] + "\n\n[TRUNCATED]"
-        truncated = True
-
-    meta = {
+    prep_meta = {
         "grep_match_count": len(matches),
-        "unique_files_expanded": len(unique_files),
-        "snippet_windows": snippet_count,
-        "truncated": truncated,
+        "unique_files_available": len(ordered_files),
     }
-    return payload, meta
+    return ordered_files, sections_by_file, windows_by_file, prep_meta
+
+
+def run_cgrep_locate(
+    cgrep_bin: Path,
+    repo_path: Path,
+    scenario: Scenario,
+    locate_limit: int,
+    max_ids: int,
+) -> tuple[CommandRun, list[str]]:
+    locate_cmd = [
+        str(cgrep_bin),
+        "agent",
+        "locate",
+        scenario.cgrep_query,
+        "--format",
+        "json2",
+        "--compact",
+        "--budget",
+        "tight",
+        "--mode",
+        "keyword",
+        "--limit",
+        str(locate_limit),
+    ]
+    locate_run = run_cmd(locate_cmd, cwd=repo_path)
+    ids = extract_ids_from_locate(locate_run.stdout, max_ids=max_ids)
+    return locate_run, ids
+
+
+def run_cgrep_expand(
+    cgrep_bin: Path,
+    repo_path: Path,
+    ids: list[str],
+    expand_context: int,
+) -> CommandRun | None:
+    if not ids:
+        return None
+    expand_cmd = [
+        str(cgrep_bin),
+        "agent",
+        "expand",
+        "--format",
+        "json2",
+        "--compact",
+        "-C",
+        str(expand_context),
+    ]
+    for rid in ids:
+        expand_cmd.extend(["--id", rid])
+    return run_cmd(expand_cmd, cwd=repo_path)
 
 
 def extract_ids_from_locate(stdout: str, max_ids: int) -> list[str]:
@@ -227,70 +303,6 @@ def extract_ids_from_locate(stdout: str, max_ids: int) -> list[str]:
         if len(ids) >= max_ids:
             break
     return ids
-
-
-def build_cgrep_payload(
-    cgrep_bin: Path,
-    repo_path: Path,
-    scenario: Scenario,
-    locate_limit: int,
-    expand_ids: int,
-    expand_context: int,
-) -> tuple[str, dict[str, Any], CommandRun, CommandRun | None]:
-    locate_cmd = [
-        str(cgrep_bin),
-        "agent",
-        "locate",
-        scenario.cgrep_query,
-        "--format",
-        "json2",
-        "--compact",
-        "--budget",
-        "tight",
-        "--mode",
-        "keyword",
-        "--limit",
-        str(locate_limit),
-    ]
-    locate_run = run_cmd(locate_cmd, cwd=repo_path)
-
-    ids = extract_ids_from_locate(locate_run.stdout, max_ids=expand_ids)
-    expand_run: CommandRun | None = None
-
-    if ids:
-        expand_cmd = [
-            str(cgrep_bin),
-            "agent",
-            "expand",
-            "--format",
-            "json2",
-            "--compact",
-            "-C",
-            str(expand_context),
-        ]
-        for rid in ids:
-            expand_cmd.extend(["--id", rid])
-        expand_run = run_cmd(expand_cmd, cwd=repo_path)
-
-    payload_parts = [
-        f"Task: {scenario.objective}",
-        "",
-        "=== cgrep locate ===",
-        locate_run.stdout.strip(),
-        "",
-        "=== cgrep expand ===",
-        (expand_run.stdout.strip() if expand_run is not None else "[no ids from locate]"),
-    ]
-    payload = "\n".join(payload_parts)
-
-    meta = {
-        "locate_returncode": locate_run.returncode,
-        "expand_returncode": (expand_run.returncode if expand_run else None),
-        "locate_ids": ids,
-        "locate_duration_ms": locate_run.duration_ms,
-        "expand_duration_ms": (expand_run.duration_ms if expand_run else 0.0),
-    }
-    return payload, meta, locate_run, expand_run
 
 
 def git_rev(path: Path) -> str:
@@ -338,10 +350,11 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines.append("")
     lines.append("## What This Measures")
     lines.append("")
-    lines.append("1. **Baseline (without cgrep):** `grep` locate + manual snippet expansion from multiple files.")
-    lines.append("2. **With cgrep:** `agent locate` + `agent expand` (tight budget, compact JSON).")
-    lines.append("3. **Primary metric:** token volume sent to an AI coding agent for task completion.")
-    lines.append("4. **Tokenizer:** OpenAI `cl100k_base` when available (fallback: byte/4 approximation).")
+    lines.append("1. **Baseline (without cgrep):** `grep` locate + incremental snippet expansion tiers.")
+    lines.append("2. **With cgrep:** `agent locate` once + incremental `agent expand` ID tiers.")
+    lines.append("3. **Completion rule:** scenario is complete when each marker-group has at least one match in cumulative tool outputs.")
+    lines.append("4. **Primary metric:** cumulative tokens consumed until completion (`tokens-to-complete`).")
+    lines.append("5. **Tokenizer:** OpenAI `cl100k_base` when available (fallback: byte/4 approximation).")
     lines.append("")
     lines.append("## Environment")
     lines.append("")
@@ -350,26 +363,36 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines.append(f"- pytorch commit: `{payload['environment']['pytorch_commit']}`")
     lines.append(f"- PyTorch files (`git ls-files`): `{payload['environment']['pytorch_file_count']}`")
     lines.append(f"- Tokenizer: `{payload['config']['tokenizer']}`")
+    lines.append(f"- Baseline file tiers: `{payload['config']['baseline_file_tiers']}`")
+    lines.append(f"- cgrep expand tiers: `{payload['config']['cgrep_expand_tiers']}`")
     lines.append("")
     lines.append("## Results")
     lines.append("")
-    lines.append("| Scenario | Baseline tokens | cgrep tokens | Reduction | Baseline latency (ms) | cgrep latency (ms) |")
-    lines.append("|---|---:|---:|---:|---:|---:|")
+    lines.append("| Scenario | Baseline done | cgrep done | Baseline attempts | cgrep attempts | Baseline tokens-to-complete | cgrep tokens-to-complete | Reduction | Baseline latency (ms) | cgrep latency (ms) |")
+    lines.append("|---|---|---|---:|---:|---:|---:|---:|---:|---:|")
     for r in rows:
+        reduction = f"{r['token_reduction_percent_to_completion']:.1f}%"
         lines.append(
             f"| {r['objective']} | "
-            f"{r['baseline_tokens']:,} | {r['cgrep_tokens']:,} | "
-            f"{r['token_reduction_percent']:.1f}% | "
-            f"{r['baseline_total_latency_ms']:.2f} | {r['cgrep_total_latency_ms']:.2f} |"
+            f"{'yes' if r['baseline_completed'] else 'no'} | "
+            f"{'yes' if r['cgrep_completed'] else 'no'} | "
+            f"{r['baseline_attempts']} | {r['cgrep_attempts']} | "
+            f"{r['baseline_tokens_to_completion']:,} | {r['cgrep_tokens_to_completion']:,} | "
+            f"{reduction} | "
+            f"{r['baseline_latency_ms_to_completion']:.2f} | {r['cgrep_latency_ms_to_completion']:.2f} |"
         )
     lines.append("")
     lines.append("## Aggregate")
     lines.append("")
     lines.append(f"- One-time index build: **{s['index_build_ms']/1000.0:.2f}s**")
-    lines.append(f"- Baseline total tokens: **{s['baseline_total_tokens']:,}**")
-    lines.append(f"- cgrep total tokens: **{s['cgrep_total_tokens']:,}**")
-    lines.append(f"- Token reduction: **{s['token_reduction_percent']:.1f}%**")
-    lines.append(f"- Token compression ratio (baseline/cgrep): **{s['token_compression_x']:.2f}x**")
+    lines.append(f"- Scenarios completed (baseline): **{s['baseline_completed_scenarios']}/{s['scenario_count']}**")
+    lines.append(f"- Scenarios completed (cgrep): **{s['cgrep_completed_scenarios']}/{s['scenario_count']}**")
+    lines.append(f"- Baseline tokens-to-complete (total): **{s['baseline_total_tokens_to_completion']:,}**")
+    lines.append(f"- cgrep tokens-to-complete (total): **{s['cgrep_total_tokens_to_completion']:,}**")
+    lines.append(f"- Token reduction (to completion): **{s['token_reduction_percent_to_completion']:.1f}%**")
+    lines.append(f"- Token compression ratio (baseline/cgrep): **{s['token_compression_x_to_completion']:.2f}x**")
+    lines.append(f"- Baseline total latency to completion: **{s['baseline_total_latency_ms_to_completion']:.2f}ms**")
+    lines.append(f"- cgrep total latency to completion: **{s['cgrep_total_latency_ms_to_completion']:.2f}ms**")
     lines.append("")
     lines.append("## Re-run")
     lines.append("")
@@ -403,7 +426,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
 
 def main() -> int:
     repo_default = os.environ.get("PYTORCH_REPO", "")
-    parser = argparse.ArgumentParser(description="Benchmark AI-agent token efficiency on PyTorch")
+    parser = argparse.ArgumentParser(description="Benchmark AI-agent token efficiency to completion on PyTorch")
     parser.add_argument("--repo", default=repo_default, help="Path to PyTorch repository (or set PYTORCH_REPO)")
     parser.add_argument("--cgrep-bin", default="target/release/cgrep", help="Path to cgrep binary")
     parser.add_argument("--json-out", default="local/benchmarks/pytorch-agent-token-efficiency.json")
@@ -415,14 +438,24 @@ def main() -> int:
 
     parser.add_argument("--grep-max-matches", type=int, default=300)
     parser.add_argument("--rg-max-matches", dest="grep_max_matches", type=int, help=argparse.SUPPRESS)
-    parser.add_argument("--baseline-max-files", type=int, default=8)
+    parser.add_argument("--baseline-max-files", type=int, default=16)
     parser.add_argument("--baseline-max-windows-per-file", type=int, default=2)
     parser.add_argument("--baseline-context-lines", type=int, default=20)
     parser.add_argument("--baseline-max-chars", type=int, default=180000)
+    parser.add_argument(
+        "--baseline-file-tiers",
+        default="2,4,6,8,12",
+        help="Comma-separated file expansion tiers for baseline completion loop",
+    )
 
     parser.add_argument("--locate-limit", type=int, default=12)
-    parser.add_argument("--expand-ids", type=int, default=6)
+    parser.add_argument("--expand-ids", type=int, default=8)
     parser.add_argument("--expand-context", type=int, default=8)
+    parser.add_argument(
+        "--cgrep-expand-tiers",
+        default="1,2,4,6,8",
+        help="Comma-separated ID expansion tiers for cgrep completion loop",
+    )
 
     args = parser.parse_args()
 
@@ -436,6 +469,21 @@ def main() -> int:
         raise SystemExit(f"Invalid repo path: {repo_path}")
     if not cgrep_bin.exists():
         raise SystemExit(f"cgrep binary not found: {cgrep_bin}. Run `cargo build --release`.")
+
+    try:
+        baseline_tiers = parse_tiers(args.baseline_file_tiers)
+        cgrep_tiers = parse_tiers(args.cgrep_expand_tiers)
+    except ValueError as exc:
+        raise SystemExit(f"Invalid tier config: {exc}") from exc
+
+    if max(baseline_tiers) > args.baseline_max_files:
+        raise SystemExit(
+            f"baseline tier max ({max(baseline_tiers)}) exceeds --baseline-max-files ({args.baseline_max_files})"
+        )
+    if max(cgrep_tiers) > args.expand_ids:
+        raise SystemExit(
+            f"cgrep tier max ({max(cgrep_tiers)}) exceeds --expand-ids ({args.expand_ids})"
+        )
 
     tokenizer_name, count_tokens = load_tokenizer()
 
@@ -452,6 +500,7 @@ def main() -> int:
 
     scenario_results: list[dict[str, Any]] = []
     for sc in SCENARIOS:
+        scenario_start = time.perf_counter()
         grep_cmd = [
             "grep",
             "-R",
@@ -467,68 +516,198 @@ def main() -> int:
             ".",
         ]
         grep_run = run_cmd(grep_cmd, cwd=repo_path, timeout_s=args.timeout)
-
-        baseline_payload, baseline_meta = build_baseline_payload(
+        ordered_files, sections_by_file, windows_by_file, baseline_prep_meta = prepare_baseline_snippets(
             repo_path=repo_path,
-            scenario=sc,
             grep_run=grep_run,
             grep_max_matches=args.grep_max_matches,
-            max_unique_files=args.baseline_max_files,
             max_windows_per_file=args.baseline_max_windows_per_file,
             context_lines=args.baseline_context_lines,
-            max_payload_chars=args.baseline_max_chars,
+            max_unique_files=args.baseline_max_files,
         )
+        baseline_attempts: list[dict[str, Any]] = []
+        baseline_context_parts: list[str] = []
+        baseline_tokens_to_completion = 0
+        baseline_latency_to_completion_ms = 0.0
+        baseline_completed = False
+        baseline_missing = [" | ".join(group) for group in sc.completion_groups]
+        previous_file_cap = 0
+        locate_preview = "\n".join(grep_run.stdout.splitlines()[:200])
+        for idx, tier in enumerate(baseline_tiers, start=1):
+            capped_tier = min(tier, len(ordered_files))
+            new_files = ordered_files[previous_file_cap:capped_tier]
+            added_windows = sum(windows_by_file.get(rel, 0) for rel in new_files)
+            attempt_parts: list[str] = []
+            if idx == 1:
+                attempt_parts.extend(
+                    [
+                        f"Task: {sc.objective}",
+                        "",
+                        "=== Baseline locate output (grep) ===",
+                        locate_preview,
+                        "",
+                    ]
+                )
+            attempt_parts.append(f"=== Baseline snippet expansion tier {capped_tier} ===")
+            if new_files:
+                for rel in new_files:
+                    body = sections_by_file.get(rel, "").strip()
+                    if body:
+                        attempt_parts.append(body)
+            else:
+                attempt_parts.append("[no additional files to expand]")
 
-        cgrep_payload, cgrep_meta, locate_run, expand_run = build_cgrep_payload(
+            attempt_payload = "\n".join(attempt_parts).strip()
+            if len(attempt_payload) > args.baseline_max_chars:
+                attempt_payload = attempt_payload[: args.baseline_max_chars] + "\n\n[TRUNCATED]"
+
+            attempt_tokens = count_tokens(attempt_payload)
+            baseline_tokens_to_completion += attempt_tokens
+            baseline_latency_to_completion_ms += grep_run.duration_ms if idx == 1 else 0.0
+            baseline_context_parts.append(attempt_payload)
+            baseline_context = "\n\n".join(baseline_context_parts)
+            baseline_missing = missing_completion_groups(baseline_context, sc.completion_groups)
+            baseline_completed = len(baseline_missing) == 0
+            baseline_attempts.append(
+                {
+                    "tier": capped_tier,
+                    "added_files": len(new_files),
+                    "added_windows": added_windows,
+                    "attempt_tokens": attempt_tokens,
+                    "cumulative_tokens": baseline_tokens_to_completion,
+                    "completed": baseline_completed,
+                    "missing_markers": baseline_missing,
+                }
+            )
+            previous_file_cap = capped_tier
+            if baseline_completed or previous_file_cap >= len(ordered_files):
+                break
+
+        locate_limit_effective = max(args.locate_limit, max(cgrep_tiers), args.expand_ids)
+        locate_run, locate_ids = run_cgrep_locate(
             cgrep_bin=cgrep_bin,
             repo_path=repo_path,
             scenario=sc,
-            locate_limit=args.locate_limit,
-            expand_ids=args.expand_ids,
-            expand_context=args.expand_context,
+            locate_limit=locate_limit_effective,
+            max_ids=args.expand_ids,
         )
+        cgrep_attempts: list[dict[str, Any]] = []
+        cgrep_context_parts: list[str] = []
+        cgrep_tokens_to_completion = 0
+        cgrep_latency_to_completion_ms = 0.0
+        cgrep_completed = False
+        cgrep_missing = [" | ".join(group) for group in sc.completion_groups]
+        expanded_so_far = 0
+        for idx, tier in enumerate(cgrep_tiers, start=1):
+            capped_tier = min(tier, len(locate_ids))
+            next_ids = locate_ids[expanded_so_far:capped_tier]
+            attempt_parts = []
+            if idx == 1:
+                attempt_parts.extend(
+                    [
+                        f"Task: {sc.objective}",
+                        "",
+                        "=== cgrep locate ===",
+                        locate_run.stdout.strip(),
+                        "",
+                    ]
+                )
+                cgrep_latency_to_completion_ms += locate_run.duration_ms
+            attempt_parts.append(f"=== cgrep expand tier {capped_tier} ===")
+            expand_run = run_cgrep_expand(
+                cgrep_bin=cgrep_bin,
+                repo_path=repo_path,
+                ids=next_ids,
+                expand_context=args.expand_context,
+            )
+            if expand_run is not None:
+                cgrep_latency_to_completion_ms += expand_run.duration_ms
+                if expand_run.returncode == 0:
+                    attempt_parts.append(expand_run.stdout.strip())
+                else:
+                    attempt_parts.append(
+                        f"[expand failed rc={expand_run.returncode}] {expand_run.stderr[-400:]}"
+                    )
+            else:
+                attempt_parts.append("[no additional ids to expand]")
 
-        baseline_tokens = count_tokens(baseline_payload)
-        cgrep_tokens = count_tokens(cgrep_payload)
+            attempt_payload = "\n".join(attempt_parts).strip()
+            attempt_tokens = count_tokens(attempt_payload)
+            cgrep_tokens_to_completion += attempt_tokens
+            cgrep_context_parts.append(attempt_payload)
+            cgrep_context = "\n\n".join(cgrep_context_parts)
+            cgrep_missing = missing_completion_groups(cgrep_context, sc.completion_groups)
+            cgrep_completed = len(cgrep_missing) == 0
+            cgrep_attempts.append(
+                {
+                    "tier": capped_tier,
+                    "added_ids": len(next_ids),
+                    "attempt_tokens": attempt_tokens,
+                    "cumulative_tokens": cgrep_tokens_to_completion,
+                    "completed": cgrep_completed,
+                    "missing_markers": cgrep_missing,
+                    "expand_returncode": (expand_run.returncode if expand_run else None),
+                    "expand_duration_ms": (expand_run.duration_ms if expand_run else 0.0),
+                }
+            )
+            expanded_so_far = capped_tier
+            if cgrep_completed or expanded_so_far >= len(locate_ids):
+                break
 
         reduction_percent = 0.0
-        if baseline_tokens > 0:
-            reduction_percent = ((baseline_tokens - cgrep_tokens) / baseline_tokens) * 100.0
-
-        cgrep_latency = locate_run.duration_ms + (expand_run.duration_ms if expand_run else 0.0)
+        if baseline_tokens_to_completion > 0:
+            reduction_percent = (
+                (baseline_tokens_to_completion - cgrep_tokens_to_completion)
+                / baseline_tokens_to_completion
+            ) * 100.0
 
         scenario_results.append(
             {
                 "id": sc.id,
                 "objective": sc.objective,
-                "baseline_tokens": baseline_tokens,
-                "cgrep_tokens": cgrep_tokens,
-                "token_reduction_percent": reduction_percent,
-                "baseline_total_latency_ms": grep_run.duration_ms,
-                "cgrep_total_latency_ms": cgrep_latency,
+                "completion_groups": [list(group) for group in sc.completion_groups],
+                "baseline_tokens_to_completion": baseline_tokens_to_completion,
+                "cgrep_tokens_to_completion": cgrep_tokens_to_completion,
+                "token_reduction_percent_to_completion": reduction_percent,
+                "baseline_latency_ms_to_completion": baseline_latency_to_completion_ms,
+                "cgrep_latency_ms_to_completion": cgrep_latency_to_completion_ms,
+                "baseline_attempts": len(baseline_attempts),
+                "cgrep_attempts": len(cgrep_attempts),
+                "baseline_completed": baseline_completed,
+                "cgrep_completed": cgrep_completed,
+                "baseline_missing_markers": baseline_missing,
+                "cgrep_missing_markers": cgrep_missing,
+                "scenario_duration_ms": (time.perf_counter() - scenario_start) * 1000.0,
                 "baseline": {
                     "grep_command": grep_run.command,
                     "grep_returncode": grep_run.returncode,
                     "grep_duration_ms": grep_run.duration_ms,
-                    **baseline_meta,
+                    "tiers": baseline_tiers,
+                    "attempts": baseline_attempts,
+                    **baseline_prep_meta,
                 },
                 "cgrep": {
                     "locate_command": locate_run.command,
                     "locate_returncode": locate_run.returncode,
                     "locate_duration_ms": locate_run.duration_ms,
-                    "expand_command": (expand_run.command if expand_run else []),
-                    "expand_returncode": (expand_run.returncode if expand_run else None),
-                    "expand_duration_ms": (expand_run.duration_ms if expand_run else 0.0),
-                    **cgrep_meta,
+                    "locate_ids": locate_ids,
+                    "tiers": cgrep_tiers,
+                    "attempts": cgrep_attempts,
                 },
             }
         )
 
-    baseline_total_tokens = sum(x["baseline_tokens"] for x in scenario_results)
-    cgrep_total_tokens = sum(x["cgrep_tokens"] for x in scenario_results)
+    baseline_total_tokens = sum(x["baseline_tokens_to_completion"] for x in scenario_results)
+    cgrep_total_tokens = sum(x["cgrep_tokens_to_completion"] for x in scenario_results)
+    baseline_total_latency = sum(x["baseline_latency_ms_to_completion"] for x in scenario_results)
+    cgrep_total_latency = sum(x["cgrep_latency_ms_to_completion"] for x in scenario_results)
+    baseline_completed_scenarios = sum(1 for x in scenario_results if x["baseline_completed"])
+    cgrep_completed_scenarios = sum(1 for x in scenario_results if x["cgrep_completed"])
+
     token_reduction = 0.0
     if baseline_total_tokens > 0:
-        token_reduction = ((baseline_total_tokens - cgrep_total_tokens) / baseline_total_tokens) * 100.0
+        token_reduction = (
+            (baseline_total_tokens - cgrep_total_tokens) / baseline_total_tokens
+        ) * 100.0
 
     compression = math.inf if cgrep_total_tokens == 0 else baseline_total_tokens / cgrep_total_tokens
 
@@ -548,9 +727,13 @@ def main() -> int:
             "baseline_max_windows_per_file": args.baseline_max_windows_per_file,
             "baseline_context_lines": args.baseline_context_lines,
             "baseline_max_chars": args.baseline_max_chars,
+            "baseline_file_tiers": baseline_tiers,
             "locate_limit": args.locate_limit,
+            "locate_limit_effective": max(args.locate_limit, max(cgrep_tiers), args.expand_ids),
             "expand_ids": args.expand_ids,
             "expand_context": args.expand_context,
+            "cgrep_expand_tiers": cgrep_tiers,
+            "completion_marker_strategy": "at_least_one_match_per_group_in_cumulative_outputs",
             "scenario_count": len(SCENARIOS),
         },
         "index": {
@@ -563,10 +746,15 @@ def main() -> int:
         "scenario_results": scenario_results,
         "summary": {
             "index_build_ms": index_run.duration_ms,
-            "baseline_total_tokens": baseline_total_tokens,
-            "cgrep_total_tokens": cgrep_total_tokens,
-            "token_reduction_percent": token_reduction,
-            "token_compression_x": compression,
+            "scenario_count": len(SCENARIOS),
+            "baseline_completed_scenarios": baseline_completed_scenarios,
+            "cgrep_completed_scenarios": cgrep_completed_scenarios,
+            "baseline_total_tokens_to_completion": baseline_total_tokens,
+            "cgrep_total_tokens_to_completion": cgrep_total_tokens,
+            "token_reduction_percent_to_completion": token_reduction,
+            "token_compression_x_to_completion": compression,
+            "baseline_total_latency_ms_to_completion": baseline_total_latency,
+            "cgrep_total_latency_ms_to_completion": cgrep_total_latency,
         },
     }
 
@@ -588,7 +776,7 @@ def main() -> int:
     print(f"JSON: {json_out}")
     print(f"MD:   {md_out}")
     print(
-        f"Token reduction: {token_reduction:.1f}% "
+        f"Token reduction (to completion): {token_reduction:.1f}% "
         f"({baseline_total_tokens:,} -> {cgrep_total_tokens:,}, {compression:.2f}x)")
     return 0
 

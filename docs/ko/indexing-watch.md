@@ -19,17 +19,26 @@ cgrep index --embeddings precompute
 ```bash
 # 포그라운드 watch
 cgrep watch
+cgrep w
 
 # daemon 모드 (백그라운드 watch 관리)
 cgrep daemon start
 cgrep daemon status
 cgrep daemon stop
+
+# 단축 별칭 형태
+cgrep bg up
+cgrep bg st
+cgrep bg down
 ```
 
 대형 저장소 저부하 예시:
 
 ```bash
 cgrep watch --debounce 30 --min-interval 180 --max-batch-delay 240
+
+# 단축 플래그 형태
+cgrep w -d 30 -i 180 -b 240
 ```
 
 적응형 모드 비활성화(고정 타이밍):

@@ -12,17 +12,19 @@ Local-first code search for humans and AI agents working in real repositories.
 
 - Built for AI coding loops: compact, deterministic `json2` output and two-stage `agent locate/expand`.
 - Code-aware navigation: `definition`, `references`, `callers`, `dependents`, `map`, and `read`.
+- Ergonomic CLI: short aliases like `s`, `d`, `r`, `c`, `dep`, `i`, `a l`.
 - Local-first operations: fast retrieval, private code, no cloud dependency.
 
 ## Benchmark Snapshot (PyTorch)
 
 Measured on February 14, 2026 across 6 implementation-tracing scenarios.
+Completion model: iterative retrieval until each scenario completion rule is satisfied.
 
 | Metric | Baseline (`grep`) | cgrep (`agent locate/expand`) | Improvement |
 |---|---:|---:|---:|
-| Total agent context tokens | 164,961 | 11,293 | **93.2% less** |
-| Avg tokens per task | 27,494 | 1,882 | **14.61x smaller** |
-| Avg retrieval latency per task | 1,244.2 ms | 20.8 ms | **~59.7x faster** |
+| Total tokens-to-complete | 127,665 | 6,153 | **95.2% less** |
+| Avg tokens-to-complete per task | 21,278 | 1,026 | **20.75x smaller** |
+| Avg retrieval latency to completion | 1,321.3 ms | 22.7 ms | **~58.2x faster** |
 
 Details: [Benchmark: Agent Token Efficiency](./benchmarks/pytorch-agent-token-efficiency.md)
 

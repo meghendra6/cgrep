@@ -78,6 +78,7 @@ pub enum AgentProvider {
 #[derive(Subcommand, Debug)]
 pub enum AgentCommands {
     /// Stage 1: locate candidate code regions with minimal payload
+    #[command(visible_aliases = ["l", "loc"])]
     Locate {
         /// Search query (natural language or keywords)
         query: String,
@@ -87,7 +88,7 @@ pub enum AgentCommands {
         path: Option<String>,
 
         /// Limit search to files changed since revision (default: HEAD)
-        #[arg(long, num_args = 0..=1, default_missing_value = "HEAD")]
+        #[arg(short = 'u', long, num_args = 0..=1, default_missing_value = "HEAD")]
         changed: Option<String>,
 
         /// Maximum number of results to return
@@ -95,15 +96,16 @@ pub enum AgentCommands {
         limit: Option<usize>,
 
         /// Search mode: keyword, semantic, or hybrid
-        #[arg(long, value_enum)]
+        #[arg(short = 'M', long, value_enum)]
         mode: Option<CliSearchMode>,
 
         /// Output budget preset (default: balanced)
-        #[arg(long, value_enum)]
+        #[arg(short = 'B', long, value_enum)]
         budget: Option<CliBudgetPreset>,
     },
 
     /// Stage 2: expand selected locate result IDs into richer context
+    #[command(visible_aliases = ["x", "ex"])]
     Expand {
         /// Result ID from `agent locate` (repeatable)
         #[arg(long = "id", required = true)]
@@ -119,12 +121,14 @@ pub enum AgentCommands {
     },
 
     /// Install cgrep instructions for an AI agent provider
+    #[command(visible_aliases = ["add"])]
     Install {
         #[arg(value_enum)]
         provider: AgentProvider,
     },
 
     /// Uninstall cgrep instructions for an AI agent provider
+    #[command(visible_aliases = ["rm"])]
     Uninstall {
         #[arg(value_enum)]
         provider: AgentProvider,
@@ -134,21 +138,22 @@ pub enum AgentCommands {
 #[derive(Subcommand, Debug)]
 pub enum DaemonCommands {
     /// Start background watch daemon
+    #[command(visible_aliases = ["up"])]
     Start {
         /// Path to watch (defaults to current directory)
         #[arg(short, long)]
         path: Option<String>,
 
         /// Debounce interval in seconds (default: 15)
-        #[arg(long, default_value = "15")]
+        #[arg(short = 'd', long, default_value = "15")]
         debounce: u64,
 
         /// Minimum time between reindex operations in seconds (default: 180)
-        #[arg(long = "min-interval", default_value = "180")]
+        #[arg(short = 'i', long = "min-interval", default_value = "180")]
         min_interval: u64,
 
         /// Force reindex if events keep arriving for this many seconds (default: 180)
-        #[arg(long = "max-batch-delay", default_value = "180")]
+        #[arg(short = 'b', long = "max-batch-delay", default_value = "180")]
         max_batch_delay: u64,
 
         /// Disable adaptive backoff (adaptive is on by default)
@@ -157,6 +162,7 @@ pub enum DaemonCommands {
     },
 
     /// Stop background watch daemon
+    #[command(visible_aliases = ["down"])]
     Stop {
         /// Path containing daemon state (defaults to current directory)
         #[arg(short, long)]
@@ -164,6 +170,7 @@ pub enum DaemonCommands {
     },
 
     /// Print daemon status
+    #[command(visible_aliases = ["st"])]
     Status {
         /// Path containing daemon state (defaults to current directory)
         #[arg(short, long)]
@@ -184,15 +191,18 @@ pub enum McpHost {
 #[derive(Subcommand, Debug)]
 pub enum McpCommands {
     /// Run cgrep as an MCP stdio server
+    #[command(visible_aliases = ["run"])]
     Serve,
 
     /// Install cgrep MCP server config for a host
+    #[command(visible_aliases = ["add"])]
     Install {
         #[arg(value_enum)]
         host: McpHost,
     },
 
     /// Remove cgrep MCP server config from a host
+    #[command(visible_aliases = ["rm"])]
     Uninstall {
         #[arg(value_enum)]
         host: McpHost,
@@ -202,7 +212,7 @@ pub enum McpCommands {
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Full-text search with BM25 ranking
-    #[command(alias = "s")]
+    #[command(visible_aliases = ["s", "find", "q"])]
     Search {
         /// Search query (natural language or keywords)
         #[arg(required_unless_present = "help_advanced")]
@@ -234,11 +244,12 @@ pub enum Commands {
         glob: Option<String>,
 
         /// Exclude files matching pattern
-        #[arg(long, help_heading = "Core")]
+        #[arg(short = 'x', long, help_heading = "Core")]
         exclude: Option<String>,
 
         /// Limit search to files changed since revision (default: HEAD)
         #[arg(
+            short = 'u',
             long,
             num_args = 0..=1,
             default_missing_value = "HEAD",
@@ -247,11 +258,11 @@ pub enum Commands {
         changed: Option<String>,
 
         /// Output budget preset (tight, balanced, full, off)
-        #[arg(long, value_enum, help_heading = "Core")]
+        #[arg(short = 'B', long, value_enum, help_heading = "Core")]
         budget: Option<CliBudgetPreset>,
 
         /// Use a preset profile (human, agent, fast)
-        #[arg(long, help_heading = "Core")]
+        #[arg(short = 'P', long, help_heading = "Core")]
         profile: Option<String>,
 
         /// Suppress statistics output
@@ -267,7 +278,7 @@ pub enum Commands {
         case_sensitive: bool,
 
         /// Search mode: keyword, semantic, or hybrid
-        #[arg(long, value_enum, help_heading = "Mode")]
+        #[arg(short = 'M', long, value_enum, help_heading = "Mode")]
         mode: Option<CliSearchMode>,
 
         /// Deprecated: use `--mode keyword`
@@ -347,12 +358,13 @@ pub enum Commands {
     },
 
     /// Read a file with smart full/outline output
+    #[command(visible_aliases = ["rd", "cat", "view"])]
     Read {
         /// File path to read
         path: String,
 
         /// Read only a specific section (line range `start-end` or markdown heading)
-        #[arg(long)]
+        #[arg(short = 's', long)]
         section: Option<String>,
 
         /// Force full content output (disable smart outline mode)
@@ -361,23 +373,26 @@ pub enum Commands {
     },
 
     /// Print a structural codebase map
+    #[command(visible_aliases = ["mp", "tree"])]
     Map {
         /// Root path to map (defaults to current directory)
         #[arg(short, long)]
         path: Option<String>,
 
         /// Maximum directory depth (default: 3)
-        #[arg(long, default_value = "3")]
+        #[arg(short = 'd', long, default_value = "3")]
         depth: usize,
     },
 
     /// Agent-optimized workflow: locate/expand/install/uninstall
+    #[command(visible_aliases = ["a"])]
     Agent {
         #[command(subcommand)]
         command: AgentCommands,
     },
 
     /// Manage background watch daemon
+    #[command(visible_aliases = ["bg"])]
     Daemon {
         #[command(subcommand)]
         command: DaemonCommands,
@@ -390,6 +405,7 @@ pub enum Commands {
     },
 
     /// Search for symbols (functions, classes, etc.)
+    #[command(visible_aliases = ["sym", "sy"])]
     Symbols {
         /// Symbol name to search for
         name: String,
@@ -411,11 +427,11 @@ pub enum Commands {
         glob: Option<String>,
 
         /// Exclude files matching pattern
-        #[arg(long)]
+        #[arg(short = 'x', long)]
         exclude: Option<String>,
 
         /// Limit symbol search to files changed since revision (default: HEAD)
-        #[arg(long, num_args = 0..=1, default_missing_value = "HEAD")]
+        #[arg(short = 'u', long, num_args = 0..=1, default_missing_value = "HEAD")]
         changed: Option<String>,
 
         /// Suppress statistics output
@@ -424,24 +440,25 @@ pub enum Commands {
     },
 
     /// Find symbol definition location
-    #[command(alias = "def")]
+    #[command(visible_aliases = ["def", "d"])]
     Definition {
         /// Symbol name to find definition for
         name: String,
     },
 
     /// Find all callers of a function
+    #[command(visible_aliases = ["calls", "c"])]
     Callers {
         /// Function name to find callers for
         function: String,
 
         /// Matching strategy (auto, regex, ast)
-        #[arg(long, value_enum, default_value = "auto")]
+        #[arg(short = 'M', long, value_enum, default_value = "auto")]
         mode: UsageSearchMode,
     },
 
     /// Find all references to a symbol
-    #[command(alias = "refs")]
+    #[command(visible_aliases = ["refs", "r"])]
     References {
         /// Symbol name to find references for
         name: String,
@@ -460,22 +477,23 @@ pub enum Commands {
         max_results: usize,
 
         /// Limit references to files changed since revision (default: HEAD)
-        #[arg(long, num_args = 0..=1, default_missing_value = "HEAD")]
+        #[arg(short = 'u', long, num_args = 0..=1, default_missing_value = "HEAD")]
         changed: Option<String>,
 
         /// Matching strategy (auto, regex, ast)
-        #[arg(long, value_enum, default_value = "auto")]
+        #[arg(short = 'M', long, value_enum, default_value = "auto")]
         mode: UsageSearchMode,
     },
 
     /// Find files that depend on a given file
-    #[command(alias = "deps")]
+    #[command(visible_aliases = ["deps", "dep"])]
     Dependents {
         /// File path to find dependents for
         file: String,
     },
 
     /// Build or rebuild the search index
+    #[command(visible_aliases = ["ix", "i"])]
     Index {
         /// Path to index (defaults to current directory)
         #[arg(short, long)]
@@ -486,15 +504,15 @@ pub enum Commands {
         force: bool,
 
         /// Embedding generation mode: auto, precompute, or off
-        #[arg(long, default_value = "off")]
+        #[arg(short = 'E', long, default_value = "off")]
         embeddings: String,
 
         /// Force regeneration of all embeddings
-        #[arg(long)]
+        #[arg(short = 'F', long)]
         embeddings_force: bool,
 
         /// Use a high-memory index writer (1GiB budget)
-        #[arg(long)]
+        #[arg(short = 'H', long)]
         high_memory: bool,
 
         /// Paths/patterns to exclude (can be specified multiple times)
@@ -503,21 +521,22 @@ pub enum Commands {
     },
 
     /// Watch for file changes and update index
+    #[command(visible_aliases = ["wt", "w"])]
     Watch {
         /// Path to watch (defaults to current directory)
         #[arg(short, long)]
         path: Option<String>,
 
         /// Debounce interval in seconds (default: 15)
-        #[arg(long, default_value = "15")]
+        #[arg(short = 'd', long, default_value = "15")]
         debounce: u64,
 
         /// Minimum time between reindex operations in seconds (default: 180)
-        #[arg(long = "min-interval", default_value = "180")]
+        #[arg(short = 'i', long = "min-interval", default_value = "180")]
         min_interval: u64,
 
         /// Force reindex if events keep arriving for this many seconds (default: 180)
-        #[arg(long = "max-batch-delay", default_value = "180")]
+        #[arg(short = 'b', long = "max-batch-delay", default_value = "180")]
         max_batch_delay: u64,
 
         /// Disable adaptive backoff (adaptive is on by default)
@@ -563,4 +582,107 @@ pub enum Commands {
         #[arg(value_enum)]
         shell: Shell,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn search_alias_and_short_flags_parse() {
+        let cli = Cli::try_parse_from([
+            "cgrep",
+            "s",
+            "auth flow",
+            "-M",
+            "keyword",
+            "-B",
+            "tight",
+            "-P",
+            "agent",
+            "-x",
+            "target/**",
+            "-u",
+        ])
+        .expect("parse search alias");
+
+        match cli.command {
+            Commands::Search {
+                query,
+                mode,
+                budget,
+                profile,
+                exclude,
+                changed,
+                ..
+            } => {
+                assert_eq!(query.as_deref(), Some("auth flow"));
+                assert_eq!(mode, Some(CliSearchMode::Keyword));
+                assert_eq!(budget, Some(CliBudgetPreset::Tight));
+                assert_eq!(profile.as_deref(), Some("agent"));
+                assert_eq!(exclude.as_deref(), Some("target/**"));
+                assert_eq!(changed.as_deref(), Some("HEAD"));
+            }
+            other => panic!("expected search command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn definition_short_alias_parses() {
+        let cli = Cli::try_parse_from(["cgrep", "d", "handle_auth"]).expect("parse definition");
+        match cli.command {
+            Commands::Definition { name } => assert_eq!(name, "handle_auth"),
+            other => panic!("expected definition command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn agent_alias_and_short_flags_parse() {
+        let cli = Cli::try_parse_from([
+            "cgrep",
+            "a",
+            "l",
+            "token validation",
+            "-u",
+            "-M",
+            "keyword",
+            "-B",
+            "balanced",
+        ])
+        .expect("parse agent locate alias");
+
+        match cli.command {
+            Commands::Agent {
+                command:
+                    AgentCommands::Locate {
+                        query,
+                        changed,
+                        mode,
+                        budget,
+                        ..
+                    },
+            } => {
+                assert_eq!(query, "token validation");
+                assert_eq!(changed.as_deref(), Some("HEAD"));
+                assert_eq!(mode, Some(CliSearchMode::Keyword));
+                assert_eq!(budget, Some(CliBudgetPreset::Balanced));
+            }
+            other => panic!("expected agent locate command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn references_short_alias_and_mode_parse() {
+        let cli = Cli::try_parse_from(["cgrep", "r", "UserService", "-M", "ast"])
+            .expect("parse references alias");
+
+        match cli.command {
+            Commands::References { name, mode, .. } => {
+                assert_eq!(name, "UserService");
+                assert_eq!(mode, UsageSearchMode::Ast);
+            }
+            other => panic!("expected references command, got {other:?}"),
+        }
+    }
 }
