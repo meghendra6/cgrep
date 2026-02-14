@@ -396,6 +396,8 @@ pub fn run(
         apply_context_pack(&mut outcome.results, pack_gap);
     }
 
+    ensure_result_ids(&mut outcome.results);
+
     let budget = SearchOutputBudget {
         max_chars_per_snippet,
         max_total_chars,
@@ -433,6 +435,22 @@ pub fn run(
             }
         }
         OutputFormat::Json2 => {
+            let hint_inputs: Vec<crate::query::agent::AgentHintInput> = outcome
+                .results
+                .iter()
+                .filter_map(|result| {
+                    result.line.map(|line| crate::query::agent::AgentHintInput {
+                        id: result.result_id.clone(),
+                        path: result.path.clone(),
+                        line,
+                        snippet: result.snippet.clone(),
+                    })
+                })
+                .collect();
+            if !hint_inputs.is_empty() {
+                let _ = crate::query::agent::persist_expand_hints(&search_root, hint_inputs);
+            }
+
             let json2_results: Vec<SearchJson2Result> = outcome
                 .results
                 .iter()
@@ -618,6 +636,14 @@ fn stable_result_id(result: &SearchResult) -> String {
     );
     let hash = blake3::hash(payload.as_bytes());
     hash.to_hex()[..16].to_string()
+}
+
+fn ensure_result_ids(results: &mut [SearchResult]) {
+    for result in results.iter_mut() {
+        if result.result_id.is_none() {
+            result.result_id = Some(stable_result_id(result));
+        }
+    }
 }
 
 fn apply_context_pack(results: &mut [SearchResult], pack_gap: usize) {
@@ -2219,48 +2245,41 @@ fn build_search_scope_query(
     search_root: &Path,
     index_root: &Path,
 ) -> Option<Box<dyn tantivy::query::Query>> {
-    let search_root = search_root
-        .canonicalize()
-        .unwrap_or_else(|_| search_root.to_path_buf());
-    let index_root = index_root
-        .canonicalize()
-        .unwrap_or_else(|_| index_root.to_path_buf());
-    if search_root == index_root || !search_root.starts_with(&index_root) {
+    let mut search_variants = vec![search_root.to_path_buf()];
+    if let Ok(canonical) = search_root.canonicalize() {
+        if !search_variants.iter().any(|v| v == &canonical) {
+            search_variants.push(canonical);
+        }
+    }
+    let mut index_variants = vec![index_root.to_path_buf()];
+    if let Ok(canonical) = index_root.canonicalize() {
+        if !index_variants.iter().any(|v| v == &canonical) {
+            index_variants.push(canonical);
+        }
+    }
+
+    let is_same_root = search_variants
+        .iter()
+        .any(|search| index_variants.iter().any(|index| search == index));
+    if is_same_root {
+        return None;
+    }
+    let is_within_index = search_variants
+        .iter()
+        .any(|search| index_variants.iter().any(|index| search.starts_with(index)));
+    if !is_within_index {
         return None;
     }
 
     let mut scope_queries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
+    let mut seen_terms: HashSet<String> = HashSet::new();
+    let mut seen_patterns: HashSet<String> = HashSet::new();
 
-    if search_root.is_file() {
-        let absolute = search_root.to_string_lossy().to_string();
-        let term = Term::from_field_text(path_exact_field, &absolute);
-        scope_queries.push((
-            Occur::Should,
-            Box::new(TermQuery::new(
-                term,
-                tantivy::schema::IndexRecordOption::Basic,
-            )),
-        ));
-    } else {
-        let mut absolute_prefix = search_root.to_string_lossy().to_string();
-        if !absolute_prefix.ends_with(std::path::MAIN_SEPARATOR) {
-            absolute_prefix.push(std::path::MAIN_SEPARATOR);
-        }
-        let pattern = format!("{}.*", regex::escape(&absolute_prefix));
-        if let Ok(query) = RegexQuery::from_pattern(&pattern, path_exact_field) {
-            scope_queries.push((Occur::Should, Box::new(query)));
-        }
-    }
-
-    let rel_scope = search_root
-        .strip_prefix(&index_root)
-        .ok()
-        .map(|p| p.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_default();
-    if !rel_scope.is_empty() {
-        if search_root.is_file() {
-            for candidate in [rel_scope.clone(), format!("./{rel_scope}")] {
-                let term = Term::from_field_text(path_exact_field, &candidate);
+    for search_variant in &search_variants {
+        if search_variant.is_file() {
+            let value = search_variant.to_string_lossy().to_string();
+            if seen_terms.insert(value.clone()) {
+                let term = Term::from_field_text(path_exact_field, &value);
                 scope_queries.push((
                     Occur::Should,
                     Box::new(TermQuery::new(
@@ -2270,14 +2289,51 @@ fn build_search_scope_query(
                 ));
             }
         } else {
-            let mut rel_prefix = rel_scope.clone();
-            if !rel_prefix.ends_with('/') {
-                rel_prefix.push('/');
+            let mut absolute_prefix = search_variant.to_string_lossy().to_string();
+            if !absolute_prefix.ends_with(std::path::MAIN_SEPARATOR) {
+                absolute_prefix.push(std::path::MAIN_SEPARATOR);
             }
-            for prefix in [rel_prefix.clone(), format!("./{rel_prefix}")] {
-                let pattern = format!("{}.*", regex::escape(&prefix));
+            let pattern = format!("{}.*", regex::escape(&absolute_prefix));
+            if seen_patterns.insert(pattern.clone()) {
                 if let Ok(query) = RegexQuery::from_pattern(&pattern, path_exact_field) {
                     scope_queries.push((Occur::Should, Box::new(query)));
+                }
+            }
+        }
+        for index_variant in &index_variants {
+            let rel_scope = search_variant
+                .strip_prefix(index_variant)
+                .ok()
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            if rel_scope.is_empty() {
+                continue;
+            }
+            if search_variant.is_file() {
+                for candidate in [rel_scope.clone(), format!("./{rel_scope}")] {
+                    if seen_terms.insert(candidate.clone()) {
+                        let term = Term::from_field_text(path_exact_field, &candidate);
+                        scope_queries.push((
+                            Occur::Should,
+                            Box::new(TermQuery::new(
+                                term,
+                                tantivy::schema::IndexRecordOption::Basic,
+                            )),
+                        ));
+                    }
+                }
+            } else {
+                let mut rel_prefix = rel_scope.clone();
+                if !rel_prefix.ends_with('/') {
+                    rel_prefix.push('/');
+                }
+                for prefix in [rel_prefix.clone(), format!("./{rel_prefix}")] {
+                    let pattern = format!("{}.*", regex::escape(&prefix));
+                    if seen_patterns.insert(pattern.clone()) {
+                        if let Ok(query) = RegexQuery::from_pattern(&pattern, path_exact_field) {
+                            scope_queries.push((Occur::Should, Box::new(query)));
+                        }
+                    }
                 }
             }
         }
