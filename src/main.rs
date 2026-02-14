@@ -420,8 +420,20 @@ fn main() -> Result<()> {
                 embeddings_force,
             )?;
         }
-        Commands::Watch { path, debounce } => {
-            indexer::watch::run(path.as_deref(), Some(debounce))?;
+        Commands::Watch {
+            path,
+            debounce,
+            min_interval,
+            max_batch_delay,
+            no_adaptive,
+        } => {
+            indexer::watch::run(
+                path.as_deref(),
+                Some(debounce),
+                Some(min_interval),
+                Some(max_batch_delay),
+                !no_adaptive,
+            )?;
         }
 
         // Legacy installation commands (deprecated)

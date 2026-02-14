@@ -412,6 +412,18 @@ pub enum Commands {
         /// Debounce interval in seconds (default: 2)
         #[arg(long, default_value = "2")]
         debounce: u64,
+
+        /// Minimum time between reindex operations in seconds (default: 5)
+        #[arg(long = "min-interval", default_value = "5")]
+        min_interval: u64,
+
+        /// Force reindex if events keep arriving for this many seconds (default: 45)
+        #[arg(long = "max-batch-delay", default_value = "45")]
+        max_batch_delay: u64,
+
+        /// Disable adaptive backoff (adaptive is on by default)
+        #[arg(long = "no-adaptive")]
+        no_adaptive: bool,
     },
 
     /// Install cgrep for Claude Code

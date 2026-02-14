@@ -598,7 +598,9 @@ where
 const MAX_DOC_BYTES: usize = 64 * 1024;
 #[cfg(not(test))]
 const MAX_DOC_BYTES: usize = 1024 * 1024;
+#[allow(dead_code)]
 const DEFAULT_SYMBOL_PREVIEW_LINES: usize = 12;
+#[allow(dead_code)]
 const DEFAULT_SYMBOL_MAX_CHARS: usize = 1200;
 
 struct TextChunk {
@@ -864,11 +866,13 @@ pub struct IndexBuilder {
 }
 
 impl IndexBuilder {
+    #[allow(dead_code)]
     pub fn new(root: impl AsRef<Path>) -> Result<Self> {
         Self::with_excludes(root, Vec::new())
     }
 
     /// Create index builder with exclude patterns
+    #[allow(dead_code)]
     pub fn with_excludes(root: impl AsRef<Path>, excludes: Vec<String>) -> Result<Self> {
         let preview_lines = DEFAULT_SYMBOL_PREVIEW_LINES;
         let symbol_max_chars = DEFAULT_SYMBOL_MAX_CHARS;
