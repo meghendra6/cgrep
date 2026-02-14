@@ -78,5 +78,11 @@ fn agent_locate_and_expand_roundtrip() {
 
     assert_eq!(expand_json["meta"]["stage"], "expand");
     assert!(expand_json["meta"]["resolved_ids"].as_u64().unwrap_or(0) >= 1);
+    assert!(
+        expand_json["meta"]["hint_resolved_ids"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1
+    );
     assert_eq!(expand_json["results"][0]["id"], first_id);
 }
