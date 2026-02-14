@@ -8,6 +8,8 @@ pub mod changed_files;
 pub mod definition;
 pub mod dependents;
 pub mod index_filter;
+pub mod map;
+pub mod read;
 pub mod references;
 pub mod search;
 pub mod symbols;

@@ -267,6 +267,31 @@ pub enum Commands {
         no_index: bool,
     },
 
+    /// Read a file with smart full/outline output
+    Read {
+        /// File path to read
+        path: String,
+
+        /// Read only a specific section (line range `start-end` or markdown heading)
+        #[arg(long)]
+        section: Option<String>,
+
+        /// Force full content output (disable smart outline mode)
+        #[arg(long)]
+        full: bool,
+    },
+
+    /// Print a structural codebase map
+    Map {
+        /// Root path to map (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Maximum directory depth (default: 3)
+        #[arg(long, default_value = "3")]
+        depth: usize,
+    },
+
     /// Agent-optimized workflow: locate/expand/install/uninstall
     Agent {
         #[command(subcommand)]
