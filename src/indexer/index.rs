@@ -937,6 +937,16 @@ impl IndexBuilder {
 
     /// Build or rebuild the index (with incremental support)
     pub fn build(&self, force: bool, writer_budget_bytes: usize) -> Result<usize> {
+        self.build_with_io_threads(force, writer_budget_bytes, None)
+    }
+
+    /// Build or rebuild the index with an optional I/O worker thread override.
+    pub fn build_with_io_threads(
+        &self,
+        force: bool,
+        writer_budget_bytes: usize,
+        io_threads_override: Option<usize>,
+    ) -> Result<usize> {
         let index_path = self.root.join(INDEX_DIR);
         let metadata_path = self.root.join(METADATA_FILE);
 
@@ -1050,10 +1060,13 @@ impl IndexBuilder {
             }
         }
 
-        let io_threads = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(1);
-        let io_threads = (io_threads * 2).clamp(4, 64);
+        let io_threads = io_threads_override.unwrap_or_else(|| {
+            let base = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1);
+            (base * 2).clamp(4, 64)
+        });
+        let io_threads = io_threads.max(1);
         let pool = ThreadPoolBuilder::new()
             .num_threads(io_threads)
             .build()

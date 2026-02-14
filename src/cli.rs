@@ -409,16 +409,16 @@ pub enum Commands {
         #[arg(short, long)]
         path: Option<String>,
 
-        /// Debounce interval in seconds (default: 2)
-        #[arg(long, default_value = "2")]
+        /// Debounce interval in seconds (default: 15)
+        #[arg(long, default_value = "15")]
         debounce: u64,
 
-        /// Minimum time between reindex operations in seconds (default: 5)
-        #[arg(long = "min-interval", default_value = "5")]
+        /// Minimum time between reindex operations in seconds (default: 180)
+        #[arg(long = "min-interval", default_value = "180")]
         min_interval: u64,
 
-        /// Force reindex if events keep arriving for this many seconds (default: 45)
-        #[arg(long = "max-batch-delay", default_value = "45")]
+        /// Force reindex if events keep arriving for this many seconds (default: 180)
+        #[arg(long = "max-batch-delay", default_value = "180")]
         max_batch_delay: u64,
 
         /// Disable adaptive backoff (adaptive is on by default)

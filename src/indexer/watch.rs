@@ -17,13 +17,19 @@ use crate::indexer::IndexBuilder;
 use cgrep::config::Config;
 
 /// Default debounce interval in seconds
-const DEFAULT_DEBOUNCE_SECS: u64 = 2;
+const DEFAULT_DEBOUNCE_SECS: u64 = 15;
 
 /// Minimum time between reindex operations
-const MIN_REINDEX_INTERVAL_SECS: u64 = 5;
+const MIN_REINDEX_INTERVAL_SECS: u64 = 180;
 
 /// Maximum time to keep batching before forcing a reindex attempt
-const DEFAULT_MAX_BATCH_DELAY_SECS: u64 = 45;
+const DEFAULT_MAX_BATCH_DELAY_SECS: u64 = 180;
+
+/// Watcher polling interval for platforms that use polling fallback
+const WATCH_POLL_INTERVAL_SECS: u64 = 15;
+
+/// Lower background indexing thread usage in watch mode
+const WATCH_IO_THREADS: usize = 2;
 
 /// Safety cap for adaptive min interval scaling
 const MAX_ADAPTIVE_MIN_INTERVAL_SECS: u64 = 600;
@@ -68,7 +74,8 @@ impl Watcher {
     pub fn watch(&self) -> Result<()> {
         let (tx, rx) = channel();
 
-        let config = NotifyConfig::default().with_poll_interval(Duration::from_secs(2));
+        let config = NotifyConfig::default()
+            .with_poll_interval(Duration::from_secs(WATCH_POLL_INTERVAL_SECS));
 
         let mut watcher = RecommendedWatcher::new(tx, config)?;
         watcher.watch(&self.root, RecursiveMode::Recursive)?;
@@ -94,7 +101,9 @@ impl Watcher {
         let mut pending_paths: HashSet<PathBuf> = HashSet::new();
         let mut pending_since: Option<Instant> = None;
         let mut last_event_time: Option<Instant> = None;
-        let mut last_reindex_time: Option<Instant> = None;
+        // Treat startup as the first cycle boundary so background reindex runs
+        // are naturally spaced out from initial index creation.
+        let mut last_reindex_time: Option<Instant> = Some(Instant::now());
         let mut last_reindex_duration: Option<Duration> = None;
 
         loop {
@@ -188,10 +197,11 @@ impl Watcher {
                     last_event_time = None;
 
                     let start = Instant::now();
-                    if let Err(e) = self
-                        .builder
-                        .build(false, crate::indexer::index::DEFAULT_WRITER_BUDGET_BYTES)
-                    {
+                    if let Err(e) = self.builder.build_with_io_threads(
+                        false,
+                        crate::indexer::index::DEFAULT_WRITER_BUDGET_BYTES,
+                        Some(WATCH_IO_THREADS),
+                    ) {
                         eprintln!("{} Reindex failed: {}", "✗".red(), e);
                     } else {
                         let elapsed = start.elapsed();
@@ -340,7 +350,11 @@ pub fn run(
     )?;
 
     // Build initial index
-    builder.build(false, crate::indexer::index::DEFAULT_WRITER_BUDGET_BYTES)?;
+    builder.build_with_io_threads(
+        false,
+        crate::indexer::index::DEFAULT_WRITER_BUDGET_BYTES,
+        Some(WATCH_IO_THREADS),
+    )?;
 
     let watcher = Watcher::with_options(
         &root,
