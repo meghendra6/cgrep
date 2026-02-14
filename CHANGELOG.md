@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shortcut-first CLI aliases for high-frequency commands (`s`, `d`, `r`, `c`, `dep`, `i`, `w`, `a`) and ergonomic subcommand aliases (`agent l/x`, `daemon up/st/down`, `mcp run/add/rm`).
 - Short flag variants for common options (for example `-u`, `-M`, `-B`, `-P`, `-x`) to reduce typing overhead during iterative coding-agent workflows.
 - CLI parser regression tests covering alias + short-flag usage patterns.
+- Cursor agent profile support via `cgrep agent install/uninstall cursor` (project-local `.cursor/rules/cgrep.mdc` generation).
+- Cursor MCP host install/uninstall integration tests and agent documentation updates.
 
 ### Changed
 - Agent token benchmark now reports **tokens-to-complete per scenario** using iterative retrieval tiers with explicit completion markers, not only single-shot payload size.
