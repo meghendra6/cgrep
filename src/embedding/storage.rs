@@ -470,7 +470,10 @@ impl EmbeddingStorage {
     }
 
     /// Retrieves multiple symbol embeddings by ID in batched queries.
-    pub fn get_symbols_by_ids(&self, symbol_ids: &[String]) -> Result<HashMap<String, SymbolEmbedding>> {
+    pub fn get_symbols_by_ids(
+        &self,
+        symbol_ids: &[String],
+    ) -> Result<HashMap<String, SymbolEmbedding>> {
         if symbol_ids.is_empty() {
             return Ok(HashMap::new());
         }

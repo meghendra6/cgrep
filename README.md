@@ -17,6 +17,7 @@ Everything runs locally.
 - Proven on large codebases: in PyTorch agent workflows, cgrep cut context tokens by **93.2%** (**14.61x**) and reduced retrieval loop latency by about **59.7x** after indexing.
 - Get answers, not just matching lines: `definition`, `references`, `callers`, `dependents`, `map`, `read`.
 - Keep AI-agent loops small with `agent locate` + `agent expand` and compact `json2` output.
+- Ergonomic CLI shortcuts: `s`, `d`, `r`, `c`, `dep`, `i`, `a l`, plus short flags like `-u`, `-M`, `-B`, `-P`.
 - Stay local-first for speed and privacy (no cloud index required).
 - Scale safely on large repos with indexing, watch/daemon, and MCP server mode.
 
@@ -70,6 +71,17 @@ cgrep references UserService --mode auto
 # Smart read/map
 cgrep read src/auth.rs
 cgrep map --depth 2
+```
+
+Shortcut-first equivalents:
+
+```bash
+cgrep i                       # index
+cgrep s "authentication flow" # search
+cgrep d handle_auth           # definition
+cgrep r UserService           # references
+cgrep c validate_token        # callers
+cgrep dep src/auth.rs         # dependents
 ```
 
 Agent workflow example:

@@ -11,6 +11,9 @@
 # Stage 1: locate (json2-oriented output)
 cgrep agent locate "where token validation happens" --changed --budget balanced --compact
 
+# Short alias form:
+cgrep a l "where token validation happens" -u -B balanced --compact
+
 # Select first result ID (example)
 ID=$(cgrep agent locate "token validation" --compact | jq -r '.results[0].id')
 

@@ -4,20 +4,32 @@
 
 | Command | Description |
 |---|---|
-| `cgrep search <query>` (`s`) | Full-text search |
-| `cgrep read <path>` | Smart file read (small file full, large file outline) |
-| `cgrep map` | Structural codebase map (file + symbol skeleton) |
-| `cgrep symbols <name>` | Symbol search |
-| `cgrep definition <name>` (`def`) | Definition lookup |
-| `cgrep callers <function>` | Caller lookup |
-| `cgrep references <name>` (`refs`) | References lookup |
-| `cgrep dependents <file>` (`deps`) | Reverse dependency lookup |
-| `cgrep index` | Build/rebuild index |
-| `cgrep watch` | Reindex on file changes |
-| `cgrep daemon <start|status|stop>` | Manage background watch daemon |
+| `cgrep search <query>` (`s`, `find`, `q`) | Full-text search |
+| `cgrep read <path>` (`rd`, `cat`, `view`) | Smart file read (small file full, large file outline) |
+| `cgrep map` (`mp`, `tree`) | Structural codebase map (file + symbol skeleton) |
+| `cgrep symbols <name>` (`sym`, `sy`) | Symbol search |
+| `cgrep definition <name>` (`def`, `d`) | Definition lookup |
+| `cgrep callers <function>` (`calls`, `c`) | Caller lookup |
+| `cgrep references <name>` (`refs`, `r`) | References lookup |
+| `cgrep dependents <file>` (`deps`, `dep`) | Reverse dependency lookup |
+| `cgrep index` (`ix`, `i`) | Build/rebuild index |
+| `cgrep watch` (`wt`, `w`) | Reindex on file changes |
+| `cgrep daemon <start|status|stop>` (`bg`) | Manage background watch daemon |
 | `cgrep mcp <serve|install|uninstall>` | MCP server + host config integration |
-| `cgrep agent <...>` | Agent locate/expand + integration install |
+| `cgrep agent <...>` (`a`) | Agent locate/expand + integration install |
 | `cgrep completions <shell>` | Generate shell completions |
+
+## Shortcut-first flow
+
+```bash
+cgrep i                           # index
+cgrep s "authentication flow"     # search
+cgrep d handle_auth               # definition
+cgrep r UserService               # references
+cgrep c validate_token            # callers
+cgrep dep src/auth.rs             # dependents
+cgrep a l "token validation" -B tight -u
+```
 
 ## Human quick start
 
@@ -32,21 +44,21 @@ cgrep search "authentication flow"
 cgrep search "token refresh" -t rust -p src/
 
 # 4) Search only changed files
-cgrep search "retry logic" --changed
+cgrep search "retry logic" -u
 
 # 5) Symbol/navigation commands
 cgrep symbols UserService -T class
-cgrep definition handle_auth
-cgrep callers validate_token --mode auto
-cgrep references UserService --mode auto
+cgrep d handle_auth
+cgrep c validate_token -M auto
+cgrep r UserService -M auto
 
 # 6) Dependency lookup
-cgrep dependents src/auth.rs
+cgrep dep src/auth.rs
 
 # 7) Smart file reading / map
-cgrep read src/auth.rs
-cgrep read README.md --section "## Configuration"
-cgrep map --depth 2
+cgrep rd src/auth.rs
+cgrep rd README.md -s "## Configuration"
+cgrep mp -d 2
 ```
 
 ## Search guide
@@ -60,18 +72,19 @@ cgrep search "<query>" \
   -C <context> \
   -t <language> \
   --glob <pattern> \
-  --exclude <pattern> \
-  --changed [REV] \
-  --budget tight|balanced|full|off \
-  --profile human|agent|fast
+  -x, --exclude <pattern> \
+  -u, --changed [REV] \
+  -M, --mode keyword|semantic|hybrid \
+  -B, --budget tight|balanced|full|off \
+  -P, --profile human|agent|fast
 ```
 
 Examples:
 
 ```bash
 cgrep search "jwt decode" -m 10
-cgrep search "retry backoff" --changed
-cgrep search "controller middleware" --budget tight
+cgrep s "retry backoff" -u
+cgrep s "controller middleware" -B tight -P agent
 ```
 
 ### Modes

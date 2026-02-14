@@ -12,6 +12,7 @@
 
 - AI 코딩 루프에 맞춘 구조: 작고 결정적인 `json2` 출력 + 2단계 `agent locate/expand`.
 - 코드 구조 중심 탐색: `definition`, `references`, `callers`, `dependents`, `map`, `read`.
+- CLI 사용성: `s`, `d`, `r`, `c`, `dep`, `i`, `a l` 같은 짧은 별칭 제공.
 - 로컬 우선 운영: 빠른 검색, 프라이버시 보호, 클라우드 의존 없음.
 
 ## 벤치마크 스냅샷 (PyTorch)

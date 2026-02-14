@@ -12,6 +12,7 @@ Local-first code search for humans and AI agents working in real repositories.
 
 - Built for AI coding loops: compact, deterministic `json2` output and two-stage `agent locate/expand`.
 - Code-aware navigation: `definition`, `references`, `callers`, `dependents`, `map`, and `read`.
+- Ergonomic CLI: short aliases like `s`, `d`, `r`, `c`, `dep`, `i`, `a l`.
 - Local-first operations: fast retrieval, private code, no cloud dependency.
 
 ## Benchmark Snapshot (PyTorch)

@@ -4,20 +4,32 @@
 
 | 명령 | 설명 |
 |---|---|
-| `cgrep search <query>` (`s`) | 전체 텍스트 검색 |
-| `cgrep read <path>` | 스마트 파일 읽기 (작은 파일은 전체, 큰 파일은 개요) |
-| `cgrep map` | 코드베이스 구조 맵 (파일 + 심볼 스켈레톤) |
-| `cgrep symbols <name>` | 심볼 검색 |
-| `cgrep definition <name>` (`def`) | 정의 위치 조회 |
-| `cgrep callers <function>` | 호출자 조회 |
-| `cgrep references <name>` (`refs`) | 참조 조회 |
-| `cgrep dependents <file>` (`deps`) | 역의존 파일 조회 |
-| `cgrep index` | 인덱스 생성/재생성 |
-| `cgrep watch` | 파일 변경 감시 후 재인덱싱 |
-| `cgrep daemon <start|status|stop>` | 백그라운드 watch daemon 관리 |
+| `cgrep search <query>` (`s`, `find`, `q`) | 전체 텍스트 검색 |
+| `cgrep read <path>` (`rd`, `cat`, `view`) | 스마트 파일 읽기 (작은 파일은 전체, 큰 파일은 개요) |
+| `cgrep map` (`mp`, `tree`) | 코드베이스 구조 맵 (파일 + 심볼 스켈레톤) |
+| `cgrep symbols <name>` (`sym`, `sy`) | 심볼 검색 |
+| `cgrep definition <name>` (`def`, `d`) | 정의 위치 조회 |
+| `cgrep callers <function>` (`calls`, `c`) | 호출자 조회 |
+| `cgrep references <name>` (`refs`, `r`) | 참조 조회 |
+| `cgrep dependents <file>` (`deps`, `dep`) | 역의존 파일 조회 |
+| `cgrep index` (`ix`, `i`) | 인덱스 생성/재생성 |
+| `cgrep watch` (`wt`, `w`) | 파일 변경 감시 후 재인덱싱 |
+| `cgrep daemon <start|status|stop>` (`bg`) | 백그라운드 watch daemon 관리 |
 | `cgrep mcp <serve|install|uninstall>` | MCP 서버 및 host 설정 연동 |
-| `cgrep agent <...>` | 에이전트 locate/expand + 연동 설치 |
+| `cgrep agent <...>` (`a`) | 에이전트 locate/expand + 연동 설치 |
 | `cgrep completions <shell>` | 셸 자동완성 생성 |
+
+## 단축 위주 사용 흐름
+
+```bash
+cgrep i                           # index
+cgrep s "authentication flow"     # search
+cgrep d handle_auth               # definition
+cgrep r UserService               # references
+cgrep c validate_token            # callers
+cgrep dep src/auth.rs             # dependents
+cgrep a l "token validation" -B tight -u
+```
 
 ## 빠른 시작 (사람)
 
@@ -32,21 +44,21 @@ cgrep search "authentication flow"
 cgrep search "token refresh" -t rust -p src/
 
 # 4) 변경 파일만 검색
-cgrep search "retry logic" --changed
+cgrep search "retry logic" -u
 
 # 5) 심볼/탐색 명령
 cgrep symbols UserService -T class
-cgrep definition handle_auth
-cgrep callers validate_token --mode auto
-cgrep references UserService --mode auto
+cgrep d handle_auth
+cgrep c validate_token -M auto
+cgrep r UserService -M auto
 
 # 6) 의존성 조회
-cgrep dependents src/auth.rs
+cgrep dep src/auth.rs
 
 # 7) 스마트 파일 읽기 / 맵
-cgrep read src/auth.rs
-cgrep read README.md --section "## Configuration"
-cgrep map --depth 2
+cgrep rd src/auth.rs
+cgrep rd README.md -s "## Configuration"
+cgrep mp -d 2
 ```
 
 ## 검색 가이드
@@ -60,18 +72,19 @@ cgrep search "<query>" \
   -C <context> \
   -t <language> \
   --glob <pattern> \
-  --exclude <pattern> \
-  --changed [REV] \
-  --budget tight|balanced|full|off \
-  --profile human|agent|fast
+  -x, --exclude <pattern> \
+  -u, --changed [REV] \
+  -M, --mode keyword|semantic|hybrid \
+  -B, --budget tight|balanced|full|off \
+  -P, --profile human|agent|fast
 ```
 
 예시:
 
 ```bash
 cgrep search "jwt decode" -m 10
-cgrep search "retry backoff" --changed
-cgrep search "controller middleware" --budget tight
+cgrep s "retry backoff" -u
+cgrep s "controller middleware" -B tight -P agent
 ```
 
 ### 모드
