@@ -57,7 +57,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          CARGO_VERSION=$(sed -n 's/^version = \"\\([0-9]\\+\\.[0-9]\\+\\.[0-9]\\+\\)\"$/\\1/p' Cargo.toml | head -n 1)
+          CARGO_VERSION=$(python3 - <<'PY'
+import tomllib
+with open("Cargo.toml", "rb") as f:
+    print(tomllib.load(f)["package"]["version"])
+PY
+          )
           EXPECTED_TAG="v${CARGO_VERSION}"
           if [[ "${TAG_NAME}" != "${EXPECTED_TAG}" ]]; then
             echo "Tag (${TAG_NAME}) does not match Cargo.toml version (${EXPECTED_TAG})"
