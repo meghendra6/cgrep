@@ -1160,6 +1160,8 @@ fn collect_index_candidates(
 
     let fetch_limit = max_candidates.saturating_mul(5).max(1);
     let top_docs = searcher.search(&parsed_query, &TopDocs::with_limit(fetch_limit))?;
+    let ranking_tokens = query_tokens_for_ranking(query);
+    let ranking_identifier = single_identifier_query(query);
 
     let mut candidates: Vec<IndexCandidate> = Vec::new();
 
@@ -1204,6 +1206,10 @@ fn collect_index_candidates(
             .get_first(content_field)
             .and_then(|v| v.as_str())
             .unwrap_or("");
+        let symbols_value = doc
+            .get_first(symbols_field)
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
         let line_offset = doc
             .get_first(line_offset_field)
@@ -1214,6 +1220,10 @@ fn collect_index_candidates(
             .get_first(doc_type_field)
             .and_then(|v| v.as_str())
             .unwrap_or("");
+        let rank_boost = 1.0
+            + path_ranking_bonus(&display_path, &ranking_tokens)
+            + symbol_ranking_bonus(doc_type_value, symbols_value, ranking_identifier.as_deref());
+        let adjusted_score = *score * rank_boost;
 
         let symbol_id = if doc_type_value == "symbol" {
             doc.get_first(symbol_id_field)
@@ -1243,7 +1253,7 @@ fn collect_index_candidates(
                         stored_path: path_value.to_string(),
                         full_path: full_path.clone(),
                         display_path: display_path.clone(),
-                        score: *score,
+                        score: adjusted_score,
                         snippet,
                         line: Some(line_offset + rel_line.saturating_sub(1)),
                         symbol_id: None,
@@ -1265,7 +1275,7 @@ fn collect_index_candidates(
             stored_path: path_value.to_string(),
             full_path,
             display_path,
-            score: *score,
+            score: adjusted_score,
             snippet,
             line: line_num,
             symbol_id,
@@ -1414,6 +1424,86 @@ fn parse_index_mode(mode: &str) -> IndexMode {
         IndexMode::Scan
     } else {
         IndexMode::Index
+    }
+}
+
+fn query_tokens_for_ranking(query: &str) -> Vec<String> {
+    query
+        .split(|c: char| !c.is_alphanumeric() && c != '_' && c != ':')
+        .map(str::trim)
+        .filter(|t| t.len() >= 3)
+        .map(|t| t.to_ascii_lowercase())
+        .collect()
+}
+
+fn single_identifier_query(query: &str) -> Option<String> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() || trimmed.contains(char::is_whitespace) {
+        return None;
+    }
+    let ident = trimmed
+        .rsplit("::")
+        .next()
+        .unwrap_or(trimmed)
+        .rsplit('.')
+        .next()
+        .unwrap_or(trimmed);
+    if ident
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+    {
+        Some(ident.to_ascii_lowercase())
+    } else {
+        None
+    }
+}
+
+fn path_ranking_bonus(display_path: &str, query_tokens: &[String]) -> f32 {
+    if query_tokens.is_empty() {
+        return 0.0;
+    }
+    let path = display_path.to_ascii_lowercase();
+    let mut bonus: f32 = 0.0;
+    for token in query_tokens {
+        if path.contains(token) {
+            bonus += 0.03;
+        }
+    }
+    bonus.min(0.15)
+}
+
+fn symbol_ranking_bonus(
+    doc_type: &str,
+    symbols_value: &str,
+    identifier_query: Option<&str>,
+) -> f32 {
+    let Some(identifier) = identifier_query else {
+        return 0.0;
+    };
+    if symbols_value.is_empty() {
+        return 0.0;
+    }
+
+    let symbol = symbols_value.to_ascii_lowercase();
+    if doc_type == "symbol" {
+        if symbol == identifier {
+            return 0.35;
+        }
+        if symbol.starts_with(identifier) || identifier.starts_with(&symbol) {
+            return 0.15;
+        }
+        if symbol.contains(identifier) {
+            return 0.08;
+        }
+        return 0.0;
+    }
+
+    if symbol.split_whitespace().any(|token| token == identifier) {
+        0.08
+    } else if symbol.contains(identifier) {
+        0.03
+    } else {
+        0.0
     }
 }
 
@@ -2541,6 +2631,24 @@ mod tests {
         let b = stable_result_id(&result);
         assert_eq!(a, b);
         assert_eq!(a.len(), 16);
+    }
+
+    #[test]
+    fn ranking_path_bonus_rewards_path_token_overlap() {
+        let tokens = query_tokens_for_ranking("auth token refresh");
+        let with_overlap = path_ranking_bonus("src/auth/token_manager.rs", &tokens);
+        let without_overlap = path_ranking_bonus("src/cache/lru.rs", &tokens);
+        assert!(with_overlap > without_overlap);
+    }
+
+    #[test]
+    fn ranking_symbol_bonus_prefers_exact_symbol_match() {
+        let exact = symbol_ranking_bonus("symbol", "target_fn", Some("target_fn"));
+        let partial = symbol_ranking_bonus("symbol", "target_fn_impl", Some("target_fn"));
+        let none = symbol_ranking_bonus("symbol", "other_name", Some("target_fn"));
+
+        assert!(exact > partial);
+        assert!(partial >= none);
     }
 
     fn sample_result(path: &str, line: usize, snippet: &str) -> SearchResult {

@@ -55,6 +55,17 @@ pub enum CliBudgetPreset {
     Off,
 }
 
+/// Usage lookup strategy for callers/references
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum UsageSearchMode {
+    /// Prefer AST when language parser is available, otherwise regex fallback
+    Auto,
+    /// Regex-only text matching
+    Regex,
+    /// AST-only matching for supported languages
+    Ast,
+}
+
 /// Agent provider for install/uninstall commands
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum AgentProvider {
@@ -117,6 +128,74 @@ pub enum AgentCommands {
     Uninstall {
         #[arg(value_enum)]
         provider: AgentProvider,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DaemonCommands {
+    /// Start background watch daemon
+    Start {
+        /// Path to watch (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Debounce interval in seconds (default: 15)
+        #[arg(long, default_value = "15")]
+        debounce: u64,
+
+        /// Minimum time between reindex operations in seconds (default: 180)
+        #[arg(long = "min-interval", default_value = "180")]
+        min_interval: u64,
+
+        /// Force reindex if events keep arriving for this many seconds (default: 180)
+        #[arg(long = "max-batch-delay", default_value = "180")]
+        max_batch_delay: u64,
+
+        /// Disable adaptive backoff (adaptive is on by default)
+        #[arg(long = "no-adaptive")]
+        no_adaptive: bool,
+    },
+
+    /// Stop background watch daemon
+    Stop {
+        /// Path containing daemon state (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+    },
+
+    /// Print daemon status
+    Status {
+        /// Path containing daemon state (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+    },
+}
+
+/// MCP host target for automatic config install
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum McpHost {
+    ClaudeCode,
+    Cursor,
+    Windsurf,
+    Vscode,
+    ClaudeDesktop,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum McpCommands {
+    /// Run cgrep as an MCP stdio server
+    Serve,
+
+    /// Install cgrep MCP server config for a host
+    Install {
+        #[arg(value_enum)]
+        host: McpHost,
+    },
+
+    /// Remove cgrep MCP server config from a host
+    Uninstall {
+        #[arg(value_enum)]
+        host: McpHost,
     },
 }
 
@@ -298,6 +377,18 @@ pub enum Commands {
         command: AgentCommands,
     },
 
+    /// Manage background watch daemon
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommands,
+    },
+
+    /// MCP server and host config integration
+    Mcp {
+        #[command(subcommand)]
+        command: McpCommands,
+    },
+
     /// Search for symbols (functions, classes, etc.)
     Symbols {
         /// Symbol name to search for
@@ -343,6 +434,10 @@ pub enum Commands {
     Callers {
         /// Function name to find callers for
         function: String,
+
+        /// Matching strategy (auto, regex, ast)
+        #[arg(long, value_enum, default_value = "auto")]
+        mode: UsageSearchMode,
     },
 
     /// Find all references to a symbol
@@ -367,6 +462,10 @@ pub enum Commands {
         /// Limit references to files changed since revision (default: HEAD)
         #[arg(long, num_args = 0..=1, default_missing_value = "HEAD")]
         changed: Option<String>,
+
+        /// Matching strategy (auto, regex, ast)
+        #[arg(long, value_enum, default_value = "auto")]
+        mode: UsageSearchMode,
     },
 
     /// Find files that depend on a given file

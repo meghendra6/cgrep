@@ -7,8 +7,9 @@ use colored::Colorize;
 use regex::Regex;
 use serde::Serialize;
 
-use crate::cli::OutputFormat;
+use crate::cli::{OutputFormat, UsageSearchMode};
 use crate::indexer::scanner::FileScanner;
+use crate::query::ast_usage::AstUsageExtractor;
 use crate::query::changed_files::ChangedFiles;
 use crate::query::index_filter::{find_files_with_content, read_scanned_files};
 use cgrep::output::print_json;
@@ -29,6 +30,7 @@ pub fn run(
     path: Option<&str>,
     max_results: usize,
     changed: Option<&str>,
+    mode: UsageSearchMode,
     format: OutputFormat,
     compact: bool,
 ) -> Result<()> {
@@ -53,6 +55,7 @@ pub fn run(
     let re = Regex::new(&pattern)?;
 
     let mut results: Vec<ReferenceResult> = Vec::new();
+    let mut ast = AstUsageExtractor::new();
 
     for file in &files {
         let rel_path = file
@@ -65,6 +68,52 @@ pub fn run(
             if !filter.matches_rel_path(&rel_path) {
                 continue;
             }
+        }
+
+        let ast_matches = if mode == UsageSearchMode::Regex {
+            None
+        } else {
+            file.language.as_deref().and_then(|lang| {
+                ast.references(
+                    &file.content,
+                    lang,
+                    name,
+                    max_results.saturating_sub(results.len()),
+                )
+                .filter(|matches| !matches.is_empty())
+            })
+        };
+
+        if let Some(matches) = ast_matches {
+            for m in matches {
+                let code = file
+                    .content
+                    .lines()
+                    .nth(m.line.saturating_sub(1))
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if code.is_empty() {
+                    continue;
+                }
+                results.push(ReferenceResult {
+                    path: rel_path.clone(),
+                    line: m.line,
+                    column: m.column,
+                    code,
+                });
+                if results.len() >= max_results {
+                    break;
+                }
+            }
+            if results.len() >= max_results {
+                break;
+            }
+            continue;
+        }
+
+        if mode == UsageSearchMode::Ast {
+            continue;
         }
 
         for (line_num, line) in file.content.lines().enumerate() {

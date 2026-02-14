@@ -3,6 +3,7 @@
 //! Query module - search and symbol lookup commands
 
 pub mod agent;
+pub mod ast_usage;
 pub mod callers;
 pub mod changed_files;
 pub mod definition;

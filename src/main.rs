@@ -8,13 +8,14 @@
 mod cli;
 mod indexer;
 mod install;
+mod mcp;
 mod parser;
 mod query;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
-use cli::{AgentProvider, Cli, CliBudgetPreset, Commands};
+use cli::{AgentProvider, Cli, CliBudgetPreset, Commands, DaemonCommands, McpCommands};
 use tracing_subscriber::EnvFilter;
 
 fn config_output_to_cli(format: cgrep::config::ConfigOutputFormat) -> cli::OutputFormat {
@@ -356,6 +357,40 @@ fn main() -> Result<()> {
                 uninstall_for_provider(provider)?;
             }
         },
+        Commands::Daemon { command } => match command {
+            DaemonCommands::Start {
+                path,
+                debounce,
+                min_interval,
+                max_batch_delay,
+                no_adaptive,
+            } => {
+                indexer::daemon::start(
+                    path.as_deref(),
+                    debounce,
+                    min_interval,
+                    max_batch_delay,
+                    !no_adaptive,
+                )?;
+            }
+            DaemonCommands::Stop { path } => {
+                indexer::daemon::stop(path.as_deref())?;
+            }
+            DaemonCommands::Status { path } => {
+                indexer::daemon::status(path.as_deref())?;
+            }
+        },
+        Commands::Mcp { command } => match command {
+            McpCommands::Serve => {
+                mcp::run()?;
+            }
+            McpCommands::Install { host } => {
+                mcp::install::install(host)?;
+            }
+            McpCommands::Uninstall { host } => {
+                mcp::install::uninstall(host)?;
+            }
+        },
         Commands::Symbols {
             name,
             symbol_type,
@@ -382,20 +417,22 @@ fn main() -> Result<()> {
         Commands::Definition { name } => {
             query::definition::run(&name, global_format, compact)?;
         }
-        Commands::Callers { function } => {
-            query::callers::run(&function, global_format, compact)?;
+        Commands::Callers { function, mode } => {
+            query::callers::run(&function, mode, global_format, compact)?;
         }
         Commands::References {
             name,
             path,
             max_results,
             changed,
+            mode,
         } => {
             query::references::run(
                 &name,
                 path.as_deref(),
                 max_results,
                 changed.as_deref(),
+                mode,
                 global_format,
                 compact,
             )?;
