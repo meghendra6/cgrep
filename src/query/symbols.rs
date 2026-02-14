@@ -82,6 +82,7 @@ pub fn run(
 
     let mut results: Vec<SymbolResult> = Vec::new();
     let mut files_searched: HashSet<String> = HashSet::new();
+    let mut parser_cache = std::collections::HashMap::new();
 
     for file in files {
         let rel_path = file
@@ -124,7 +125,9 @@ pub fn run(
         files_searched.insert(rel_path.clone());
 
         if let Some(ref file_lang) = file.language {
-            if let Ok(symbols) = extractor.extract(&file.content, file_lang) {
+            if let Ok(symbols) =
+                extractor.extract_with_cache(&file.content, file_lang, &mut parser_cache)
+            {
                 for symbol in symbols {
                     // Filter by name
                     if !symbol.name.to_lowercase().contains(&name_lower) {

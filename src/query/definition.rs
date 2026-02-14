@@ -5,11 +5,15 @@
 use anyhow::Result;
 use colored::Colorize;
 use serde::Serialize;
+use std::collections::HashMap;
+use std::path::Path;
 
 use crate::cli::OutputFormat;
-use crate::indexer::scanner::FileScanner;
+use crate::indexer::scanner::{FileScanner, ScannedFile};
 use crate::parser::symbols::{SymbolExtractor, SymbolKind};
-use crate::query::index_filter::{find_files_with_symbol, read_scanned_files};
+use crate::query::index_filter::{
+    find_files_with_symbol, find_files_with_symbol_definition, read_scanned_files, SymbolNameMatch,
+};
 use cgrep::output::print_json;
 use cgrep::utils::get_root_with_index;
 
@@ -28,23 +32,23 @@ pub fn run(name: &str, format: OutputFormat, compact: bool) -> Result<()> {
     let search_root = std::env::current_dir()?.canonicalize()?;
     let index_root = get_root_with_index(&search_root);
     let extractor = SymbolExtractor::new();
-
-    let files = match find_files_with_symbol(&index_root, name, Some(&search_root))? {
-        Some(indexed_paths) => read_scanned_files(&indexed_paths),
-        None => {
-            let scanner = FileScanner::new(&search_root);
-            scanner.scan()?
-        }
-    };
+    let files = load_definition_candidate_files(name, &search_root, &index_root)?;
+    let content_by_path: HashMap<&std::path::PathBuf, &str> = files
+        .iter()
+        .map(|file| (&file.path, file.content.as_str()))
+        .collect();
     let name_lower = name.to_lowercase();
 
     // Priority: exact match > contains
     let mut exact_matches = Vec::new();
     let mut partial_matches = Vec::new();
+    let mut parser_cache = HashMap::new();
 
     for file in &files {
         if let Some(ref file_lang) = file.language {
-            if let Ok(symbols) = extractor.extract(&file.content, file_lang) {
+            if let Ok(symbols) =
+                extractor.extract_with_cache(&file.content, file_lang, &mut parser_cache)
+            {
                 for symbol in symbols {
                     // Skip variable/property references, focus on definitions
                     if matches!(
@@ -123,7 +127,7 @@ pub fn run(name: &str, format: OutputFormat, compact: bool) -> Result<()> {
                 );
 
                 // Show context from file
-                if let Ok(content) = std::fs::read_to_string(path) {
+                if let Some(content) = content_by_path.get(path).copied() {
                     let lines: Vec<&str> = content.lines().collect();
                     let start = symbol.line.saturating_sub(1);
                     let end = (start + 3).min(lines.len());
@@ -145,4 +149,42 @@ pub fn run(name: &str, format: OutputFormat, compact: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn load_definition_candidate_files(
+    name: &str,
+    search_root: &Path,
+    index_root: &Path,
+) -> Result<Vec<ScannedFile>> {
+    let exact = find_files_with_symbol_definition(
+        index_root,
+        name,
+        Some(search_root),
+        SymbolNameMatch::Exact,
+    )?;
+    if let Some(paths) = exact {
+        if !paths.is_empty() {
+            return Ok(read_scanned_files(&paths));
+        }
+
+        let partial = find_files_with_symbol_definition(
+            index_root,
+            name,
+            Some(search_root),
+            SymbolNameMatch::Contains,
+        )?;
+        if let Some(paths) = partial {
+            if !paths.is_empty() {
+                return Ok(read_scanned_files(&paths));
+            }
+        }
+    }
+
+    match find_files_with_symbol(index_root, name, Some(search_root))? {
+        Some(indexed_paths) => Ok(read_scanned_files(&indexed_paths)),
+        None => {
+            let scanner = FileScanner::new(search_root);
+            scanner.scan()
+        }
+    }
 }
