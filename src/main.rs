@@ -287,6 +287,16 @@ fn main() -> Result<()> {
                 effective_suppress_boilerplate,
             )?;
         }
+        Commands::Read {
+            path,
+            section,
+            full,
+        } => {
+            query::read::run(&path, section.as_deref(), full, global_format, compact)?;
+        }
+        Commands::Map { path, depth } => {
+            query::map::run(path.as_deref(), depth, global_format, compact)?;
+        }
         Commands::Agent { command } => match command {
             cli::AgentCommands::Locate {
                 query,
