@@ -1,0 +1,30 @@
+site_name: cgrep Docs
+site_description: Local code search for humans and AI agents
+site_url: https://meghendra6.github.io/cgrep/
+repo_url: https://github.com/meghendra6/cgrep
+repo_name: meghendra6/cgrep
+docs_dir: docs
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - toc.follow
+plugins:
+  - search
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+nav:
+  - Overview: index.md
+  - Installation: installation.md
+  - Usage: usage.md
+  - Agent Workflow: agent.md
+  - MCP: mcp.md
+  - Indexing and Watch: indexing-watch.md
+  - Configuration: configuration.md
+  - Embeddings: embeddings.md
+  - Troubleshooting: troubleshooting.md
+  - Development: development.md
