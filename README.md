@@ -50,6 +50,11 @@ cgrep references UserService
 
 # 6) Dependency lookup
 cgrep dependents src/auth.rs
+
+# 7) Smart file reading / map
+cgrep read src/auth.rs
+cgrep read README.md --section "## Configuration"
+cgrep map --depth 2
 ```
 
 ## Quick Start (AI Agent)
@@ -79,6 +84,8 @@ Notes:
 | Command | Description |
 |---|---|
 | `cgrep search <query>` (`s`) | Full-text search |
+| `cgrep read <path>` | Smart file read (small file full, large file outline) |
+| `cgrep map` | Structural codebase map (file + symbol skeleton) |
 | `cgrep agent locate <query>` | Agent stage 1 candidate retrieval |
 | `cgrep agent expand --id <id>...` | Agent stage 2 context expansion |
 | `cgrep symbols <name>` | Symbol search |
@@ -180,6 +187,13 @@ Format summary:
 `search --format json2` shape:
 - `meta`: query/mode/timing/truncation/cache metadata
 - `results`: deterministic list with stable `id`, path/snippet/lines/scores
+
+`read --format json` shape:
+- `path`, `mode`, `size_bytes`, `line_count`, `tokens_estimate`, `content`
+
+`map --format json2` shape:
+- `meta`: schema/command/root/depth
+- `entries`: deterministic file list with token estimates and optional `symbols`
 
 ## Symbols / References Examples
 
