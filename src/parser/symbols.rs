@@ -4,6 +4,7 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tree_sitter::{Node, Parser};
 
 use crate::parser::languages::LANGUAGES;
@@ -75,11 +76,21 @@ impl SymbolExtractor {
 
     /// Extract symbols from source code
     pub fn extract(&self, source: &str, language: &str) -> Result<Vec<Symbol>> {
+        let mut parser = Parser::new();
+        self.extract_with_parser(source, language, &mut parser)
+    }
+
+    /// Extract symbols using a caller-provided parser instance.
+    pub fn extract_with_parser(
+        &self,
+        source: &str,
+        language: &str,
+        parser: &mut Parser,
+    ) -> Result<Vec<Symbol>> {
         let lang = LANGUAGES
             .get(language)
             .ok_or_else(|| anyhow::anyhow!("Unsupported language: {}", language))?;
 
-        let mut parser = Parser::new();
         parser.set_language(lang)?;
 
         let tree = parser
@@ -92,6 +103,22 @@ impl SymbolExtractor {
         self.traverse_node(tree.root_node(), source_bytes, language, &mut symbols);
 
         Ok(symbols)
+    }
+
+    /// Extract symbols while reusing parser instances per language.
+    pub fn extract_with_cache(
+        &self,
+        source: &str,
+        language: &str,
+        cache: &mut HashMap<String, Parser>,
+    ) -> Result<Vec<Symbol>> {
+        use std::collections::hash_map::Entry;
+
+        let parser = match cache.entry(language.to_string()) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => entry.insert(Parser::new()),
+        };
+        self.extract_with_parser(source, language, parser)
     }
 
     /// Traverse the AST and extract symbols

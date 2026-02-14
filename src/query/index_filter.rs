@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tantivy::{
     collector::DocSetCollector,
-    query::{BooleanQuery, Occur, PhraseQuery, Query, TermQuery},
+    query::{BooleanQuery, Occur, PhraseQuery, Query, RegexQuery, TermQuery},
     schema::{Field, FieldType, IndexRecordOption, Term, Value},
     Index, ReloadPolicy, TantivyDocument,
 };
@@ -15,6 +15,12 @@ use tantivy::{
 use crate::indexer::scanner::{detect_language, ScannedFile};
 use crate::query::scope_query::{build_scope_path_query, normalize_scope, ScopeNormalization};
 use cgrep::utils::INDEX_DIR;
+
+#[derive(Clone, Copy)]
+pub enum SymbolNameMatch {
+    Exact,
+    Contains,
+}
 
 /// Find files that likely contain a symbol name using the index.
 pub fn find_files_with_symbol(
@@ -39,6 +45,122 @@ pub fn find_files_with_content(
     scope: Option<&Path>,
 ) -> Result<Option<Vec<PathBuf>>> {
     find_files_with_field(root, "content", term, scope, MatchMode::AllTokens)
+}
+
+/// Find files with symbol definition docs whose stored symbol name matches.
+///
+/// This only searches `doc_type=symbol` docs, which is more selective than
+/// generic symbol-field filtering and helps keep `definition` lookups fast.
+pub fn find_files_with_symbol_definition(
+    root: &Path,
+    symbol_name: &str,
+    scope: Option<&Path>,
+    symbol_match: SymbolNameMatch,
+) -> Result<Option<Vec<PathBuf>>> {
+    let index_path = root.join(INDEX_DIR);
+    if !index_path.exists() {
+        return Ok(None);
+    }
+
+    let index = match Index::open_in_dir(&index_path) {
+        Ok(index) => index,
+        Err(_) => return Ok(None),
+    };
+
+    let schema = index.schema();
+    let symbols_field = match schema.get_field("symbols") {
+        Ok(field) => field,
+        Err(_) => return Ok(None),
+    };
+    let path_field = match schema.get_field("path") {
+        Ok(field) => field,
+        Err(_) => return Ok(None),
+    };
+    let doc_type_field = match schema.get_field("doc_type") {
+        Ok(field) => field,
+        Err(_) => return Ok(None),
+    };
+    let path_exact_field = schema.get_field("path_exact").ok();
+
+    let tokens = tokenize_for_field(&index, symbols_field, symbol_name)?;
+    if tokens.is_empty() {
+        return Ok(Some(Vec::new()));
+    }
+
+    let effective_scope = match normalize_scope(root, scope) {
+        ScopeNormalization::None => None,
+        ScopeNormalization::Filter(path) => Some(path),
+        ScopeNormalization::OutsideRoot => return Ok(Some(Vec::new())),
+    };
+
+    let mut clauses: Vec<(Occur, Box<dyn Query>)> = vec![
+        (
+            Occur::Must,
+            build_symbol_name_query(symbols_field, &tokens, symbol_match),
+        ),
+        (
+            Occur::Must,
+            Box::new(TermQuery::new(
+                Term::from_field_text(doc_type_field, "symbol"),
+                IndexRecordOption::Basic,
+            )),
+        ),
+    ];
+
+    if let (Some(scope_path), Some(path_exact)) = (effective_scope.as_ref(), path_exact_field) {
+        if let Some(query) = build_scope_path_query(path_exact, root, scope_path) {
+            clauses.push((Occur::Must, query));
+        }
+    }
+
+    let query = BooleanQuery::new(clauses);
+    let reader = index
+        .reader_builder()
+        .reload_policy(ReloadPolicy::Manual)
+        .try_into()
+        .context("Failed to create index reader")?;
+    let searcher = reader.searcher();
+    let docset = searcher.search(&query, &DocSetCollector)?;
+
+    let needle = symbol_name.to_lowercase();
+    let mut unique_paths: HashSet<PathBuf> = HashSet::with_capacity(docset.len());
+    for doc_address in docset {
+        let Ok(doc) = searcher.doc::<TantivyDocument>(doc_address) else {
+            continue;
+        };
+
+        let stored_symbol = doc
+            .get_first(symbols_field)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_lowercase();
+        let matched = match symbol_match {
+            SymbolNameMatch::Exact => stored_symbol == needle,
+            SymbolNameMatch::Contains => stored_symbol.contains(&needle),
+        };
+        if !matched {
+            continue;
+        }
+
+        let Some(path_value) = doc.get_first(path_field).and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let full_path = if Path::new(path_value).is_absolute() {
+            PathBuf::from(path_value)
+        } else {
+            root.join(path_value)
+        };
+        if let Some(scope_path) = effective_scope.as_ref() {
+            if !full_path.starts_with(scope_path) {
+                continue;
+            }
+        }
+        unique_paths.insert(full_path);
+    }
+
+    let mut paths: Vec<PathBuf> = unique_paths.into_iter().collect();
+    paths.sort();
+    Ok(Some(paths))
 }
 
 /// Read a list of files into scanned-file structs.
@@ -165,6 +287,25 @@ fn build_token_query(field: Field, tokens: &[String], match_mode: MatchMode) -> 
     }
 }
 
+fn build_symbol_name_query(
+    field: Field,
+    tokens: &[String],
+    symbol_match: SymbolNameMatch,
+) -> Box<dyn Query> {
+    match symbol_match {
+        SymbolNameMatch::Exact => build_token_query(field, tokens, MatchMode::AllTokens),
+        SymbolNameMatch::Contains if tokens.len() == 1 => {
+            let pattern = format!(".*{}.*", regex::escape(&tokens[0]));
+            if let Ok(query) = RegexQuery::from_pattern(&pattern, field) {
+                Box::new(query)
+            } else {
+                build_token_query(field, tokens, MatchMode::AllTokens)
+            }
+        }
+        SymbolNameMatch::Contains => build_token_query(field, tokens, MatchMode::AllTokens),
+    }
+}
+
 fn tokenize_for_field(index: &Index, field: Field, text: &str) -> Result<Vec<String>> {
     let schema = index.schema();
     let field_entry = schema.get_field_entry(field);
@@ -229,5 +370,53 @@ mod tests {
 
         assert!(paths.iter().any(|p| p.ends_with("inside.py")));
         assert!(!paths.iter().any(|p| p.ends_with("outside.py")));
+    }
+
+    #[test]
+    fn find_symbol_definition_exact_excludes_partial_names() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+
+        let run_file = root.join("run.rs");
+        let runner_file = root.join("runner.rs");
+        std::fs::write(&run_file, "pub fn run() {}\n").expect("write run");
+        std::fs::write(&runner_file, "pub fn runner() {}\n").expect("write runner");
+
+        let builder = IndexBuilder::new(root).expect("builder");
+        builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("build");
+
+        let paths =
+            find_files_with_symbol_definition(root, "run", Some(root), SymbolNameMatch::Exact)
+                .expect("query")
+                .expect("index-backed");
+
+        assert!(paths.iter().any(|p| p.ends_with("run.rs")));
+        assert!(!paths.iter().any(|p| p.ends_with("runner.rs")));
+    }
+
+    #[test]
+    fn find_symbol_definition_contains_includes_partial_names() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+
+        let run_file = root.join("run.rs");
+        let runner_file = root.join("runner.rs");
+        std::fs::write(&run_file, "pub fn run() {}\n").expect("write run");
+        std::fs::write(&runner_file, "pub fn runner() {}\n").expect("write runner");
+
+        let builder = IndexBuilder::new(root).expect("builder");
+        builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("build");
+
+        let paths =
+            find_files_with_symbol_definition(root, "run", Some(root), SymbolNameMatch::Contains)
+                .expect("query")
+                .expect("index-backed");
+
+        assert!(paths.iter().any(|p| p.ends_with("run.rs")));
+        assert!(paths.iter().any(|p| p.ends_with("runner.rs")));
     }
 }
