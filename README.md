@@ -222,13 +222,18 @@ cgrep index --embeddings auto
 cgrep index --embeddings precompute
 
 # Watch mode
-cgrep watch --debounce 2
+cgrep watch
+
+# Large repos (ex: pytorch): even lower background pressure
+cgrep watch --debounce 30 --min-interval 180 --max-batch-delay 240
 ```
 
 Behavior notes:
 - Index lives under `.cgrep/`
 - Search from subdirectories reuses nearest parent index
 - Indexing ignores `.gitignore`; scan mode respects `.gitignore`
+- Watch mode uses adaptive backoff by default (disable with `--no-adaptive`)
+- Watch defaults are tuned for background operation: `--min-interval 180` (about 3 minutes)
 
 ## Agent Integration Install
 

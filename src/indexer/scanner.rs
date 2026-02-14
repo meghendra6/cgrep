@@ -7,6 +7,11 @@ use ignore::WalkBuilder;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
+const INDEXABLE_EXTENSIONS: &[&str] = &[
+    "rs", "ts", "tsx", "js", "jsx", "py", "go", "java", "c", "cpp", "h", "hpp", "cs", "rb", "php",
+    "swift", "kt", "scala", "lua", "md", "txt", "json", "yaml", "toml",
+];
+
 /// Scanned file with content
 #[derive(Debug, Clone)]
 pub struct ScannedFile {
@@ -18,7 +23,6 @@ pub struct ScannedFile {
 /// File scanner that respects .gitignore and custom excludes
 pub struct FileScanner {
     root: PathBuf,
-    extensions: Vec<String>,
     exclude_patterns: Vec<String>,
     respect_git_ignore: bool,
 }
@@ -27,32 +31,6 @@ impl FileScanner {
     pub fn new(root: impl AsRef<Path>) -> Self {
         Self {
             root: root.as_ref().to_path_buf(),
-            extensions: vec![
-                "rs".into(),
-                "ts".into(),
-                "tsx".into(),
-                "js".into(),
-                "jsx".into(),
-                "py".into(),
-                "go".into(),
-                "java".into(),
-                "c".into(),
-                "cpp".into(),
-                "h".into(),
-                "hpp".into(),
-                "cs".into(),
-                "rb".into(),
-                "php".into(),
-                "swift".into(),
-                "kt".into(),
-                "scala".into(),
-                "lua".into(),
-                "md".into(),
-                "txt".into(),
-                "json".into(),
-                "yaml".into(),
-                "toml".into(),
-            ],
             exclude_patterns: Vec::new(),
             respect_git_ignore: true,
         }
@@ -104,12 +82,10 @@ impl FileScanner {
             })
             .build_parallel();
 
-        let extensions = self.extensions.clone();
         let exclude_patterns = self.exclude_patterns.clone();
 
         walker.run(|| {
             let tx = tx.clone();
-            let extensions = extensions.clone();
             let exclude_patterns = exclude_patterns.clone();
 
             Box::new(move |entry| {
@@ -128,7 +104,7 @@ impl FileScanner {
 
                     if path.is_file() {
                         if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                            if extensions.contains(&ext.to_lowercase()) {
+                            if is_indexable_extension(ext) {
                                 if let Ok(content) = std::fs::read_to_string(path) {
                                     let language = detect_language(ext);
                                     let _ = tx.send(ScannedFile {
@@ -166,12 +142,10 @@ impl FileScanner {
             })
             .build_parallel();
 
-        let extensions = self.extensions.clone();
         let exclude_patterns = self.exclude_patterns.clone();
 
         walker.run(|| {
             let tx = tx.clone();
-            let extensions = extensions.clone();
             let exclude_patterns = exclude_patterns.clone();
 
             Box::new(move |entry| {
@@ -190,7 +164,7 @@ impl FileScanner {
 
                     if path.is_file() {
                         if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                            if extensions.contains(&ext.to_lowercase()) {
+                            if is_indexable_extension(ext) {
                                 let _ = tx.send(path.to_path_buf());
                             }
                         }
@@ -203,6 +177,14 @@ impl FileScanner {
         drop(tx);
         Ok(rx.into_iter().collect())
     }
+}
+
+/// True when a file extension is included in indexing/scanning.
+pub fn is_indexable_extension(ext: &str) -> bool {
+    let lower = ext.to_ascii_lowercase();
+    INDEXABLE_EXTENSIONS
+        .iter()
+        .any(|candidate| *candidate == lower.as_str())
 }
 
 /// Detect language from file extension
