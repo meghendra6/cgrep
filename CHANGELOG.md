@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Release checksum manifests for Unix archives no longer reference a non-existent `dist/` prefix.
+- Windows checksum manifests now use LF newline format for cross-platform `sha256sum/shasum -c` verification.
 
 ## [1.4.1] - 2026-02-14
 

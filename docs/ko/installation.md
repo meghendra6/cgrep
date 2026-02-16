@@ -22,7 +22,7 @@ curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/insta
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh \
-  | bash -s -- --version v1.4.1
+  | bash -s -- --version <tag>
 ```
 
 설치 경로 지정:
@@ -43,9 +43,11 @@ cp target/release/cgrep ~/.local/bin/
 
 ```bash
 # 예시 (macOS Apple Silicon)
-curl -LO https://github.com/meghendra6/cgrep/releases/download/v1.4.1/cgrep-v1.4.1-aarch64-apple-darwin.tar.gz
-curl -LO https://github.com/meghendra6/cgrep/releases/download/v1.4.1/cgrep-v1.4.1-aarch64-apple-darwin.tar.gz.sha256
-shasum -a 256 -c cgrep-v1.4.1-aarch64-apple-darwin.tar.gz.sha256
+TAG=v1.4.2
+ASSET="cgrep-${TAG}-aarch64-apple-darwin.tar.gz"
+curl -LO "https://github.com/meghendra6/cgrep/releases/download/${TAG}/${ASSET}"
+curl -LO "https://github.com/meghendra6/cgrep/releases/download/${TAG}/${ASSET}.sha256"
+shasum -a 256 -c "${ASSET}.sha256"
 ```
 
 ## macOS Gatekeeper 참고

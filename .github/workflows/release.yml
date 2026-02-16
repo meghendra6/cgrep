@@ -118,7 +118,12 @@ jobs:
           Copy-Item README.md, CHANGELOG.md, LICENSE-* "dist/$out/" -ErrorAction SilentlyContinue
           Compress-Archive -Path "dist/$out/*" -DestinationPath "dist/$out.zip" -Force
           $hash = (Get-FileHash "dist/$out.zip" -Algorithm SHA256).Hash.ToLower()
-          "$hash  $out.zip" | Out-File -Encoding ASCII "dist/$out.zip.sha256"
+          # Write checksum manifest with LF newline for cross-platform `sha256sum -c`.
+          [System.IO.File]::WriteAllText(
+            "dist/$out.zip.sha256",
+            "$hash  $out.zip`n",
+            [System.Text.Encoding]::ASCII
+          )
           Remove-Item -Recurse -Force "dist/$out"
 
       - name: Upload artifacts
