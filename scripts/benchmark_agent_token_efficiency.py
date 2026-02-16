@@ -29,6 +29,7 @@ from typing import Any
 class Scenario:
     id: str
     objective: str
+    coding_task: str
     grep_pattern: str
     cgrep_query: str
     completion_groups: tuple[tuple[str, ...], ...]
@@ -47,6 +48,7 @@ SCENARIOS: list[Scenario] = [
     Scenario(
         id="autograd_evaluate_function",
         objective="Find where autograd engine evaluate_function is implemented and inspected.",
+        coding_task="Patch autograd evaluate_function flow and verify the implementation file + autograd context.",
         grep_pattern="evaluate_function",
         cgrep_query="evaluate_function engine.cpp autograd",
         completion_groups=(("evaluate_function",), ("engine.cpp", "autograd/")),
@@ -54,6 +56,7 @@ SCENARIOS: list[Scenario] = [
     Scenario(
         id="tensor_iterator_impl",
         objective="Find TensorIterator definition and major implementation usage points.",
+        coding_task="Prepare a TensorIterator behavior change by locating the core declaration and implementation paths.",
         grep_pattern="TensorIterator",
         cgrep_query="TensorIterator TensorIterator.h TensorIterator.cpp",
         completion_groups=(("TensorIterator",), ("TensorIterator.h", "TensorIterator.cpp")),
@@ -61,6 +64,7 @@ SCENARIOS: list[Scenario] = [
     Scenario(
         id="python_arg_parser_impl",
         objective="Locate PythonArgParser implementation and usage points.",
+        coding_task="Implement a parser-related fix by gathering PythonArgParser definition and source implementation.",
         grep_pattern="PythonArgParser",
         cgrep_query="PythonArgParser python_arg_parser.h python_arg_parser.cpp",
         completion_groups=(
@@ -71,6 +75,7 @@ SCENARIOS: list[Scenario] = [
     Scenario(
         id="dispatch_key_set",
         objective="Understand DispatchKeySet representation and references.",
+        coding_task="Refactor DispatchKeySet logic with confidence by finding its representation and core references.",
         grep_pattern="DispatchKeySet",
         cgrep_query="where DispatchKeySet is defined and referenced",
         completion_groups=(("DispatchKeySet",), ("DispatchKeySet.h", "c10/core/")),
@@ -78,6 +83,7 @@ SCENARIOS: list[Scenario] = [
     Scenario(
         id="cuda_graph",
         objective="Locate CUDAGraph implementation-related code quickly.",
+        coding_task="Make a CUDAGraph code-path update by collecting implementation and CUDA path context.",
         grep_pattern="CUDAGraph",
         cgrep_query="where CUDAGraph is implemented",
         completion_groups=(("CUDAGraph",), ("CUDAGraph.cpp", "cuda/")),
@@ -85,6 +91,7 @@ SCENARIOS: list[Scenario] = [
     Scenario(
         id="addmm_path",
         objective="Find addmm implementation and call sites.",
+        coding_task="Modify addmm behavior by locating native implementation and addmm_out call path.",
         grep_pattern=r"addmm\(",
         cgrep_query="addmm LinearAlgebra.cpp addmm_out",
         completion_groups=(("addmm(", "addmm"), ("LinearAlgebra.cpp", "addmm_out", "native/")),
@@ -339,8 +346,53 @@ def run_index(cgrep_bin: Path, repo_path: Path, timeout_s: int) -> CommandRun:
     return run_cmd(cmd, cwd=repo_path, timeout_s=timeout_s)
 
 
+def compute_coding_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    task_count = len(rows)
+    baseline_ready = sum(1 for row in rows if row["baseline_completed"])
+    cgrep_ready = sum(1 for row in rows if row["cgrep_completed"])
+    baseline_attempts_total = sum(row["baseline_attempts"] for row in rows)
+    cgrep_attempts_total = sum(row["cgrep_attempts"] for row in rows)
+    baseline_tokens_total = sum(row["baseline_tokens_to_completion"] for row in rows)
+    cgrep_tokens_total = sum(row["cgrep_tokens_to_completion"] for row in rows)
+    baseline_latency_total = sum(row["baseline_latency_ms_to_completion"] for row in rows)
+    cgrep_latency_total = sum(row["cgrep_latency_ms_to_completion"] for row in rows)
+
+    baseline_ready_rate = (baseline_ready / task_count * 100.0) if task_count else 0.0
+    cgrep_ready_rate = (cgrep_ready / task_count * 100.0) if task_count else 0.0
+    baseline_avg_attempts = (baseline_attempts_total / task_count) if task_count else 0.0
+    cgrep_avg_attempts = (cgrep_attempts_total / task_count) if task_count else 0.0
+    baseline_avg_tokens = (baseline_tokens_total / task_count) if task_count else 0.0
+    cgrep_avg_tokens = (cgrep_tokens_total / task_count) if task_count else 0.0
+    baseline_avg_latency = (baseline_latency_total / task_count) if task_count else 0.0
+    cgrep_avg_latency = (cgrep_latency_total / task_count) if task_count else 0.0
+
+    token_reduction = 0.0
+    if baseline_tokens_total > 0:
+        token_reduction = (
+            (baseline_tokens_total - cgrep_tokens_total) / baseline_tokens_total
+        ) * 100.0
+
+    return {
+        "task_count": task_count,
+        "baseline_ready_tasks": baseline_ready,
+        "cgrep_ready_tasks": cgrep_ready,
+        "baseline_ready_rate_percent": baseline_ready_rate,
+        "cgrep_ready_rate_percent": cgrep_ready_rate,
+        "baseline_total_tokens_to_ready": baseline_tokens_total,
+        "cgrep_total_tokens_to_ready": cgrep_tokens_total,
+        "token_reduction_percent_to_ready": token_reduction,
+        "baseline_avg_tokens_to_ready": baseline_avg_tokens,
+        "cgrep_avg_tokens_to_ready": cgrep_avg_tokens,
+        "baseline_avg_attempts_to_ready": baseline_avg_attempts,
+        "cgrep_avg_attempts_to_ready": cgrep_avg_attempts,
+        "baseline_avg_latency_ms_to_ready": baseline_avg_latency,
+        "cgrep_avg_latency_ms_to_ready": cgrep_avg_latency,
+    }
+
+
 def render_markdown(payload: dict[str, Any]) -> str:
     s = payload["summary"]
+    cs = payload["coding_summary"]
     rows = payload["scenario_results"]
 
     lines: list[str] = []
@@ -368,12 +420,13 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines.append("")
     lines.append("## Results")
     lines.append("")
-    lines.append("| Scenario | Baseline done | cgrep done | Baseline attempts | cgrep attempts | Baseline tokens-to-complete | cgrep tokens-to-complete | Reduction | Baseline latency (ms) | cgrep latency (ms) |")
-    lines.append("|---|---|---|---:|---:|---:|---:|---:|---:|---:|")
+    lines.append("| Scenario | Representative coding task | Baseline done | cgrep done | Baseline attempts | cgrep attempts | Baseline tokens-to-complete | cgrep tokens-to-complete | Reduction | Baseline latency (ms) | cgrep latency (ms) |")
+    lines.append("|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|")
     for r in rows:
         reduction = f"{r['token_reduction_percent_to_completion']:.1f}%"
         lines.append(
             f"| {r['objective']} | "
+            f"{r['coding_task']} | "
             f"{'yes' if r['baseline_completed'] else 'no'} | "
             f"{'yes' if r['cgrep_completed'] else 'no'} | "
             f"{r['baseline_attempts']} | {r['cgrep_attempts']} | "
@@ -393,6 +446,20 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines.append(f"- Token compression ratio (baseline/cgrep): **{s['token_compression_x_to_completion']:.2f}x**")
     lines.append(f"- Baseline total latency to completion: **{s['baseline_total_latency_ms_to_completion']:.2f}ms**")
     lines.append(f"- cgrep total latency to completion: **{s['cgrep_total_latency_ms_to_completion']:.2f}ms**")
+    lines.append("")
+    lines.append("## Coding Readiness Snapshot")
+    lines.append("")
+    lines.append(
+        "The same scenarios can be interpreted as coding tasks where the agent must gather enough context to start an implementation change."
+    )
+    lines.append("")
+    lines.append(f"- Tasks ready (baseline): **{cs['baseline_ready_tasks']}/{cs['task_count']}** ({cs['baseline_ready_rate_percent']:.1f}%)")
+    lines.append(f"- Tasks ready (cgrep): **{cs['cgrep_ready_tasks']}/{cs['task_count']}** ({cs['cgrep_ready_rate_percent']:.1f}%)")
+    lines.append(f"- Baseline avg tokens to readiness: **{cs['baseline_avg_tokens_to_ready']:.0f}**")
+    lines.append(f"- cgrep avg tokens to readiness: **{cs['cgrep_avg_tokens_to_ready']:.0f}**")
+    lines.append(f"- Token reduction to readiness: **{cs['token_reduction_percent_to_ready']:.1f}%**")
+    lines.append(f"- Baseline avg attempts: **{cs['baseline_avg_attempts_to_ready']:.2f}**")
+    lines.append(f"- cgrep avg attempts: **{cs['cgrep_avg_attempts_to_ready']:.2f}**")
     lines.append("")
     lines.append("## Re-run")
     lines.append("")
@@ -424,6 +491,81 @@ def render_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_coding_markdown(payload: dict[str, Any]) -> str:
+    cs = payload["coding_summary"]
+    rows = payload["scenario_results"]
+
+    lines: list[str] = []
+    lines.append("# PyTorch AI Agent Coding Readiness Benchmark")
+    lines.append("")
+    lines.append(f"Generated: {payload['generated_at_utc']}")
+    lines.append("")
+    lines.append("## What This Measures")
+    lines.append("")
+    lines.append("This benchmark reuses the same PyTorch scenarios and evaluates them as **coding tasks**.")
+    lines.append("A task is considered \"ready\" when retrieved context satisfies all completion marker groups (enough evidence to start patching).")
+    lines.append("")
+    lines.append("Workflows compared:")
+    lines.append("1. **Baseline:** `grep` locate + incremental snippet expansion tiers")
+    lines.append("2. **cgrep:** `agent locate` + incremental `agent expand` ID tiers")
+    lines.append("")
+    lines.append("## Environment")
+    lines.append("")
+    lines.append(f"- OS: `{payload['environment']['os']}`")
+    lines.append(f"- cgrep commit: `{payload['environment']['cgrep_commit']}`")
+    lines.append(f"- pytorch commit: `{payload['environment']['pytorch_commit']}`")
+    lines.append(f"- PyTorch files (`git ls-files`): `{payload['environment']['pytorch_file_count']}`")
+    lines.append(f"- Tokenizer: `{payload['config']['tokenizer']}`")
+    lines.append("")
+    lines.append("## Task Matrix")
+    lines.append("")
+    lines.append("| Scenario | Coding task | Completion markers |")
+    lines.append("|---|---|---|")
+    for row in rows:
+        marker_groups = "; ".join(" / ".join(group) for group in row["completion_groups"])
+        lines.append(f"| `{row['id']}` | {row['coding_task']} | {marker_groups} |")
+    lines.append("")
+    lines.append("## Results")
+    lines.append("")
+    lines.append("| Task | Baseline ready | cgrep ready | Baseline attempts | cgrep attempts | Baseline tokens-to-ready | cgrep tokens-to-ready | Reduction | Baseline latency (ms) | cgrep latency (ms) |")
+    lines.append("|---|---|---|---:|---:|---:|---:|---:|---:|---:|")
+    for row in rows:
+        lines.append(
+            f"| {row['id']} | "
+            f"{'yes' if row['baseline_completed'] else 'no'} | "
+            f"{'yes' if row['cgrep_completed'] else 'no'} | "
+            f"{row['baseline_attempts']} | {row['cgrep_attempts']} | "
+            f"{row['baseline_tokens_to_completion']:,} | {row['cgrep_tokens_to_completion']:,} | "
+            f"{row['token_reduction_percent_to_completion']:.1f}% | "
+            f"{row['baseline_latency_ms_to_completion']:.2f} | {row['cgrep_latency_ms_to_completion']:.2f} |"
+        )
+    lines.append("")
+    lines.append("## Aggregate")
+    lines.append("")
+    lines.append(f"- Tasks ready (baseline): **{cs['baseline_ready_tasks']}/{cs['task_count']}** ({cs['baseline_ready_rate_percent']:.1f}%)")
+    lines.append(f"- Tasks ready (cgrep): **{cs['cgrep_ready_tasks']}/{cs['task_count']}** ({cs['cgrep_ready_rate_percent']:.1f}%)")
+    lines.append(f"- Baseline total tokens-to-ready: **{cs['baseline_total_tokens_to_ready']:,}**")
+    lines.append(f"- cgrep total tokens-to-ready: **{cs['cgrep_total_tokens_to_ready']:,}**")
+    lines.append(f"- Token reduction to readiness: **{cs['token_reduction_percent_to_ready']:.1f}%**")
+    lines.append(f"- Baseline avg tokens per task: **{cs['baseline_avg_tokens_to_ready']:.0f}**")
+    lines.append(f"- cgrep avg tokens per task: **{cs['cgrep_avg_tokens_to_ready']:.0f}**")
+    lines.append(f"- Baseline avg attempts per task: **{cs['baseline_avg_attempts_to_ready']:.2f}**")
+    lines.append(f"- cgrep avg attempts per task: **{cs['cgrep_avg_attempts_to_ready']:.2f}**")
+    lines.append(f"- Baseline avg latency per task: **{cs['baseline_avg_latency_ms_to_ready']:.2f}ms**")
+    lines.append(f"- cgrep avg latency per task: **{cs['cgrep_avg_latency_ms_to_ready']:.2f}ms**")
+    lines.append("")
+    lines.append("## Re-run")
+    lines.append("")
+    lines.append("```bash")
+    lines.append(
+        "python3 scripts/benchmark_agent_token_efficiency.py "
+        "--repo /path/to/pytorch"
+    )
+    lines.append("```")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def main() -> int:
     repo_default = os.environ.get("PYTORCH_REPO", "")
     parser = argparse.ArgumentParser(description="Benchmark AI-agent token efficiency to completion on PyTorch")
@@ -431,6 +573,10 @@ def main() -> int:
     parser.add_argument("--cgrep-bin", default="target/release/cgrep", help="Path to cgrep binary")
     parser.add_argument("--json-out", default="local/benchmarks/pytorch-agent-token-efficiency.json")
     parser.add_argument("--md-out", default="docs/benchmarks/pytorch-agent-token-efficiency.md")
+    parser.add_argument(
+        "--coding-md-out",
+        default="docs/benchmarks/pytorch-agent-coding-efficiency.md",
+    )
     parser.add_argument("--history-dir", default="", help="Optional timestamped JSON snapshot directory")
     parser.add_argument("--timeout", type=int, default=300, help="Per command timeout seconds")
     parser.add_argument("--index-timeout", type=int, default=3600, help="Index timeout seconds")
@@ -664,6 +810,7 @@ def main() -> int:
             {
                 "id": sc.id,
                 "objective": sc.objective,
+                "coding_task": sc.coding_task,
                 "completion_groups": [list(group) for group in sc.completion_groups],
                 "baseline_tokens_to_completion": baseline_tokens_to_completion,
                 "cgrep_tokens_to_completion": cgrep_tokens_to_completion,
@@ -710,6 +857,7 @@ def main() -> int:
         ) * 100.0
 
     compression = math.inf if cgrep_total_tokens == 0 else baseline_total_tokens / cgrep_total_tokens
+    coding_summary = compute_coding_summary(scenario_results)
 
     payload = {
         "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -744,6 +892,7 @@ def main() -> int:
             "stdout_tail": index_run.stdout[-1000:],
         },
         "scenario_results": scenario_results,
+        "coding_summary": coding_summary,
         "summary": {
             "index_build_ms": index_run.duration_ms,
             "scenario_count": len(SCENARIOS),
@@ -760,11 +909,14 @@ def main() -> int:
 
     json_out = (repo_root / args.json_out).resolve()
     md_out = (repo_root / args.md_out).resolve()
+    coding_md_out = (repo_root / args.coding_md_out).resolve()
     json_out.parent.mkdir(parents=True, exist_ok=True)
     md_out.parent.mkdir(parents=True, exist_ok=True)
+    coding_md_out.parent.mkdir(parents=True, exist_ok=True)
 
     json_out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     md_out.write_text(render_markdown(payload), encoding="utf-8")
+    coding_md_out.write_text(render_coding_markdown(payload), encoding="utf-8")
 
     if args.history_dir:
         history_dir = (repo_root / args.history_dir).resolve()
@@ -775,6 +927,7 @@ def main() -> int:
 
     print(f"JSON: {json_out}")
     print(f"MD:   {md_out}")
+    print(f"MD2:  {coding_md_out}")
     print(
         f"Token reduction (to completion): {token_reduction:.1f}% "
         f"({baseline_total_tokens:,} -> {cgrep_total_tokens:,}, {compression:.2f}x)")
