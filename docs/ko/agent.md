@@ -52,3 +52,15 @@ cgrep agent uninstall opencode
 Cursor 참고:
 - `agent install cursor`는 프로젝트 로컬 규칙 파일 `.cursor/rules/cgrep.mdc`를 생성합니다.
 - Cursor용 MCP도 지원합니다: `cgrep mcp install cursor`
+
+## instruction/skill 파일 생성 위치
+
+`cgrep agent install <provider>` 실행 시 각 에이전트 형식에 맞는 파일이 생성/수정됩니다.
+
+| Provider | 생성/수정 파일 |
+|---|---|
+| `claude-code` | `~/.claude/CLAUDE.md` |
+| `codex` | `~/.codex/AGENTS.md` |
+| `copilot` | `.github/instructions/cgrep.instructions.md` (필요 시 `.github/copilot-instructions.md`에 섹션 추가) |
+| `cursor` | `.cursor/rules/cgrep.mdc` |
+| `opencode` | `~/.config/opencode/tool/cgrep.ts` |
