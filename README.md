@@ -32,18 +32,31 @@ Everything runs locally.
 
 ## Benchmark Snapshot (PyTorch)
 
-- Measured on February 14, 2026 across 6 AI-coding scenarios (implementation/structure tracing on PyTorch).
+- Measured on February 16, 2026 across 6 AI-coding scenarios (implementation/structure tracing on PyTorch).
 - Completion model: iterative retrieval loops run until each scenario’s completion criteria is satisfied.
-- One-time index build: **5.31s**.
+- One-time index build: **4.87s**.
 
 | Metric | Baseline (`grep`) | cgrep (`agent locate/expand`) | Improvement |
 |---|---:|---:|---:|
-| Total tokens-to-complete | 127,665 | 6,153 | **95.2% less** |
-| Avg tokens-to-complete per task | 21,278 | 1,026 | **20.75x smaller** |
-| Avg retrieval latency to completion | 1,321.3 ms | 22.7 ms | **~58.2x faster** |
+| Total tokens-to-complete | 128,479 | 6,160 | **95.2% less** |
+| Avg tokens-to-complete per task | 21,413 | 1,027 | **20.86x smaller** |
+| Avg retrieval latency to completion | 1,284.3 ms | 21.1 ms | **~60.8x faster** |
 
 - Practical meaning: for the same completed scenarios, cgrep used only **4.8%** of the token volume of a plain `grep` workflow.
 - Full methodology and raw data: `docs/benchmarks/pytorch-agent-token-efficiency.md`.
+
+## Coding Readiness Benchmark (PyTorch)
+
+Same 6 scenarios, interpreted as coding tasks ("enough context to start patching"):
+
+| Metric | Baseline (`grep`) | cgrep (`agent locate/expand`) | Improvement |
+|---|---:|---:|---:|
+| Tasks ready | 6/6 | 6/6 | parity |
+| Total tokens-to-ready | 128,479 | 6,160 | **95.2% less** |
+| Avg tokens-to-ready per task | 21,413 | 1,027 | **20.86x smaller** |
+| Avg retrieval latency to readiness | 1,284.3 ms | 21.1 ms | **~60.8x faster** |
+
+Detailed report: `docs/benchmarks/pytorch-agent-coding-efficiency.md`.
 
 ## Install
 
@@ -115,6 +128,7 @@ cgrep agent expand --id "$ID" -C 8 --compact
 - Configuration: `docs/configuration.md`
 - Embeddings mode: `docs/embeddings.md`
 - Agent token benchmark: `docs/benchmarks/pytorch-agent-token-efficiency.md`
+- Agent coding-readiness benchmark: `docs/benchmarks/pytorch-agent-coding-efficiency.md`
 - Troubleshooting: `docs/troubleshooting.md`
 - Development and validation: `docs/development.md`
 

@@ -23,16 +23,18 @@ v1.4.3 highlights:
 
 ## Benchmark Snapshot (PyTorch)
 
-Measured on February 14, 2026 across 6 implementation-tracing scenarios.
+Measured on February 16, 2026 across 6 implementation-tracing scenarios.
 Completion model: iterative retrieval until each scenario completion rule is satisfied.
 
 | Metric | Baseline (`grep`) | cgrep (`agent locate/expand`) | Improvement |
 |---|---:|---:|---:|
-| Total tokens-to-complete | 127,665 | 6,153 | **95.2% less** |
-| Avg tokens-to-complete per task | 21,278 | 1,026 | **20.75x smaller** |
-| Avg retrieval latency to completion | 1,321.3 ms | 22.7 ms | **~58.2x faster** |
+| Total tokens-to-complete | 128,479 | 6,160 | **95.2% less** |
+| Avg tokens-to-complete per task | 21,413 | 1,027 | **20.86x smaller** |
+| Avg retrieval latency to completion | 1,284.3 ms | 21.1 ms | **~60.8x faster** |
 
 Details: [Benchmark: Agent Token Efficiency](./benchmarks/pytorch-agent-token-efficiency.md)
+
+Coding-readiness details: [Benchmark: Agent Coding Readiness](./benchmarks/pytorch-agent-coding-efficiency.md)
 
 ## Start Here
 
@@ -46,6 +48,7 @@ Details: [Benchmark: Agent Token Efficiency](./benchmarks/pytorch-agent-token-ef
 | [Configuration](./configuration.md) | `.cgreprc.toml` and config precedence |
 | [Embeddings](./embeddings.md) | Semantic/hybrid mode setup and tuning |
 | [Benchmark: Agent Token Efficiency](./benchmarks/pytorch-agent-token-efficiency.md) | AI coding workflow token reduction benchmark on PyTorch (`grep` baseline) |
+| [Benchmark: Agent Coding Readiness](./benchmarks/pytorch-agent-coding-efficiency.md) | Coding-task readiness benchmark using the same PyTorch scenarios |
 | [Troubleshooting](./troubleshooting.md) | Common issues and fixes |
 | [Development](./development.md) | Build, test, and validation commands |
 

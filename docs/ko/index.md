@@ -23,16 +23,18 @@ v1.4.3 핵심:
 
 ## 벤치마크 스냅샷 (PyTorch)
 
-2026년 2월 14일 기준, 구현 추적 시나리오 6개를 측정했습니다.
+2026년 2월 16일 기준, 구현 추적 시나리오 6개를 측정했습니다.
 완료 기준: 각 시나리오가 충족될 때까지 반복 조회를 수행합니다.
 
 | 지표 | 기준 (`grep`) | cgrep (`agent locate/expand`) | 개선 |
 |---|---:|---:|---:|
-| 완료까지 필요한 토큰 합계 | 127,665 | 6,153 | **95.2% 감소** |
-| 작업당 평균 완료 토큰 | 21,278 | 1,026 | **20.75x 축소** |
-| 완료까지 평균 검색 지연 | 1,321.3 ms | 22.7 ms | **약 58.2x 향상** |
+| 완료까지 필요한 토큰 합계 | 128,479 | 6,160 | **95.2% 감소** |
+| 작업당 평균 완료 토큰 | 21,413 | 1,027 | **20.86x 축소** |
+| 완료까지 평균 검색 지연 | 1,284.3 ms | 21.1 ms | **약 60.8x 향상** |
 
 자세한 방법/결과: [Agent Token Efficiency 벤치마크](../benchmarks/pytorch-agent-token-efficiency.md)
+
+코딩 준비 관점 결과: [Agent Coding Readiness 벤치마크(영문)](../benchmarks/pytorch-agent-coding-efficiency.md)
 
 ## 문서 시작점
 
@@ -46,6 +48,7 @@ v1.4.3 핵심:
 | [설정](./configuration.md) | `.cgreprc.toml` 설정과 우선순위 |
 | [임베딩](./embeddings.md) | semantic/hybrid 모드 설정과 튜닝 |
 | [에이전트 토큰 효율 벤치마크(영문)](../benchmarks/pytorch-agent-token-efficiency.md) | PyTorch 기준 토큰 절감 효과 측정 |
+| [에이전트 코딩 준비 벤치마크(영문)](../benchmarks/pytorch-agent-coding-efficiency.md) | 동일 시나리오를 코딩 준비 관점으로 측정 |
 | [문제 해결](./troubleshooting.md) | 자주 발생하는 문제와 해결 |
 | [개발](./development.md) | 빌드, 테스트, 검증 명령 |
 
