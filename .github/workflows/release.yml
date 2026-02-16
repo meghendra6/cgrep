@@ -174,17 +174,17 @@ jobs:
 
           # Smoke-check archive contents.
           for tarball in *.tar.gz; do
-            tar -tzf "${tarball}" | grep -Eq '/cgrep$' || {
+            if ! tar -tzf "${tarball}" | grep -E '/cgrep$' >/dev/null; then
               echo "No cgrep binary found in ${tarball}"
               exit 1
-            }
+            fi
           done
 
           for zipfile in *.zip; do
-            unzip -l "${zipfile}" | grep -Eq 'cgrep\.exe$' || {
+            if ! unzip -l "${zipfile}" | grep -E 'cgrep\.exe$' >/dev/null; then
               echo "No cgrep.exe found in ${zipfile}"
               exit 1
-            }
+            fi
           done
 
       - name: Publish GitHub Release
