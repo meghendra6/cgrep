@@ -3,9 +3,9 @@
 `grep` finds text. `cgrep` finds code intent.
 
 Local-first code search for humans and AI agents working in real repositories.
-Current release: **v1.4.2**.
+Current release: **v1.4.3**.
 
-v1.4.2 highlights:
+v1.4.3 highlights:
 - Shortcut-first CLI for high-frequency commands.
 - Agent install support for `claude-code`, `codex`, `copilot`, `cursor`, and `opencode`.
 - MCP host install support including Cursor (`cgrep mcp install cursor`).
