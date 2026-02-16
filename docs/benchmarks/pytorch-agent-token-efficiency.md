@@ -1,6 +1,6 @@
 # PyTorch AI Agent Token Efficiency Benchmark
 
-Generated: 2026-02-14T08:53:38.505639+00:00
+Generated: 2026-02-16T11:58:18.234788+00:00
 
 ## What This Measures
 
@@ -13,7 +13,7 @@ Generated: 2026-02-14T08:53:38.505639+00:00
 ## Environment
 
 - OS: `macOS-26.2-arm64-arm-64bit`
-- cgrep commit: `723324c`
+- cgrep commit: `b2d160d`
 - pytorch commit: `b7abe8e3ab9`
 - PyTorch files (`git ls-files`): `20437`
 - Tokenizer: `tiktoken:cl100k_base`
@@ -22,26 +22,38 @@ Generated: 2026-02-14T08:53:38.505639+00:00
 
 ## Results
 
-| Scenario | Baseline done | cgrep done | Baseline attempts | cgrep attempts | Baseline tokens-to-complete | cgrep tokens-to-complete | Reduction | Baseline latency (ms) | cgrep latency (ms) |
-|---|---|---|---:|---:|---:|---:|---:|---:|---:|
-| Find where autograd engine evaluate_function is implemented and inspected. | yes | yes | 1 | 1 | 7,024 | 939 | 86.6% | 1907.61 | 21.58 |
-| Find TensorIterator definition and major implementation usage points. | yes | yes | 1 | 1 | 43,255 | 1,026 | 97.6% | 1170.75 | 21.34 |
-| Locate PythonArgParser implementation and usage points. | yes | yes | 1 | 1 | 6,740 | 1,000 | 85.2% | 1079.13 | 22.37 |
-| Understand DispatchKeySet representation and references. | yes | yes | 1 | 1 | 43,740 | 1,028 | 97.6% | 1057.25 | 23.04 |
-| Locate CUDAGraph implementation-related code quickly. | yes | yes | 1 | 1 | 11,217 | 1,018 | 90.9% | 1092.60 | 23.76 |
-| Find addmm implementation and call sites. | yes | yes | 1 | 1 | 15,689 | 1,142 | 92.7% | 1620.41 | 24.21 |
+| Scenario | Representative coding task | Baseline done | cgrep done | Baseline attempts | cgrep attempts | Baseline tokens-to-complete | cgrep tokens-to-complete | Reduction | Baseline latency (ms) | cgrep latency (ms) |
+|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| Find where autograd engine evaluate_function is implemented and inspected. | Patch autograd evaluate_function flow and verify the implementation file + autograd context. | yes | yes | 1 | 1 | 7,681 | 939 | 87.8% | 1853.05 | 20.75 |
+| Find TensorIterator definition and major implementation usage points. | Prepare a TensorIterator behavior change by locating the core declaration and implementation paths. | yes | yes | 1 | 1 | 43,265 | 1,026 | 97.6% | 1151.19 | 20.03 |
+| Locate PythonArgParser implementation and usage points. | Implement a parser-related fix by gathering PythonArgParser definition and source implementation. | yes | yes | 1 | 1 | 6,742 | 1,001 | 85.2% | 1081.20 | 21.84 |
+| Understand DispatchKeySet representation and references. | Refactor DispatchKeySet logic with confidence by finding its representation and core references. | yes | yes | 1 | 1 | 43,738 | 1,028 | 97.6% | 1034.56 | 21.78 |
+| Locate CUDAGraph implementation-related code quickly. | Make a CUDAGraph code-path update by collecting implementation and CUDA path context. | yes | yes | 1 | 1 | 11,361 | 1,018 | 91.0% | 1047.23 | 21.18 |
+| Find addmm implementation and call sites. | Modify addmm behavior by locating native implementation and addmm_out call path. | yes | yes | 1 | 1 | 15,692 | 1,148 | 92.7% | 1538.34 | 21.11 |
 
 ## Aggregate
 
-- One-time index build: **5.31s**
+- One-time index build: **4.87s**
 - Scenarios completed (baseline): **6/6**
 - Scenarios completed (cgrep): **6/6**
-- Baseline tokens-to-complete (total): **127,665**
-- cgrep tokens-to-complete (total): **6,153**
+- Baseline tokens-to-complete (total): **128,479**
+- cgrep tokens-to-complete (total): **6,160**
 - Token reduction (to completion): **95.2%**
-- Token compression ratio (baseline/cgrep): **20.75x**
-- Baseline total latency to completion: **7927.74ms**
-- cgrep total latency to completion: **136.30ms**
+- Token compression ratio (baseline/cgrep): **20.86x**
+- Baseline total latency to completion: **7705.58ms**
+- cgrep total latency to completion: **126.70ms**
+
+## Coding Readiness Snapshot
+
+The same scenarios can be interpreted as coding tasks where the agent must gather enough context to start an implementation change.
+
+- Tasks ready (baseline): **6/6** (100.0%)
+- Tasks ready (cgrep): **6/6** (100.0%)
+- Baseline avg tokens to readiness: **21413**
+- cgrep avg tokens to readiness: **1027**
+- Token reduction to readiness: **95.2%**
+- Baseline avg attempts: **1.00**
+- cgrep avg attempts: **1.00**
 
 ## Re-run
 

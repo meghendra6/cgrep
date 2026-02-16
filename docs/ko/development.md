@@ -37,4 +37,5 @@ python3 scripts/benchmark_agent_token_efficiency.py \
 
 출력 파일:
 - `docs/benchmarks/pytorch-agent-token-efficiency.md`
+- `docs/benchmarks/pytorch-agent-coding-efficiency.md`
 - `local/benchmarks/pytorch-agent-token-efficiency.json` (로컬 전용)
