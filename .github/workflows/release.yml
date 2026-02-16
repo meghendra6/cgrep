@@ -77,6 +77,15 @@ jobs:
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
 
+      - name: Sign macOS binary (ad-hoc)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="target/${{ matrix.target }}/release/cgrep"
+          codesign --force --sign - "$BIN"
+          codesign --verify --verbose "$BIN"
+
       - name: Package (unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -87,11 +96,16 @@ jobs:
           cp "target/${{ matrix.target }}/release/cgrep" "dist/${OUT}/"
           cp README.md CHANGELOG.md LICENSE-* "dist/${OUT}/" 2>/dev/null || true
           (cd dist && tar -czf "${OUT}.tar.gz" "${OUT}")
-          if command -v shasum >/dev/null 2>&1; then
-            shasum -a 256 "dist/${OUT}.tar.gz" > "dist/${OUT}.tar.gz.sha256"
-          else
-            sha256sum "dist/${OUT}.tar.gz" > "dist/${OUT}.tar.gz.sha256"
-          fi
+          (
+            cd dist
+            if command -v shasum >/dev/null 2>&1; then
+              shasum -a 256 "${OUT}.tar.gz" > "${OUT}.tar.gz.sha256"
+              shasum -a 256 -c "${OUT}.tar.gz.sha256"
+            else
+              sha256sum "${OUT}.tar.gz" > "${OUT}.tar.gz.sha256"
+              sha256sum -c "${OUT}.tar.gz.sha256"
+            fi
+          )
           rm -rf "dist/${OUT}"
 
       - name: Package (windows)
@@ -129,6 +143,44 @@ jobs:
           pattern: cgrep-*
           path: dist
           merge-multiple: true
+
+      - name: Verify packaged artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+
+          # Check every checksum manifest against its archive.
+          for checksum in *.sha256; do
+            archive="${checksum%.sha256}"
+            [[ -f "${archive}" ]] || {
+              echo "Missing archive for checksum: ${checksum}"
+              exit 1
+            }
+            expected="$(awk '{print $1}' "${checksum}")"
+            actual="$(shasum -a 256 "${archive}" | awk '{print $1}')"
+            [[ "${expected}" == "${actual}" ]] || {
+              echo "Checksum mismatch for ${archive}"
+              echo "expected=${expected}"
+              echo "actual=${actual}"
+              exit 1
+            }
+          done
+
+          # Smoke-check archive contents.
+          for tarball in *.tar.gz; do
+            tar -tzf "${tarball}" | grep -Eq '/cgrep$' || {
+              echo "No cgrep binary found in ${tarball}"
+              exit 1
+            }
+          done
+
+          for zipfile in *.zip; do
+            unzip -l "${zipfile}" | grep -Eq 'cgrep\.exe$' || {
+              echo "No cgrep.exe found in ${zipfile}"
+              exit 1
+            }
+          done
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
