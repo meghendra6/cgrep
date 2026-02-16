@@ -3,9 +3,9 @@
 `grep`은 텍스트를 찾고, `cgrep`은 코드 의도를 찾습니다.
 
 실제 저장소에서 사람과 AI 에이전트가 함께 작업할 때를 위한 로컬 우선 코드 검색 도구입니다.
-현재 릴리즈: **v1.4.2**.
+현재 릴리즈: **v1.4.3**.
 
-v1.4.2 핵심:
+v1.4.3 핵심:
 - 자주 쓰는 명령 중심의 단축 CLI.
 - `claude-code`, `codex`, `copilot`, `cursor`, `opencode` 에이전트 설치 지원.
 - Cursor 포함 MCP 호스트 설치 지원 (`cgrep mcp install cursor`).

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- No unreleased changes yet.
+
+## [1.4.3] - 2026-02-16
+
 ### Fixed
 - Release artifact verification no longer false-fails with `pipefail` when checking tarball contents (`grep -q` early-exit case).
 
