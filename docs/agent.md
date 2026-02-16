@@ -52,3 +52,15 @@ Legacy `install-*` and `uninstall-*` commands remain for compatibility.
 Cursor note:
 - `agent install cursor` writes a project-local rule file: `.cursor/rules/cgrep.mdc`
 - MCP is also supported for Cursor via `cgrep mcp install cursor`
+
+## Instruction/skill file outputs
+
+`cgrep agent install <provider>` writes provider-native instruction/skill files:
+
+| Provider | File(s) created/updated |
+|---|---|
+| `claude-code` | `~/.claude/CLAUDE.md` |
+| `codex` | `~/.codex/AGENTS.md` |
+| `copilot` | `.github/instructions/cgrep.instructions.md` (and optional append to `.github/copilot-instructions.md`) |
+| `cursor` | `.cursor/rules/cgrep.mdc` |
+| `opencode` | `~/.config/opencode/tool/cgrep.ts` |

@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- No unreleased changes yet.
+### Added
+- Release installer script (`scripts/install_release.sh`) for GitHub release binaries on macOS/Linux with target auto-detection, checksum verification, and install-path control.
+- Agent docs now include provider-specific instruction/skill file output paths.
+
+### Changed
+- Release workflow now ad-hoc signs macOS binaries for both Apple Silicon and Intel targets before packaging.
+- Release workflow checksum files now use archive-relative paths and are self-validated during packaging.
+
+### Fixed
+- Release checksum manifests for Unix archives no longer reference a non-existent `dist/` prefix.
 
 ## [1.4.1] - 2026-02-14
 

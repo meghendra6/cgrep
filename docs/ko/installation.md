@@ -11,11 +11,49 @@
 cargo install --path .
 ```
 
+## GitHub 릴리즈 바이너리 설치 (대부분 사용자 권장)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh \
+  | bash
+```
+
+특정 버전 고정:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh \
+  | bash -s -- --version v1.4.1
+```
+
+설치 경로 지정:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh \
+  | bash -s -- --bin-dir ~/.local/bin
+```
+
 ## 수동 빌드
 
 ```bash
 cargo build --release
 cp target/release/cgrep ~/.local/bin/
+```
+
+## 릴리즈 자산 수동 검증
+
+```bash
+# 예시 (macOS Apple Silicon)
+curl -LO https://github.com/meghendra6/cgrep/releases/download/v1.4.1/cgrep-v1.4.1-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/meghendra6/cgrep/releases/download/v1.4.1/cgrep-v1.4.1-aarch64-apple-darwin.tar.gz.sha256
+shasum -a 256 -c cgrep-v1.4.1-aarch64-apple-darwin.tar.gz.sha256
+```
+
+## macOS Gatekeeper 참고
+
+브라우저로 받은 바이너리는 quarantine 속성 때문에 차단될 수 있습니다.
+
+```bash
+xattr -d com.apple.quarantine ~/.local/bin/cgrep
 ```
 
 ## 설치 확인

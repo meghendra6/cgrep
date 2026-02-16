@@ -48,12 +48,21 @@ Everything runs locally.
 ## Install
 
 ```bash
+# Option 1: install latest GitHub release binary (macOS/Linux)
+curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh \
+  | bash
+
+# Option 2: install from source
 cargo install --path .
 
-# or build manually
+# Option 3: build manually
 cargo build --release
 cp target/release/cgrep ~/.local/bin/
 ```
+
+macOS note:
+- If Gatekeeper blocks first launch for a downloaded binary, run:
+  `xattr -d com.apple.quarantine ~/.local/bin/cgrep`
 
 Detailed setup: `docs/installation.md`
 
