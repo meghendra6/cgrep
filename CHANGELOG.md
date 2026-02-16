@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- No unreleased changes yet.
+
+## [1.4.2] - 2026-02-16
+
 ### Added
 - Release installer script (`scripts/install_release.sh`) for GitHub release binaries on macOS/Linux with target auto-detection, checksum verification, and install-path control.
 - Agent docs now include provider-specific instruction/skill file output paths.
