@@ -15,7 +15,7 @@ Everything runs locally.
 
 ## Why Teams Choose cgrep
 
-- Proven on large codebases: in PyTorch scenario-completion workflows, cgrep cut tokens-to-complete by **95.2%** (**20.75x**) and reduced retrieval loop latency by about **58.2x** after indexing.
+- Proven on large codebases: in PyTorch scenario-completion workflows, cgrep cut tokens-to-complete by **95.2%** (**20.79x**) and reduced retrieval loop latency by about **59.5x** after indexing.
 - Get answers, not just matching lines: `definition`, `references`, `callers`, `dependents`, `map`, `read`.
 - Keep AI-agent loops small with `agent locate` + `agent expand` and compact `json2` output.
 - Ergonomic CLI shortcuts: `s`, `d`, `r`, `c`, `dep`, `i`, `a l`, plus short flags like `-u`, `-M`, `-B`, `-P`.
@@ -32,31 +32,31 @@ Everything runs locally.
 
 ## Benchmark Snapshot (PyTorch)
 
-- Measured on February 16, 2026 across 6 AI-coding scenarios (implementation/structure tracing on PyTorch).
+- Measured on February 17, 2026 across 6 AI-coding scenarios (implementation/structure tracing on PyTorch).
 - Completion model: iterative retrieval loops run until each scenario’s completion criteria is satisfied.
-- One-time index build: **4.87s**.
+- One-time index build: **5.11s**.
 
 | Metric | Baseline (`grep`) | cgrep (`agent locate/expand`) | Improvement |
 |---|---:|---:|---:|
-| Total tokens-to-complete | 128,479 | 6,160 | **95.2% less** |
-| Avg tokens-to-complete per task | 21,413 | 1,027 | **20.86x smaller** |
-| Avg retrieval latency to completion | 1,284.3 ms | 21.1 ms | **~60.8x faster** |
+| Total tokens-to-complete | 128,042 | 6,159 | **95.2% less** |
+| Avg tokens-to-complete per task | 21,340 | 1,027 | **20.79x smaller** |
+| Avg retrieval latency to completion | 1,287.7 ms | 21.7 ms | **~59.5x faster** |
 
 - Practical meaning: for the same completed scenarios, cgrep used only **4.8%** of the token volume of a plain `grep` workflow.
 - Full methodology and raw data: `docs/benchmarks/pytorch-agent-token-efficiency.md`.
+- Real Codex-agent benchmark (provider telemetry): `docs/benchmarks/pytorch-codex-agent-efficiency.md`.
 
-## Coding Readiness Benchmark (PyTorch)
+## Codex Real-Agent Snapshot (PyTorch)
 
-Same 6 scenarios, interpreted as coding tasks ("enough context to start patching"):
+- Measured on February 17, 2026 with `gpt-5-codex`, reasoning effort `medium`, `runs=2`.
 
-| Metric | Baseline (`grep`) | cgrep (`agent locate/expand`) | Improvement |
-|---|---:|---:|---:|
-| Tasks ready | 6/6 | 6/6 | parity |
-| Total tokens-to-ready | 128,479 | 6,160 | **95.2% less** |
-| Avg tokens-to-ready per task | 21,413 | 1,027 | **20.86x smaller** |
-| Avg retrieval latency to readiness | 1,284.3 ms | 21.1 ms | **~60.8x faster** |
+| Metric | Baseline | cgrep | Notes |
+|---|---:|---:|---|
+| Success rate (all cases) | 100.0% | 66.7% | strict command-policy validation enabled |
+| Total billable tokens (all cases) | 104,152 | 126,269 | cgrep had expensive failure tails |
+| Total billable tokens (success-only) | 104,152 | 27,087 | cgrep **74.0% less** on successful runs |
 
-Detailed report: `docs/benchmarks/pytorch-agent-coding-efficiency.md`.
+- Detailed run log and per-scenario breakdown: `docs/benchmarks/pytorch-codex-agent-efficiency.md`.
 
 ## Install
 
@@ -128,7 +128,7 @@ cgrep agent expand --id "$ID" -C 8 --compact
 - Configuration: `docs/configuration.md`
 - Embeddings mode: `docs/embeddings.md`
 - Agent token benchmark: `docs/benchmarks/pytorch-agent-token-efficiency.md`
-- Agent coding-readiness benchmark: `docs/benchmarks/pytorch-agent-coding-efficiency.md`
+- Codex real-agent benchmark: `docs/benchmarks/pytorch-codex-agent-efficiency.md`
 - Troubleshooting: `docs/troubleshooting.md`
 - Development and validation: `docs/development.md`
 
@@ -136,4 +136,3 @@ cgrep agent expand --id "$ID" -C 8 --compact
 
 - Changelog: `CHANGELOG.md`
 - Comparison material: `COMPARISON.md`
-- Harness rationale: <https://blog.can.ac/2026/02/12/the-harness-problem/>

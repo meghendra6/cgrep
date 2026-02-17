@@ -23,18 +23,28 @@ v1.4.3 핵심:
 
 ## 벤치마크 스냅샷 (PyTorch)
 
-2026년 2월 16일 기준, 구현 추적 시나리오 6개를 측정했습니다.
+2026년 2월 17일 기준, 구현 추적 시나리오 6개를 측정했습니다.
 완료 기준: 각 시나리오가 충족될 때까지 반복 조회를 수행합니다.
 
 | 지표 | 기준 (`grep`) | cgrep (`agent locate/expand`) | 개선 |
 |---|---:|---:|---:|
-| 완료까지 필요한 토큰 합계 | 128,479 | 6,160 | **95.2% 감소** |
-| 작업당 평균 완료 토큰 | 21,413 | 1,027 | **20.86x 축소** |
-| 완료까지 평균 검색 지연 | 1,284.3 ms | 21.1 ms | **약 60.8x 향상** |
+| 완료까지 필요한 토큰 합계 | 128,042 | 6,159 | **95.2% 감소** |
+| 작업당 평균 완료 토큰 | 21,340 | 1,027 | **20.79x 축소** |
+| 완료까지 평균 검색 지연 | 1,287.7 ms | 21.7 ms | **약 59.5x 향상** |
 
 자세한 방법/결과: [Agent Token Efficiency 벤치마크](../benchmarks/pytorch-agent-token-efficiency.md)
 
-코딩 준비 관점 결과: [Agent Coding Readiness 벤치마크(영문)](../benchmarks/pytorch-agent-coding-efficiency.md)
+## Codex 실사용 스냅샷 (PyTorch)
+
+2026년 2월 17일, `gpt-5-codex` (`reasoning_effort=medium`, `runs=2`) 기준 측정입니다.
+
+| 지표 | baseline | cgrep | 비고 |
+|---|---:|---:|---|
+| 성공률 (전체 케이스) | 100.0% | 66.7% | 엄격한 명령 정책 검증 포함 |
+| 청구 토큰 합계 (전체 케이스) | 104,152 | 126,269 | cgrep 실패 케이스 tail 비용 존재 |
+| 청구 토큰 합계 (성공 케이스만) | 104,152 | 27,087 | 성공 케이스 기준 cgrep **74.0% 감소** |
+
+자세한 결과: [Codex Agent Efficiency 벤치마크(영문)](../benchmarks/pytorch-codex-agent-efficiency.md)
 
 ## 문서 시작점
 
@@ -48,7 +58,7 @@ v1.4.3 핵심:
 | [설정](./configuration.md) | `.cgreprc.toml` 설정과 우선순위 |
 | [임베딩](./embeddings.md) | semantic/hybrid 모드 설정과 튜닝 |
 | [에이전트 토큰 효율 벤치마크(영문)](../benchmarks/pytorch-agent-token-efficiency.md) | PyTorch 기준 토큰 절감 효과 측정 |
-| [에이전트 코딩 준비 벤치마크(영문)](../benchmarks/pytorch-agent-coding-efficiency.md) | 동일 시나리오를 코딩 준비 관점으로 측정 |
+| [Codex 에이전트 효율 벤치마크(영문)](../benchmarks/pytorch-codex-agent-efficiency.md) | PyTorch 기준 실제 `codex exec` 토큰/성공률 측정 |
 | [문제 해결](./troubleshooting.md) | 자주 발생하는 문제와 해결 |
 | [개발](./development.md) | 빌드, 테스트, 검증 명령 |
 
@@ -56,4 +66,3 @@ v1.4.3 핵심:
 
 - 변경 이력: [CHANGELOG.md](https://github.com/meghendra6/cgrep/blob/main/CHANGELOG.md)
 - 비교 문서: [COMPARISON.md](https://github.com/meghendra6/cgrep/blob/main/COMPARISON.md)
-- Harness 배경: <https://blog.can.ac/2026/02/12/the-harness-problem/>

@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- No unreleased changes yet.
+### Added
+- Codex real-agent benchmark harness on PyTorch (`scripts/benchmark_codex_agent_efficiency.py`) using `codex exec` event telemetry.
+- Benchmark report page for Codex runs: `docs/benchmarks/pytorch-codex-agent-efficiency.md`.
+
+### Changed
+- Benchmark documentation is now focused on PyTorch-based `tokens-to-complete` results only.
 
 ## [1.4.3] - 2026-02-16
 

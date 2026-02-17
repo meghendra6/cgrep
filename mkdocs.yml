@@ -28,7 +28,7 @@ nav:
   - Embeddings: embeddings.md
   - Benchmark:
       - Agent Token Efficiency: benchmarks/pytorch-agent-token-efficiency.md
-      - Agent Coding Readiness: benchmarks/pytorch-agent-coding-efficiency.md
+      - Codex Agent Efficiency: benchmarks/pytorch-codex-agent-efficiency.md
   - Troubleshooting: troubleshooting.md
   - Development: development.md
   - Korean:
