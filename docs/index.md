@@ -23,18 +23,27 @@ v1.4.3 highlights:
 
 ## Benchmark Snapshot (PyTorch)
 
-Measured on February 16, 2026 across 6 implementation-tracing scenarios.
+Measured on February 17, 2026 across 6 implementation-tracing scenarios.
 Completion model: iterative retrieval until each scenario completion rule is satisfied.
 
 | Metric | Baseline (`grep`) | cgrep (`agent locate/expand`) | Improvement |
 |---|---:|---:|---:|
-| Total tokens-to-complete | 128,479 | 6,160 | **95.2% less** |
-| Avg tokens-to-complete per task | 21,413 | 1,027 | **20.86x smaller** |
-| Avg retrieval latency to completion | 1,284.3 ms | 21.1 ms | **~60.8x faster** |
+| Total tokens-to-complete | 128,042 | 6,159 | **95.2% less** |
+| Avg tokens-to-complete per task | 21,340 | 1,027 | **20.79x smaller** |
+| Avg retrieval latency to completion | 1,287.7 ms | 21.7 ms | **~59.5x faster** |
 
 Details: [Benchmark: Agent Token Efficiency](./benchmarks/pytorch-agent-token-efficiency.md)
 
-Coding-readiness details: [Benchmark: Agent Coding Readiness](./benchmarks/pytorch-agent-coding-efficiency.md)
+## Codex Real-Agent Snapshot (PyTorch)
+
+Measured on February 17, 2026 with `gpt-5-codex` (`reasoning_effort=medium`, `runs=2`).
+
+| Metric | Baseline | cgrep | Notes |
+|---|---:|---:|---|
+| Success rate (all cases) | 100.0% | 100.0% | strict command-policy validation enabled |
+| Total billable tokens (all cases) | 83,283 | 62,910 | cgrep **24.5% less** |
+
+Details: [Benchmark: Codex Agent Efficiency](./benchmarks/pytorch-codex-agent-efficiency.md)
 
 ## Start Here
 
@@ -48,7 +57,7 @@ Coding-readiness details: [Benchmark: Agent Coding Readiness](./benchmarks/pytor
 | [Configuration](./configuration.md) | `.cgreprc.toml` and config precedence |
 | [Embeddings](./embeddings.md) | Semantic/hybrid mode setup and tuning |
 | [Benchmark: Agent Token Efficiency](./benchmarks/pytorch-agent-token-efficiency.md) | AI coding workflow token reduction benchmark on PyTorch (`grep` baseline) |
-| [Benchmark: Agent Coding Readiness](./benchmarks/pytorch-agent-coding-efficiency.md) | Coding-task readiness benchmark using the same PyTorch scenarios |
+| [Benchmark: Codex Agent Efficiency](./benchmarks/pytorch-codex-agent-efficiency.md) | Real `codex exec` benchmark on PyTorch with provider token telemetry |
 | [Troubleshooting](./troubleshooting.md) | Common issues and fixes |
 | [Development](./development.md) | Build, test, and validation commands |
 
@@ -56,4 +65,3 @@ Coding-readiness details: [Benchmark: Agent Coding Readiness](./benchmarks/pytor
 
 - Changelog: [CHANGELOG.md](https://github.com/meghendra6/cgrep/blob/main/CHANGELOG.md)
 - Comparison: [COMPARISON.md](https://github.com/meghendra6/cgrep/blob/main/COMPARISON.md)
-- Harness rationale: <https://blog.can.ac/2026/02/12/the-harness-problem/>

@@ -37,5 +37,25 @@ python3 scripts/benchmark_agent_token_efficiency.py \
 
 This writes:
 - `docs/benchmarks/pytorch-agent-token-efficiency.md`
-- `docs/benchmarks/pytorch-agent-coding-efficiency.md`
 - `local/benchmarks/pytorch-agent-token-efficiency.json` (local-only)
+
+## Codex real-agent benchmark (PyTorch)
+
+```bash
+python3 scripts/benchmark_codex_agent_efficiency.py \
+  --repo /path/to/pytorch \
+  --cgrep-bin /path/to/cgrep \
+  --model gpt-5-codex \
+  --reasoning-effort medium \
+  --runs 2
+```
+
+This benchmark runs real `codex exec` sessions and records provider telemetry:
+- `input_tokens`, `cached_input_tokens`, `output_tokens`
+- `billable_tokens = input - cached_input + output`
+- success/failure under command-policy constraints
+- both `all_cases` and `success_only` aggregates are reported
+
+This writes:
+- `docs/benchmarks/pytorch-codex-agent-efficiency.md`
+- `local/benchmarks/pytorch-codex-agent-efficiency.json` (local-only)
