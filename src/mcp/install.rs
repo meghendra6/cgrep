@@ -15,15 +15,38 @@ struct HostInfo {
     note: Option<&'static str>,
 }
 
-fn server_entry() -> Value {
+fn server_entry(command: &str) -> Value {
     json!({
-        "command": "cgrep",
+        "command": command,
         "args": ["mcp", "serve"]
     })
 }
 
 fn required_home_dir() -> Result<PathBuf> {
     dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))
+}
+
+fn is_cgrep_binary(path: &std::path::Path) -> bool {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(|stem| stem.eq_ignore_ascii_case("cgrep"))
+        .unwrap_or(false)
+}
+
+fn resolve_cgrep_command() -> String {
+    if let Ok(found) = which::which("cgrep") {
+        if is_cgrep_binary(&found) {
+            return found.to_string_lossy().to_string();
+        }
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if is_cgrep_binary(&exe) {
+            return exe.to_string_lossy().to_string();
+        }
+    }
+
+    "cgrep".to_string()
 }
 
 fn host_info(host: McpHost) -> Result<HostInfo> {
@@ -80,6 +103,7 @@ fn claude_desktop_path(_home: &std::path::Path) -> Result<PathBuf> {
 
 pub fn install(host: McpHost) -> Result<()> {
     let info = host_info(host)?;
+    let command = resolve_cgrep_command();
     let mut config = if info.path.exists() {
         let raw = fs::read_to_string(&info.path)
             .with_context(|| format!("failed to read {}", info.path.display()))?;
@@ -96,7 +120,7 @@ pub fn install(host: McpHost) -> Result<()> {
         .or_insert_with(|| json!({}))
         .as_object_mut()
         .ok_or_else(|| anyhow::anyhow!("{} is not a JSON object", info.servers_key))?
-        .insert("cgrep".to_string(), server_entry());
+        .insert("cgrep".to_string(), server_entry(&command));
 
     if let Some(parent) = info.path.parent() {
         fs::create_dir_all(parent)
@@ -109,6 +133,7 @@ pub fn install(host: McpHost) -> Result<()> {
     .with_context(|| format!("failed to write {}", info.path.display()))?;
 
     println!("✓ MCP config installed at {}", info.path.display());
+    println!("  command: {}", command);
     if let Some(note) = info.note {
         println!("  {}", note);
     }

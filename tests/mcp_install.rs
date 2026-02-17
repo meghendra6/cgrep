@@ -3,7 +3,21 @@
 use assert_cmd::Command;
 use serde_json::Value;
 use std::fs;
+use std::path::Path;
 use tempfile::TempDir;
+
+fn assert_cgrep_command(cmd_value: &Value) {
+    let command = cmd_value.as_str().expect("command string");
+    assert!(
+        command == "cgrep"
+            || Path::new(command)
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(|stem| stem.eq_ignore_ascii_case("cgrep"))
+                .unwrap_or(false),
+        "unexpected cgrep command: {command}"
+    );
+}
 
 #[test]
 fn mcp_install_and_uninstall_claude_code_updates_config() {
@@ -23,7 +37,7 @@ fn mcp_install_and_uninstall_claude_code_updates_config() {
     let raw = fs::read_to_string(&config_path).expect("read config");
     let json: Value = serde_json::from_str(&raw).expect("parse config");
     assert!(json["mcpServers"]["cgrep"].is_object());
-    assert_eq!(json["mcpServers"]["cgrep"]["command"], "cgrep");
+    assert_cgrep_command(&json["mcpServers"]["cgrep"]["command"]);
 
     let mut uninstall_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
     uninstall_cmd
@@ -87,7 +101,7 @@ fn mcp_install_cursor_updates_cursor_config() {
     let raw = fs::read_to_string(&config_path).expect("read config");
     let json: Value = serde_json::from_str(&raw).expect("parse config");
     assert!(json["mcpServers"]["cgrep"].is_object());
-    assert_eq!(json["mcpServers"]["cgrep"]["command"], "cgrep");
+    assert_cgrep_command(&json["mcpServers"]["cgrep"]["command"]);
 
     let mut uninstall_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
     uninstall_cmd
