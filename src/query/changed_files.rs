@@ -31,7 +31,7 @@ impl ChangedFiles {
             }
         });
 
-        let paths = collect_changed_paths(&repo_root, rev)?;
+        let paths = collect_changed_paths(&repo_root, rev, scope_prefix.as_deref())?;
 
         let signature = signature_for(rev, scope_prefix.as_deref(), &paths);
 
@@ -105,16 +105,29 @@ fn git_repo_root(path: &Path) -> Result<PathBuf> {
     Ok(PathBuf::from(top))
 }
 
-fn collect_changed_paths(repo_root: &Path, rev: &str) -> Result<HashSet<String>> {
+fn collect_changed_paths(
+    repo_root: &Path,
+    rev: &str,
+    scope_prefix: Option<&str>,
+) -> Result<HashSet<String>> {
+    let mut diff_args = vec!["diff", "--name-only", rev, "--"];
+    if let Some(prefix) = scope_prefix {
+        diff_args.push(prefix);
+    }
     let diff_output = run_git_collect_paths(
         repo_root,
-        &["diff", "--name-only", rev, "--"],
+        &diff_args,
         "Failed to run git diff for changed-files filter",
         "Failed to resolve changed files from git diff",
     )?;
+
+    let mut untracked_args = vec!["ls-files", "--others", "--exclude-standard", "--"];
+    if let Some(prefix) = scope_prefix {
+        untracked_args.push(prefix);
+    }
     let untracked_output = run_git_collect_paths(
         repo_root,
-        &["ls-files", "--others", "--exclude-standard", "--"],
+        &untracked_args,
         "Failed to run git ls-files for changed-files filter",
         "Failed to resolve untracked files from git ls-files",
     )?;
@@ -256,5 +269,38 @@ mod tests {
             normalize_rel_path_str("./src/./nested/../lib.rs"),
             "src/lib.rs"
         );
+    }
+
+    #[test]
+    fn changed_files_signature_ignores_out_of_scope_changes() {
+        let dir = TempDir::new().expect("tempdir");
+        run(dir.path(), &["init"]);
+        run(dir.path(), &["config", "user.email", "test@example.com"]);
+        run(dir.path(), &["config", "user.name", "test"]);
+
+        let src = dir.path().join("src");
+        let docs = dir.path().join("docs");
+        std::fs::create_dir_all(&src).expect("mkdir src");
+        std::fs::create_dir_all(&docs).expect("mkdir docs");
+        std::fs::write(src.join("lib.rs"), "pub fn scoped() {}\n").expect("write scoped");
+        std::fs::write(docs.join("guide.md"), "v1\n").expect("write docs");
+
+        run(dir.path(), &["add", "."]);
+        run(dir.path(), &["commit", "-m", "initial"]);
+
+        let base = ChangedFiles::from_scope(&src, "HEAD").expect("base changed");
+
+        // Change outside scope only.
+        std::fs::write(docs.join("guide.md"), "v2\n").expect("rewrite docs");
+        let outside_only = ChangedFiles::from_scope(&src, "HEAD").expect("outside changed");
+        assert_eq!(outside_only.signature(), base.signature());
+        assert!(!outside_only.matches_rel_path("lib.rs"));
+
+        // Change inside scope.
+        std::fs::write(src.join("lib.rs"), "pub fn scoped() { let _ = 1; }\n")
+            .expect("rewrite src");
+        let scoped = ChangedFiles::from_scope(&src, "HEAD").expect("scoped changed");
+        assert_ne!(scoped.signature(), outside_only.signature());
+        assert!(scoped.matches_rel_path("lib.rs"));
     }
 }
