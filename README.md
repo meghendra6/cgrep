@@ -3,7 +3,7 @@
 `grep` finds text. `cgrep` finds code intent.
 
 Built for humans and AI agents working in real repositories.
-Current release: **v1.4.4**.
+Current release: **v1.4.5**.
 
 `cgrep` combines:
 - BM25 full-text search (Tantivy)
@@ -19,6 +19,7 @@ Everything runs locally.
 - Get answers, not just matching lines: `definition`, `references`, `callers`, `dependents`, `map`, `read`.
 - Keep AI-agent loops small with `agent locate` + `agent expand` and compact `json2` output.
 - Ergonomic CLI shortcuts: `s`, `d`, `r`, `c`, `dep`, `i`, `a l`, plus short flags like `-u`, `-M`, `-B`, `-P`.
+- One-step agent installs now auto-wire MCP for `codex`, `claude-code`, `copilot`, and `cursor`.
 - Stay local-first for speed and privacy (no cloud index required).
 - Scale safely on large repos with indexing, watch/daemon, and MCP server mode.
 

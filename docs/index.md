@@ -3,12 +3,12 @@
 `grep` finds text. `cgrep` finds code intent.
 
 Local-first code search for humans and AI agents working in real repositories.
-Current release: **v1.4.4**.
+Current release: **v1.4.5**.
 
-v1.4.4 highlights:
-- Shortcut-first CLI for high-frequency commands.
-- Agent install support for `claude-code`, `codex`, `copilot`, `cursor`, and `opencode`.
-- MCP host install support including Cursor (`cgrep mcp install cursor`).
+v1.4.5 highlights:
+- Agent install now auto-configures MCP for `codex`, `claude-code`, `copilot`, and `cursor`.
+- Codex install now auto-updates both `~/.codex/config.toml` and `~/.codex/AGENTS.md` for MCP-first workflows.
+- Agent/MCP docs were tightened with verification-first setup guidance.
 
 - Docs site: <https://meghendra6.github.io/cgrep/>
 - Repository README: [README.md](https://github.com/meghendra6/cgrep/blob/main/README.md)

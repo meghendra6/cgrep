@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.5] - 2026-02-17
+
+### Added
+- Agent install commands now auto-configure MCP endpoints for supported targets (`codex`, `claude-code`, `copilot`, `cursor`) so installs are immediately MCP-ready.
+- Codex install now writes MCP guidance into `~/.codex/AGENTS.md` and ensures `~/.codex/config.toml` contains the cgrep MCP server entry.
+
+### Changed
+- Agent and MCP documentation (EN/KO) now describes MCP-first usage and post-install verification flow.
+
 ## [1.4.4] - 2026-02-17
 
 ### Added
