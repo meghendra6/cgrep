@@ -10,6 +10,8 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
+use crate::cli::McpHost;
+
 use super::{print_install_success, print_uninstall_success, write_file_if_changed};
 
 const CURSOR_RULE: &str = r#"---
@@ -69,6 +71,7 @@ pub fn install() -> Result<()> {
     }
 
     print_install_success("Cursor");
+    crate::mcp::install::install(McpHost::Cursor).context("Failed to install Cursor MCP config")?;
     Ok(())
 }
 
@@ -82,6 +85,9 @@ pub fn uninstall() -> Result<()> {
     } else {
         println!("Cursor rule not found");
     }
+
+    crate::mcp::install::uninstall(McpHost::Cursor)
+        .context("Failed to remove Cursor MCP config")?;
 
     Ok(())
 }

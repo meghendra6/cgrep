@@ -7,6 +7,8 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
+use crate::cli::McpHost;
+
 use super::{append_if_not_present, home_dir, print_install_success, print_uninstall_success};
 
 const SKILL_CONTENT: &str = r#"
@@ -73,6 +75,9 @@ pub fn install() -> Result<()> {
         println!("cgrep is already installed in Claude Code");
     }
 
+    crate::mcp::install::install(McpHost::ClaudeCode)
+        .context("Failed to install Claude Code MCP config")?;
+
     Ok(())
 }
 
@@ -106,6 +111,9 @@ pub fn uninstall() -> Result<()> {
     } else {
         println!("cgrep is not installed in Claude Code");
     }
+
+    crate::mcp::install::uninstall(McpHost::ClaudeCode)
+        .context("Failed to remove Claude Code MCP config")?;
 
     Ok(())
 }

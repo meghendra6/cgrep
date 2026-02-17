@@ -8,6 +8,8 @@ use anyhow::{Context, Result};
 use std::env;
 use std::path::PathBuf;
 
+use crate::cli::McpHost;
+
 use super::{print_install_success, print_uninstall_success, write_file_if_changed};
 
 const LGREP_INSTRUCTIONS: &str = r#"---
@@ -158,6 +160,8 @@ pub fn install() -> Result<()> {
         }
     }
 
+    crate::mcp::install::install(McpHost::Vscode)
+        .context("Failed to install VS Code MCP config for Copilot")?;
     print_install_success("GitHub Copilot");
     Ok(())
 }
@@ -186,6 +190,8 @@ pub fn uninstall() -> Result<()> {
         }
     }
 
+    crate::mcp::install::uninstall(McpHost::Vscode)
+        .context("Failed to remove VS Code MCP config for Copilot")?;
     print_uninstall_success("GitHub Copilot");
     Ok(())
 }

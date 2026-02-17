@@ -49,9 +49,12 @@ cgrep agent uninstall opencode
 
 Legacy `install-*` and `uninstall-*` commands remain for compatibility.
 
-Cursor note:
-- `agent install cursor` writes a project-local rule file: `.cursor/rules/cgrep.mdc`
-- MCP is also supported for Cursor via `cgrep mcp install cursor`
+Auto MCP setup during install:
+- `agent install claude-code` also runs MCP install for `claude-code` host.
+- `agent install codex` also ensures `~/.codex/config.toml` has `[mcp_servers.cgrep]` with `cgrep mcp serve`.
+- `agent install copilot` also runs MCP install for `vscode` host (`.vscode/mcp.json`).
+- `agent install cursor` also writes `.cursor/rules/cgrep.mdc` and runs MCP install for `cursor` host.
+- `agent install opencode` writes the OpenCode tool file only.
 
 ## Instruction/skill file outputs
 
@@ -64,3 +67,16 @@ Cursor note:
 | `copilot` | `.github/instructions/cgrep.instructions.md` (and optional append to `.github/copilot-instructions.md`) |
 | `cursor` | `.cursor/rules/cgrep.mdc` |
 | `opencode` | `~/.config/opencode/tool/cgrep.ts` |
+
+## Verify in one minute
+
+```bash
+# Confirm MCP registration (Codex)
+codex mcp list
+
+# Confirm MCP server responds
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+| cgrep mcp serve
+```

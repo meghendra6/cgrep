@@ -18,6 +18,9 @@ cgrep mcp install vscode
 cgrep mcp install claude-desktop
 ```
 
+`cgrep mcp install <host>` writes `command` as the resolved cgrep executable path
+(absolute when available) to avoid GUI/PATH mismatches in editor hosts.
+
 ## Remove host config
 
 ```bash
