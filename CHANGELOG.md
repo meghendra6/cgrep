@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `definition` no longer treats C/C++ forward declarations as full definitions, reducing token-heavy false positives.
+- `definition` now filters declaration-only C/C++ function signatures by default, reducing constructor/overload noise without requiring extra flags.
 
 ## [1.4.5] - 2026-02-17
 

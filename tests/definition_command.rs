@@ -218,3 +218,38 @@ fn definition_worst_case_cpp_noise_is_compacted_by_default() {
         results.len()
     );
 }
+
+#[test]
+fn definition_cpp_constructor_noise_prefers_type_definition() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(
+        &dir.path().join("sample/Foo.h"),
+        "\
+struct Foo {\n\
+  Foo();\n\
+  Foo(int x);\n\
+};\n\
+Foo::Foo() {}\n\
+Foo::Foo(int x) {}\n",
+    );
+
+    let mut index_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    index_cmd
+        .current_dir(dir.path())
+        .args(["index"])
+        .assert()
+        .success();
+
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let assert = cmd
+        .current_dir(dir.path())
+        .args(["--format", "json", "--compact", "definition", "Foo"])
+        .assert()
+        .success();
+    let out = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
+    let results: Vec<Value> = serde_json::from_str(&out).expect("json");
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["kind"], "struct");
+    assert_eq!(results[0]["path"], "sample/Foo.h");
+}

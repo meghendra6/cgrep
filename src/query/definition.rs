@@ -5,7 +5,7 @@
 use anyhow::Result;
 use colored::Colorize;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::cli::OutputFormat;
@@ -55,10 +55,26 @@ pub fn run(
 
     for file in &files {
         if let Some(ref file_lang) = file.language {
+            let is_cpp_like = is_cpp_like_language(file_lang);
             let lines: Vec<&str> = file.content.lines().collect();
             if let Ok(symbols) =
                 extractor.extract_with_cache(&file.content, file_lang, &mut parser_cache)
             {
+                let mut file_type_like_names: HashSet<String> = HashSet::new();
+                for symbol in &symbols {
+                    if !is_type_like_kind(&symbol.kind) {
+                        continue;
+                    }
+                    let line_text = lines
+                        .get(symbol.line.saturating_sub(1))
+                        .copied()
+                        .unwrap_or_default();
+                    if is_forward_declaration(line_text, &symbol.kind) {
+                        continue;
+                    }
+                    file_type_like_names.insert(symbol.name.to_lowercase());
+                }
+
                 for symbol in symbols {
                     // Skip variable/property references, focus on definitions
                     if !is_definition_kind(&symbol.kind) {
@@ -69,6 +85,18 @@ pub fn run(
                         .copied()
                         .unwrap_or_default();
                     if is_forward_declaration(line_text, &symbol.kind) {
+                        continue;
+                    }
+                    if is_cpp_like && is_cpp_declaration_without_body(&symbol.kind, line_text) {
+                        continue;
+                    }
+                    if is_cpp_like
+                        && matches!(symbol.kind, SymbolKind::Function)
+                        && symbol.name.to_lowercase() == name_lower
+                        && file_type_like_names.contains(&name_lower)
+                    {
+                        // Constructor-like overloads with the same name as a type are redundant
+                        // when locating a type definition and add significant token noise.
                         continue;
                     }
 
@@ -189,6 +217,22 @@ fn is_definition_kind(kind: &SymbolKind) -> bool {
     )
 }
 
+fn is_type_like_kind(kind: &SymbolKind) -> bool {
+    matches!(
+        kind,
+        SymbolKind::Class
+            | SymbolKind::Interface
+            | SymbolKind::Type
+            | SymbolKind::Struct
+            | SymbolKind::Enum
+            | SymbolKind::Trait
+    )
+}
+
+fn is_cpp_like_language(language: &str) -> bool {
+    matches!(language, "c" | "cpp")
+}
+
 fn is_forward_declaration(line_text: &str, kind: &SymbolKind) -> bool {
     if !matches!(
         kind,
@@ -205,6 +249,18 @@ fn is_forward_declaration(line_text: &str, kind: &SymbolKind) -> bool {
         || lower.starts_with("struct ")
         || lower.starts_with("interface ")
         || lower.starts_with("enum ")
+}
+
+fn is_cpp_declaration_without_body(kind: &SymbolKind, line_text: &str) -> bool {
+    if !matches!(kind, SymbolKind::Function) {
+        return false;
+    }
+    let trimmed = line_text.trim();
+    if trimmed.is_empty() || !trimmed.ends_with(';') || trimmed.contains('{') {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    !lower.starts_with("typedef ") && !lower.starts_with("using ")
 }
 
 fn dedupe_matches(matches: Vec<(PathBuf, Symbol)>) -> Vec<(PathBuf, Symbol)> {
