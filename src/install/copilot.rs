@@ -114,6 +114,11 @@ This project uses **cgrep** for local code search. When searching for code or co
 cgrep uses tantivy + tree-sitter for fast offline code search.
 "#;
 
+fn has_cgrep_section(existing: &str) -> bool {
+    existing.contains("## cgrep Local Code Search")
+        || existing.contains("## cgrep Local Semantic Search")
+}
+
 fn get_project_root() -> Result<PathBuf> {
     env::current_dir().context("Failed to get current directory")
 }
@@ -141,16 +146,15 @@ pub fn install() -> Result<()> {
     // Append to copilot-instructions.md if it exists
     if copilot_instructions_path.exists() {
         let existing = std::fs::read_to_string(&copilot_instructions_path)?;
-        if !existing.contains("## cgrep Local Code Search")
-            && !existing.contains("## cgrep Local Semantic Search")
-            && !existing.contains("cgrep")
-        {
+        if !has_cgrep_section(&existing) {
             let mut file = std::fs::OpenOptions::new()
                 .append(true)
                 .open(&copilot_instructions_path)?;
             use std::io::Write;
             write!(file, "{}", COPILOT_INSTRUCTIONS_APPEND)?;
             println!("Added cgrep section to {:?}", copilot_instructions_path);
+        } else {
+            println!("copilot-instructions already contains a cgrep section");
         }
     }
 
