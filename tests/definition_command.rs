@@ -158,3 +158,63 @@ fn definition_skips_cpp_forward_declarations() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0]["path"], "impl.h");
 }
+
+#[test]
+fn definition_worst_case_cpp_noise_is_compacted_by_default() {
+    let dir = TempDir::new().expect("tempdir");
+    let mut core = String::new();
+    core.push_str("struct DispatchKeySet {\n");
+    for i in 0..120 {
+        core.push_str(&format!("  DispatchKeySet(int v{i});\n"));
+    }
+    core.push_str("};\n");
+    write_file(&dir.path().join("core/DispatchKeySet.h"), &core);
+
+    for i in 0..120 {
+        write_file(
+            &dir.path().join(format!("noise/forward_{i}.h")),
+            "struct DispatchKeySet;\n",
+        );
+    }
+
+    let mut index_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    index_cmd
+        .current_dir(dir.path())
+        .args(["index"])
+        .assert()
+        .success();
+
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let assert = cmd
+        .current_dir(dir.path())
+        .args([
+            "--format",
+            "json",
+            "--compact",
+            "definition",
+            "DispatchKeySet",
+        ])
+        .assert()
+        .success();
+    let out = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
+    let results: Vec<Value> = serde_json::from_str(&out).expect("json");
+
+    assert!(
+        results.iter().any(|r| r["path"] == "core/DispatchKeySet.h"),
+        "expected primary definition file to be present"
+    );
+    assert!(
+        !results.iter().any(|r| {
+            r["path"]
+                .as_str()
+                .map(|p| p.starts_with("noise/forward_"))
+                .unwrap_or(false)
+        }),
+        "forward declaration-only files should be filtered out"
+    );
+    assert!(
+        results.len() <= 2,
+        "results should stay compact by default, got {}",
+        results.len()
+    );
+}

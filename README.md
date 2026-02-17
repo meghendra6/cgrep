@@ -89,7 +89,7 @@ cgrep index
 cgrep search "authentication flow" -t rust -p src/
 
 # Symbol navigation
-cgrep definition handle_auth -p src/ -m 5
+cgrep definition handle_auth
 cgrep references UserService --mode auto
 
 # Smart read/map

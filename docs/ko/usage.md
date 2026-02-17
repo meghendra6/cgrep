@@ -48,7 +48,7 @@ cgrep search "retry logic" -u
 
 # 5) 심볼/탐색 명령
 cgrep symbols UserService -T class
-cgrep d handle_auth -p src/ -m 5
+cgrep d handle_auth
 cgrep c validate_token -M auto
 cgrep r UserService -M auto
 
@@ -132,7 +132,7 @@ cgrep search --help-advanced
 - `--max-chars-per-snippet`, `--max-context-chars`, `--max-total-chars`
 - `--path-alias`, `--dedupe-context`, `--suppress-boilerplate`
 
-## Definition 가이드
+## Definition 가이드 (선택 튜닝)
 
 ```bash
 cgrep definition <name> \
@@ -141,8 +141,9 @@ cgrep definition <name> \
 ```
 
 참고:
-- `-p`는 특정 하위 경로로 범위를 제한해 대형 저장소에서 노이즈/지연을 줄입니다.
-- `-m`은 반환 정의 개수를 제한합니다 (기본값: `20`). 에이전트 입력 토큰을 줄일 때 유용합니다.
+- 대부분의 저장소에서는 `cgrep d <name>`만으로 충분합니다.
+- `-p`는 특정 하위 경로로 의도적으로 범위를 제한할 때만 사용하세요.
+- `-m`은 반환 정의 개수를 더 엄격히 제한할 때 사용하세요 (기본값: `20`).
 
 ## 출력 형식
 

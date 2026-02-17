@@ -46,8 +46,8 @@ SCENARIOS: list[Scenario] = [
         coding_task="Patch autograd evaluate_function flow and verify the implementation file + autograd context.",
         grep_pattern="evaluate_function",
         cgrep_commands=(
-            "d Engine::evaluate_function --format json --compact -m 5 -p torch/csrc/autograd",
-            "d evaluate_function --format json --compact -m 5 -p torch/csrc/autograd",
+            "d Engine::evaluate_function --format json --compact",
+            "d evaluate_function --format json --compact",
         ),
         completion_groups=(("evaluate_function",), ("engine.cpp", "autograd/")),
     ),
@@ -57,8 +57,8 @@ SCENARIOS: list[Scenario] = [
         coding_task="Prepare a TensorIterator behavior change by locating the core declaration and implementation paths.",
         grep_pattern="TensorIterator",
         cgrep_commands=(
-            "d TensorIteratorBase --format json --compact -m 5 -p aten/src/ATen",
-            "d TensorIteratorBase::reorder_dimensions --format json --compact -m 5 -p aten/src/ATen",
+            "d TensorIteratorBase --format json --compact",
+            "d TensorIteratorBase::reorder_dimensions --format json --compact",
         ),
         completion_groups=(("TensorIterator",), ("TensorIterator.h", "TensorIterator.cpp")),
     ),
@@ -68,8 +68,8 @@ SCENARIOS: list[Scenario] = [
         coding_task="Implement a parser-related fix by gathering PythonArgParser definition and source implementation.",
         grep_pattern="PythonArgParser",
         cgrep_commands=(
-            "d PythonArgParser --format json --compact -m 5 -p torch/csrc/utils",
-            's "check_deprecated" --format json2 --compact -m 5 -p torch/csrc/utils',
+            "d PythonArgParser --format json --compact",
+            's "check_deprecated python_arg_parser" --format json2 --compact',
         ),
         completion_groups=(
             ("PythonArgParser",),
@@ -82,8 +82,8 @@ SCENARIOS: list[Scenario] = [
         coding_task="Refactor DispatchKeySet logic with confidence by finding its representation and core references.",
         grep_pattern="DispatchKeySet",
         cgrep_commands=(
-            "d DispatchKeySet --format json --compact -m 5 -p c10/core",
-            "d getRuntimeDispatchKeySet --format json --compact -m 5 -p c10/core",
+            "d DispatchKeySet --format json --compact",
+            "d getRuntimeDispatchKeySet --format json --compact",
         ),
         completion_groups=(("DispatchKeySet",), ("DispatchKeySet.h", "c10/core/")),
     ),
@@ -93,8 +93,8 @@ SCENARIOS: list[Scenario] = [
         coding_task="Make a CUDAGraph code-path update by collecting implementation and CUDA path context.",
         grep_pattern="CUDAGraph",
         cgrep_commands=(
-            "d CUDAGraph --format json --compact -m 5 -p aten/src/ATen/cuda",
-            's "CUDAGraph.cpp" --format json2 --compact -m 3 -p aten/src/ATen/cuda',
+            "d CUDAGraph --format json --compact",
+            's "CUDAGraph.cpp" --format json2 --compact',
         ),
         completion_groups=(("CUDAGraph",), ("CUDAGraph.cpp", "cuda/")),
     ),
@@ -104,8 +104,8 @@ SCENARIOS: list[Scenario] = [
         coding_task="Modify addmm behavior by locating native implementation and addmm_out call path.",
         grep_pattern=r"addmm\(",
         cgrep_commands=(
-            "d addmm_out_cpu --format json --compact -m 5 -p aten/src/ATen/native",
-            "d addmm_impl_cpu_ --format json --compact -m 5 -p aten/src/ATen/native",
+            "d addmm_out_cpu --format json --compact",
+            "d addmm_impl_cpu_ --format json --compact",
         ),
         completion_groups=(("addmm(", "addmm"), ("LinearAlgebra.cpp", "addmm_out", "native/")),
     ),
