@@ -18,6 +18,9 @@ cgrep mcp install vscode
 cgrep mcp install claude-desktop
 ```
 
+`cgrep mcp install <host>`는 가능하면 cgrep 실행 파일의 절대경로를 `command`로 기록해
+에디터 GUI 환경의 PATH 차이로 인한 실행 실패를 줄입니다.
+
 ## Host 설정 제거
 
 ```bash

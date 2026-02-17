@@ -49,9 +49,12 @@ cgrep agent uninstall opencode
 
 기존 `install-*`, `uninstall-*` 명령도 호환성 때문에 유지됩니다.
 
-Cursor 참고:
-- `agent install cursor`는 프로젝트 로컬 규칙 파일 `.cursor/rules/cgrep.mdc`를 생성합니다.
-- Cursor용 MCP도 지원합니다: `cgrep mcp install cursor`
+설치 시 MCP 자동 연동:
+- `agent install claude-code`는 `claude-code` host MCP 설정도 함께 적용합니다.
+- `agent install codex`는 `~/.codex/config.toml`의 `[mcp_servers.cgrep]`를 자동 보정합니다.
+- `agent install copilot`는 `vscode` host MCP 설정(`.vscode/mcp.json`)도 함께 적용합니다.
+- `agent install cursor`는 `.cursor/rules/cgrep.mdc` 생성 + `cursor` host MCP 설정을 함께 적용합니다.
+- `agent install opencode`는 OpenCode tool 파일만 생성합니다.
 
 ## instruction/skill 파일 생성 위치
 
@@ -64,3 +67,16 @@ Cursor 참고:
 | `copilot` | `.github/instructions/cgrep.instructions.md` (필요 시 `.github/copilot-instructions.md`에 섹션 추가) |
 | `cursor` | `.cursor/rules/cgrep.mdc` |
 | `opencode` | `~/.config/opencode/tool/cgrep.ts` |
+
+## 1분 검증
+
+```bash
+# Codex MCP 등록 확인
+codex mcp list
+
+# MCP 서버 응답 확인
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+| cgrep mcp serve
+```
