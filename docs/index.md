@@ -40,8 +40,8 @@ Measured on February 17, 2026 with `gpt-5-codex` (`reasoning_effort=medium`, `ru
 
 | Metric | Baseline | cgrep | Notes |
 |---|---:|---:|---|
-| Success rate (all cases) | 100.0% | 100.0% | strict command-policy validation enabled |
-| Total billable tokens (all cases) | 83,283 | 62,910 | cgrep **24.5% less** |
+| Success rate (all cases) | 91.7% | 100.0% | strict command-policy validation enabled (one baseline timeout) |
+| Total billable tokens (all cases) | 167,409 | 89,967 | cgrep **46.3% less** |
 
 Details: [Benchmark: Codex Agent Efficiency](./benchmarks/pytorch-codex-agent-efficiency.md)
 
