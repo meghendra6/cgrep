@@ -32,7 +32,7 @@ pub fn find_index_root(start: impl AsRef<Path>) -> Option<IndexRoot> {
 
     loop {
         let index_path = current.join(INDEX_DIR);
-        if index_path.exists() && index_path.is_dir() {
+        if is_valid_index_dir(&index_path) {
             return Some(IndexRoot {
                 root: current.clone(),
                 index_path,
@@ -46,6 +46,10 @@ pub fn find_index_root(start: impl AsRef<Path>) -> Option<IndexRoot> {
     }
 
     None
+}
+
+fn is_valid_index_dir(index_path: &Path) -> bool {
+    index_path.is_dir() && index_path.join("meta.json").is_file()
 }
 
 /// Get the index path for the current directory, walking up to find parent indexes.
@@ -77,6 +81,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let index_dir = dir.path().join(INDEX_DIR);
         fs::create_dir(&index_dir).unwrap();
+        fs::write(index_dir.join("meta.json"), "{}").unwrap();
 
         let result = find_index_root(dir.path()).unwrap();
         assert_eq!(result.root, dir.path().canonicalize().unwrap());
@@ -88,6 +93,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let index_dir = dir.path().join(INDEX_DIR);
         fs::create_dir(&index_dir).unwrap();
+        fs::write(index_dir.join("meta.json"), "{}").unwrap();
 
         let subdir = dir.path().join("subdir");
         fs::create_dir(&subdir).unwrap();
@@ -108,5 +114,29 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = get_index_path(dir.path());
         assert_eq!(path, dir.path().join(INDEX_DIR));
+    }
+
+    #[test]
+    fn find_index_root_skips_invalid_local_cgrep_dir() {
+        let dir = TempDir::new().unwrap();
+
+        let root_index = dir.path().join(INDEX_DIR);
+        fs::create_dir(&root_index).unwrap();
+        fs::write(root_index.join("meta.json"), "{}").unwrap();
+
+        let subdir = dir.path().join("subdir");
+        fs::create_dir_all(subdir.join(INDEX_DIR).join("cache")).unwrap();
+
+        let result = find_index_root(&subdir).unwrap();
+        assert_eq!(result.root, dir.path().canonicalize().unwrap());
+        assert!(result.is_parent);
+    }
+
+    #[test]
+    fn find_index_root_returns_none_for_invalid_cgrep_dir() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join(INDEX_DIR)).unwrap();
+
+        assert!(find_index_root(dir.path()).is_none());
     }
 }
