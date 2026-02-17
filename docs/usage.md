@@ -132,6 +132,19 @@ Common advanced flags:
 - `--max-chars-per-snippet`, `--max-context-chars`, `--max-total-chars`
 - `--path-alias`, `--dedupe-context`, `--suppress-boilerplate`
 
+## Definition guide (optional tuning)
+
+```bash
+cgrep definition <name> \
+  -p <path> \
+  -m <limit>
+```
+
+Notes:
+- In most repos, plain `cgrep d <name>` is enough.
+- Use `-p` only when you intentionally want to constrain lookup to a subtree.
+- Use `-m` only when you need a stricter payload budget (default: `20`).
+
 ## Output formats
 
 Global flags:

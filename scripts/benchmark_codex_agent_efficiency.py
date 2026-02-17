@@ -69,7 +69,7 @@ SCENARIOS: list[Scenario] = [
         grep_pattern="PythonArgParser",
         cgrep_commands=(
             "d PythonArgParser --format json --compact",
-            's "check_deprecated" --format json2 --compact -m 5 -p torch/csrc/utils',
+            's "check_deprecated python_arg_parser" --format json2 --compact',
         ),
         completion_groups=(
             ("PythonArgParser",),
@@ -94,7 +94,7 @@ SCENARIOS: list[Scenario] = [
         grep_pattern="CUDAGraph",
         cgrep_commands=(
             "d CUDAGraph --format json --compact",
-            's "CUDAGraph.cpp" --format json2 --compact -m 5 -p aten/src/ATen/cuda',
+            's "CUDAGraph.cpp" --format json2 --compact',
         ),
         completion_groups=(("CUDAGraph",), ("CUDAGraph.cpp", "cuda/")),
     ),
@@ -290,8 +290,11 @@ def build_prompt(mode: str, scenario: Scenario, cgrep_bin: Path) -> str:
         rules = (
             f"- Use only this cgrep binary: {cgrep_bin}\n"
             "- Allowed subcommands are only `search`/`s` and `definition`/`d`.\n"
-            "- Run exactly the following commands in order (no extras):\n"
+            "- Start with command 1 and execute commands in order.\n"
+            "- Run the next command only when evidence is still insufficient.\n"
+            "- Do not run commands outside this list:\n"
             f"{cgrep_plan}\n"
+            "- Stop as soon as marker groups are satisfied.\n"
             "- Do NOT wrap commands with `bash -lc`.\n"
             "- Do NOT use `cgrep agent`, `cgrep read`, grep/rg/find, or any `--help` command.\n"
             "- Do not edit files.\n"

@@ -132,6 +132,19 @@ cgrep search --help-advanced
 - `--max-chars-per-snippet`, `--max-context-chars`, `--max-total-chars`
 - `--path-alias`, `--dedupe-context`, `--suppress-boilerplate`
 
+## Definition 가이드 (선택 튜닝)
+
+```bash
+cgrep definition <name> \
+  -p <path> \
+  -m <limit>
+```
+
+참고:
+- 대부분의 저장소에서는 `cgrep d <name>`만으로 충분합니다.
+- `-p`는 특정 하위 경로로 의도적으로 범위를 제한할 때만 사용하세요.
+- `-m`은 반환 정의 개수를 더 엄격히 제한할 때 사용하세요 (기본값: `20`).
+
 ## 출력 형식
 
 전역 플래그:

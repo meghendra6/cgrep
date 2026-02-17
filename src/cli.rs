@@ -445,6 +445,19 @@ pub enum Commands {
     Definition {
         /// Symbol name to find definition for
         name: String,
+
+        /// Path to search in (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Maximum number of results
+        #[arg(
+            short = 'm',
+            long = "limit",
+            visible_alias = "max-results",
+            default_value = "20"
+        )]
+        max_results: usize,
     },
 
     /// Find all callers of a function
@@ -631,9 +644,18 @@ mod tests {
 
     #[test]
     fn definition_short_alias_parses() {
-        let cli = Cli::try_parse_from(["cgrep", "d", "handle_auth"]).expect("parse definition");
+        let cli = Cli::try_parse_from(["cgrep", "d", "handle_auth", "-p", "src", "-m", "7"])
+            .expect("parse definition");
         match cli.command {
-            Commands::Definition { name } => assert_eq!(name, "handle_auth"),
+            Commands::Definition {
+                name,
+                path,
+                max_results,
+            } => {
+                assert_eq!(name, "handle_auth");
+                assert_eq!(path.as_deref(), Some("src"));
+                assert_eq!(max_results, 7);
+            }
             other => panic!("expected definition command, got {other:?}"),
         }
     }
