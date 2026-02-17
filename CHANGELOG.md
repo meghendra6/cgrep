@@ -7,10 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.6] - 2026-02-17
+
 ### Changed
 - `definition` now supports `-p/--path` scope and `-m/--limit` result limits for lower-noise symbol lookups in large repositories.
 - `definition` ranking now prefers high-signal matches and deduplicates repeated overload-style entries from the same file.
 - Codex benchmark cgrep command plans now use scoped, capped definition/search calls to reduce retrieval payload size.
+- Codex benchmark documentation and README/docs snapshots are synced to the latest rerun, including aggregate and per-scenario values.
 
 ### Fixed
 - `definition` no longer treats C/C++ forward declarations as full definitions, reducing token-heavy false positives.

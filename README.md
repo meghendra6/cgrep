@@ -3,7 +3,7 @@
 `grep` finds text. `cgrep` finds code intent.
 
 Built for humans and AI agents working in real repositories.
-Current release: **v1.4.5**.
+Current release: **v1.4.6**.
 
 `cgrep` combines:
 - BM25 full-text search (Tantivy)

@@ -3,12 +3,12 @@
 `grep`은 텍스트를 찾고, `cgrep`은 코드 의도를 찾습니다.
 
 실제 저장소에서 사람과 AI 에이전트가 함께 작업할 때를 위한 로컬 우선 코드 검색 도구입니다.
-현재 릴리즈: **v1.4.5**.
+현재 릴리즈: **v1.4.6**.
 
-v1.4.5 핵심:
-- `codex`, `claude-code`, `copilot`, `cursor` 설치 시 MCP가 자동 구성됩니다.
-- Codex 설치가 `~/.codex/config.toml`과 `~/.codex/AGENTS.md`를 함께 갱신해 MCP 우선 워크플로를 바로 적용합니다.
-- 에이전트/MCP 문서가 검증 중심 설치 절차로 정리되었습니다.
+v1.4.6 핵심:
+- `definition`에 `-p/--path`, `-m/--limit`가 추가되어 대규모 저장소에서 범위 제한 조회가 쉬워졌습니다.
+- C/C++의 forward declaration 및 선언 전용 시그니처 노이즈를 기본적으로 줄이도록 `definition` 동작이 개선되었습니다.
+- Codex 벤치마크 문서(집계 + Per Scenario 표)가 최신 재측정 결과로 동기화되었습니다.
 
 - 문서 사이트: <https://meghendra6.github.io/cgrep/>
 - 저장소 README: [README.md](https://github.com/meghendra6/cgrep/blob/main/README.md)
