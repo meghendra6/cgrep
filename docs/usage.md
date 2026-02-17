@@ -48,7 +48,7 @@ cgrep search "retry logic" -u
 
 # 5) Symbol/navigation commands
 cgrep symbols UserService -T class
-cgrep d handle_auth
+cgrep d handle_auth -p src/ -m 5
 cgrep c validate_token -M auto
 cgrep r UserService -M auto
 
@@ -131,6 +131,18 @@ Common advanced flags:
 - `--context-pack`
 - `--max-chars-per-snippet`, `--max-context-chars`, `--max-total-chars`
 - `--path-alias`, `--dedupe-context`, `--suppress-boilerplate`
+
+## Definition guide
+
+```bash
+cgrep definition <name> \
+  -p <path> \
+  -m <limit>
+```
+
+Notes:
+- `-p` scopes lookup to a subtree (often reduces noise and latency in large repos).
+- `-m` limits returned definitions (default: `20`) to keep payloads small for agents.
 
 ## Output formats
 
