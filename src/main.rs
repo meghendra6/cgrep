@@ -416,8 +416,12 @@ fn main() -> Result<()> {
                 compact,
             )?;
         }
-        Commands::Definition { name } => {
-            query::definition::run(&name, global_format, compact)?;
+        Commands::Definition {
+            name,
+            path,
+            max_results,
+        } => {
+            query::definition::run(&name, path.as_deref(), max_results, global_format, compact)?;
         }
         Commands::Callers { function, mode } => {
             query::callers::run(&function, mode, global_format, compact)?;
