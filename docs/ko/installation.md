@@ -43,7 +43,7 @@ cp target/release/cgrep ~/.local/bin/
 
 ```bash
 # 예시 (macOS Apple Silicon)
-TAG=v1.4.2
+TAG=v1.4.5
 ASSET="cgrep-${TAG}-aarch64-apple-darwin.tar.gz"
 curl -LO "https://github.com/meghendra6/cgrep/releases/download/${TAG}/${ASSET}"
 curl -LO "https://github.com/meghendra6/cgrep/releases/download/${TAG}/${ASSET}.sha256"
