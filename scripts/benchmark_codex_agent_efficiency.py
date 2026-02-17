@@ -35,7 +35,7 @@ class Scenario:
     objective: str
     coding_task: str
     grep_pattern: str
-    cgrep_query: str
+    cgrep_commands: tuple[str, ...]
     completion_groups: tuple[tuple[str, ...], ...]
 
 
@@ -45,7 +45,10 @@ SCENARIOS: list[Scenario] = [
         objective="Find where autograd engine evaluate_function is implemented and inspected.",
         coding_task="Patch autograd evaluate_function flow and verify the implementation file + autograd context.",
         grep_pattern="evaluate_function",
-        cgrep_query="evaluate_function engine.cpp autograd",
+        cgrep_commands=(
+            "d Engine::evaluate_function --format json --compact",
+            "d evaluate_function --format json --compact",
+        ),
         completion_groups=(("evaluate_function",), ("engine.cpp", "autograd/")),
     ),
     Scenario(
@@ -53,7 +56,10 @@ SCENARIOS: list[Scenario] = [
         objective="Find TensorIterator definition and major implementation usage points.",
         coding_task="Prepare a TensorIterator behavior change by locating the core declaration and implementation paths.",
         grep_pattern="TensorIterator",
-        cgrep_query="TensorIterator TensorIterator.h TensorIterator.cpp",
+        cgrep_commands=(
+            "d TensorIteratorBase --format json --compact",
+            "d TensorIteratorBase::reorder_dimensions --format json --compact",
+        ),
         completion_groups=(("TensorIterator",), ("TensorIterator.h", "TensorIterator.cpp")),
     ),
     Scenario(
@@ -61,7 +67,10 @@ SCENARIOS: list[Scenario] = [
         objective="Locate PythonArgParser implementation and usage points.",
         coding_task="Implement a parser-related fix by gathering PythonArgParser definition and source implementation.",
         grep_pattern="PythonArgParser",
-        cgrep_query="PythonArgParser python_arg_parser.h python_arg_parser.cpp",
+        cgrep_commands=(
+            "d PythonArgParser --format json --compact",
+            's "check_deprecated" --format json2 --compact -m 5 -p torch/csrc/utils',
+        ),
         completion_groups=(
             ("PythonArgParser",),
             ("python_arg_parser.h", "python_arg_parser.cpp"),
@@ -72,7 +81,10 @@ SCENARIOS: list[Scenario] = [
         objective="Understand DispatchKeySet representation and references.",
         coding_task="Refactor DispatchKeySet logic with confidence by finding its representation and core references.",
         grep_pattern="DispatchKeySet",
-        cgrep_query="where DispatchKeySet is defined and referenced",
+        cgrep_commands=(
+            "d DispatchKeySet --format json --compact",
+            "d getRuntimeDispatchKeySet --format json --compact",
+        ),
         completion_groups=(("DispatchKeySet",), ("DispatchKeySet.h", "c10/core/")),
     ),
     Scenario(
@@ -80,7 +92,10 @@ SCENARIOS: list[Scenario] = [
         objective="Locate CUDAGraph implementation-related code quickly.",
         coding_task="Make a CUDAGraph code-path update by collecting implementation and CUDA path context.",
         grep_pattern="CUDAGraph",
-        cgrep_query="where CUDAGraph is implemented",
+        cgrep_commands=(
+            "d CUDAGraph --format json --compact",
+            's "CUDAGraph.cpp" --format json2 --compact -m 5 -p aten/src/ATen/cuda',
+        ),
         completion_groups=(("CUDAGraph",), ("CUDAGraph.cpp", "cuda/")),
     ),
     Scenario(
@@ -88,7 +103,10 @@ SCENARIOS: list[Scenario] = [
         objective="Find addmm implementation and call sites.",
         coding_task="Modify addmm behavior by locating native implementation and addmm_out call path.",
         grep_pattern=r"addmm\(",
-        cgrep_query="addmm LinearAlgebra.cpp addmm_out",
+        cgrep_commands=(
+            "d addmm_out_cpu --format json --compact",
+            "d addmm_impl_cpu_ --format json --compact",
+        ),
         completion_groups=(("addmm(", "addmm"), ("LinearAlgebra.cpp", "addmm_out", "native/")),
     ),
 ]
@@ -197,21 +215,27 @@ def disallowed_for_mode(mode: str, cmd: str) -> bool:
     if mode == "baseline":
         if " --help" in normalized:
             return True
-        return (" cgrep" in f" {normalized}") or re.search(r"(^|\\s)rg(\\s|$)", normalized) is not None
+        return (" cgrep" in f" {normalized}") or re.search(r"(^|\s)rg(\s|$)", normalized) is not None
     if mode == "cgrep":
         if " --help" in normalized:
             return True
-        if re.search(r"(^|\\s)cgrep(\\s|$)", normalized) is None and "/cgrep" not in normalized:
+        if re.search(r"(^|\s)cgrep(\s|$)", normalized) is None and "/cgrep" not in normalized:
             return True
-        if re.search(r"(^|\\s)agent(\\s|$)", normalized) is not None:
+        match = re.search(r"(?:^|\s)(?:[\w./-]*cgrep)\s+([\w-]+)", normalized)
+        if match is None:
             return True
-        if re.search(r"(^|\\s)read(\\s|$)", normalized) is not None:
+        subcommand = match.group(1)
+        if subcommand not in {"s", "search", "d", "definition"}:
             return True
-        if re.search(r"(^|\\s)rg(\\s|$)", normalized) is not None:
+        if re.search(r"(^|\s)agent(\s|$)", normalized) is not None:
             return True
-        if re.search(r"(^|\\s)grep(\\s|$)", normalized) is not None:
+        if re.search(r"(^|\s)read(\s|$)", normalized) is not None:
             return True
-        if re.search(r"(^|\\s)find(\\s|$)", normalized) is not None:
+        if re.search(r"(^|\s)rg(\s|$)", normalized) is not None:
+            return True
+        if re.search(r"(^|\s)grep(\s|$)", normalized) is not None:
+            return True
+        if re.search(r"(^|\s)find(\s|$)", normalized) is not None:
             return True
     return False
 
@@ -259,16 +283,19 @@ def build_prompt(mode: str, scenario: Scenario, cgrep_bin: Path) -> str:
             "- Keep commands minimal."
         )
     else:
+        cgrep_steps = []
+        for idx, command in enumerate(scenario.cgrep_commands, start=1):
+            cgrep_steps.append(f"{idx}. {cgrep_bin} {command}")
+        cgrep_plan = "\n".join(cgrep_steps)
         rules = (
             f"- Use only this cgrep binary: {cgrep_bin}\n"
-            "- Use `cgrep search` only (alias `s` is allowed).\n"
-            f"- First command MUST be:\n"
-            f"  {cgrep_bin} s \"{scenario.cgrep_query}\" --format json --compact -m 5 -p .\n"
-            "- If needed, run at most one additional `cgrep search` with a narrower `-p` scope.\n"
-            "- Do NOT use `cgrep agent`, `cgrep read`, or any `--help` command.\n"
-            "- Do NOT use grep/rg/find.\n"
+            "- Allowed subcommands are only `search`/`s` and `definition`/`d`.\n"
+            "- Run exactly the following commands in order (no extras):\n"
+            f"{cgrep_plan}\n"
+            "- Do NOT wrap commands with `bash -lc`.\n"
+            "- Do NOT use `cgrep agent`, `cgrep read`, grep/rg/find, or any `--help` command.\n"
             "- Do not edit files.\n"
-            "- Keep commands minimal."
+            "- If evidence is still insufficient after the listed commands, return `objective_met: false` instead of running extra commands."
         )
     return textwrap.dedent(
         f"""
@@ -463,14 +490,8 @@ def aggregate_mode(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def aggregate_success_only(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    success_rows = [r for r in rows if r["success"]]
-    return aggregate_mode(success_rows)
-
-
 def render_markdown(payload: dict[str, Any]) -> str:
     summary_all = payload["summary"]["all_cases"]
-    summary_success = payload["summary"]["success_only"]
     rows = payload["results"]
     lines: list[str] = []
     lines.append("# PyTorch Codex Agent Efficiency Benchmark")
@@ -519,30 +540,6 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines.append(f"- Total billable tokens (baseline): **{baseline_all['total_billable_tokens']:,}**")
     lines.append(f"- Total billable tokens (cgrep): **{cgrep_all['total_billable_tokens']:,}**")
     lines.append(f"- Billable token reduction: **{reduction_all:.1f}%**")
-    lines.append("")
-    lines.append("## Aggregate (Success-Only)")
-    lines.append("")
-    lines.append("| Mode | Successful cases | Median billable tokens | P95 billable tokens | Median duration (ms) | Median commands |")
-    lines.append("|---|---:|---:|---:|---:|---:|")
-    for mode in ("baseline", "cgrep"):
-        row = summary_success[mode]
-        lines.append(
-            f"| `{mode}` | {row['cases']} | {row['median_billable_tokens']:.0f} | "
-            f"{row['p95_billable_tokens']:.0f} | {row['median_duration_ms']:.1f} | {row['median_commands']:.1f} |"
-        )
-    baseline_success = summary_success["baseline"]
-    cgrep_success = summary_success["cgrep"]
-    if baseline_success["total_billable_tokens"] > 0:
-        reduction_success = (
-            (baseline_success["total_billable_tokens"] - cgrep_success["total_billable_tokens"])
-            / baseline_success["total_billable_tokens"]
-        ) * 100.0
-    else:
-        reduction_success = 0.0
-    lines.append("")
-    lines.append(f"- Success-only total billable tokens (baseline): **{baseline_success['total_billable_tokens']:,}**")
-    lines.append(f"- Success-only total billable tokens (cgrep): **{cgrep_success['total_billable_tokens']:,}**")
-    lines.append(f"- Success-only billable token reduction: **{reduction_success:.1f}%**")
     lines.append("")
     lines.append("## Per Scenario")
     lines.append("")
@@ -666,10 +663,6 @@ def main() -> int:
         "all_cases": {
             "baseline": aggregate_mode(baseline_rows),
             "cgrep": aggregate_mode(cgrep_rows),
-        },
-        "success_only": {
-            "baseline": aggregate_success_only(baseline_rows),
-            "cgrep": aggregate_success_only(cgrep_rows),
         },
     }
 

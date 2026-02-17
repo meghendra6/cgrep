@@ -52,9 +52,8 @@ Everything runs locally.
 
 | Metric | Baseline | cgrep | Notes |
 |---|---:|---:|---|
-| Success rate (all cases) | 100.0% | 66.7% | strict command-policy validation enabled |
-| Total billable tokens (all cases) | 104,152 | 126,269 | cgrep had expensive failure tails |
-| Total billable tokens (success-only) | 104,152 | 27,087 | cgrep **74.0% less** on successful runs |
+| Success rate (all cases) | 100.0% | 100.0% | strict command-policy validation enabled |
+| Total billable tokens (all cases) | 83,283 | 62,910 | cgrep **24.5% less** |
 
 - Detailed run log and per-scenario breakdown: `docs/benchmarks/pytorch-codex-agent-efficiency.md`.
 

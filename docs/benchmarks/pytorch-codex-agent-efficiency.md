@@ -1,6 +1,6 @@
 # PyTorch Codex Agent Efficiency Benchmark
 
-Generated: 2026-02-17T02:16:51.150186+00:00
+Generated: 2026-02-17T03:09:42.221263+00:00
 
 ## What This Measures
 
@@ -16,7 +16,7 @@ Generated: 2026-02-17T02:16:51.150186+00:00
 - codex model: `gpt-5-codex`
 - reasoning effort: `medium`
 - runs per scenario/mode: `2`
-- cgrep commit: `3606f38`
+- cgrep commit: `c4a5cdd`
 - pytorch commit: `b7abe8e3ab9`
 - PyTorch files (`git ls-files`): `20437`
 
@@ -24,52 +24,41 @@ Generated: 2026-02-17T02:16:51.150186+00:00
 
 | Mode | Cases | Success rate | Median billable tokens | P95 billable tokens | Median total tokens | Median duration (ms) | Median commands |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `baseline` | 12 | 100.0% | 9466 | 12801 | 29046 | 13145.0 | 2.0 |
-| `cgrep` | 12 | 66.7% | 4798 | 35595 | 22392 | 11328.5 | 2.0 |
+| `baseline` | 12 | 100.0% | 6302 | 11110 | 26437 | 14519.6 | 2.0 |
+| `cgrep` | 12 | 100.0% | 2866 | 11463 | 21802 | 9688.6 | 2.0 |
 
-- Total billable tokens (baseline): **104,152**
-- Total billable tokens (cgrep): **126,269**
-- Billable token reduction: **-21.2%**
-
-## Aggregate (Success-Only)
-
-| Mode | Successful cases | Median billable tokens | P95 billable tokens | Median duration (ms) | Median commands |
-|---|---:|---:|---:|---:|---:|
-| `baseline` | 12 | 9466 | 12801 | 13145.0 | 2.0 |
-| `cgrep` | 8 | 2244 | 7210 | 7753.6 | 1.5 |
-
-- Success-only total billable tokens (baseline): **104,152**
-- Success-only total billable tokens (cgrep): **27,087**
-- Success-only billable token reduction: **74.0%**
+- Total billable tokens (baseline): **83,283**
+- Total billable tokens (cgrep): **62,910**
+- Billable token reduction: **24.5%**
 
 ## Per Scenario
 
 | Run | Scenario | Mode | Success | Billable tokens | Total tokens | Duration (ms) | Commands |
 |---:|---|---|---|---:|---:|---:|---:|
-| 1 | `autograd_evaluate_function` | `baseline` | yes | 7,133 | 33,501 | 16382.6 | 3 |
-| 1 | `autograd_evaluate_function` | `cgrep` | no | 7,199 | 39,327 | 15109.6 | 4 |
-| 1 | `tensor_iterator_impl` | `baseline` | yes | 13,446 | 29,062 | 12900.4 | 2 |
-| 1 | `tensor_iterator_impl` | `cgrep` | yes | 4,218 | 22,266 | 12436.0 | 2 |
-| 1 | `python_arg_parser_impl` | `baseline` | yes | 4,242 | 24,850 | 12255.8 | 2 |
-| 1 | `python_arg_parser_impl` | `cgrep` | yes | 8,197 | 14,213 | 7999.5 | 1 |
-| 1 | `dispatch_key_set` | `baseline` | yes | 11,757 | 29,805 | 13189.6 | 2 |
-| 1 | `dispatch_key_set` | `cgrep` | no | 19,414 | 76,118 | 21230.0 | 6 |
-| 1 | `cuda_graph` | `baseline` | yes | 4,745 | 16,777 | 6236.0 | 1 |
-| 1 | `cuda_graph` | `cgrep` | yes | 1,356 | 14,028 | 4910.3 | 1 |
-| 1 | `addmm_path` | `baseline` | yes | 11,780 | 29,828 | 16210.3 | 2 |
-| 1 | `addmm_path` | `cgrep` | yes | 5,378 | 23,426 | 18067.7 | 2 |
-| 2 | `autograd_evaluate_function` | `cgrep` | yes | 2,192 | 21,520 | 7507.7 | 2 |
-| 2 | `autograd_evaluate_function` | `baseline` | yes | 3,231 | 23,327 | 10216.0 | 2 |
-| 2 | `tensor_iterator_impl` | `cgrep` | no | 29,385 | 124,489 | 36850.7 | 10 |
-| 2 | `tensor_iterator_impl` | `baseline` | yes | 10,982 | 29,030 | 13100.4 | 2 |
-| 2 | `python_arg_parser_impl` | `cgrep` | yes | 1,358 | 14,158 | 4448.3 | 1 |
-| 2 | `python_arg_parser_impl` | `baseline` | yes | 7,949 | 25,997 | 18267.6 | 2 |
-| 2 | `dispatch_key_set` | `cgrep` | yes | 2,295 | 22,519 | 10221.0 | 2 |
-| 2 | `dispatch_key_set` | `baseline` | yes | 12,016 | 30,064 | 15519.6 | 2 |
-| 2 | `cuda_graph` | `cgrep` | yes | 2,093 | 14,125 | 6014.5 | 1 |
-| 2 | `cuda_graph` | `baseline` | yes | 4,598 | 16,630 | 6240.6 | 1 |
-| 2 | `addmm_path` | `cgrep` | no | 43,184 | 203,056 | 59441.6 | 16 |
-| 2 | `addmm_path` | `baseline` | yes | 12,273 | 30,321 | 18304.4 | 2 |
+| 1 | `autograd_evaluate_function` | `baseline` | yes | 4,042 | 24,394 | 18336.5 | 2 |
+| 1 | `autograd_evaluate_function` | `cgrep` | yes | 2,110 | 21,054 | 8745.9 | 2 |
+| 1 | `tensor_iterator_impl` | `baseline` | yes | 7,651 | 29,795 | 14720.9 | 2 |
+| 1 | `tensor_iterator_impl` | `cgrep` | yes | 9,448 | 22,248 | 8799.7 | 2 |
+| 1 | `python_arg_parser_impl` | `baseline` | yes | 4,088 | 25,592 | 17009.3 | 2 |
+| 1 | `python_arg_parser_impl` | `cgrep` | yes | 2,332 | 22,044 | 11907.0 | 2 |
+| 1 | `dispatch_key_set` | `baseline` | yes | 8,179 | 29,811 | 14379.9 | 2 |
+| 1 | `dispatch_key_set` | `cgrep` | yes | 12,026 | 24,058 | 9246.9 | 2 |
+| 1 | `cuda_graph` | `baseline` | yes | 4,077 | 16,749 | 6198.8 | 1 |
+| 1 | `cuda_graph` | `cgrep` | yes | 9,787 | 21,819 | 10130.2 | 2 |
+| 1 | `addmm_path` | `baseline` | yes | 10,207 | 29,023 | 21858.1 | 2 |
+| 1 | `addmm_path` | `cgrep` | yes | 2,762 | 21,706 | 13687.5 | 2 |
+| 2 | `autograd_evaluate_function` | `cgrep` | yes | 1,277 | 20,989 | 7249.8 | 2 |
+| 2 | `autograd_evaluate_function` | `baseline` | yes | 5,398 | 23,446 | 14659.2 | 2 |
+| 2 | `tensor_iterator_impl` | `cgrep` | yes | 3,929 | 21,977 | 7318.9 | 2 |
+| 2 | `tensor_iterator_impl` | `baseline` | yes | 10,759 | 28,807 | 13328.2 | 2 |
+| 2 | `python_arg_parser_impl` | `cgrep` | yes | 2,568 | 21,384 | 10256.4 | 2 |
+| 2 | `python_arg_parser_impl` | `baseline` | yes | 6,523 | 24,571 | 11860.4 | 2 |
+| 2 | `dispatch_key_set` | `cgrep` | yes | 11,002 | 23,802 | 10237.1 | 2 |
+| 2 | `dispatch_key_set` | `baseline` | yes | 11,538 | 27,282 | 10781.8 | 2 |
+| 2 | `cuda_graph` | `cgrep` | yes | 2,969 | 21,785 | 12337.6 | 2 |
+| 2 | `cuda_graph` | `baseline` | yes | 4,739 | 16,771 | 7886.6 | 1 |
+| 2 | `addmm_path` | `cgrep` | yes | 2,700 | 21,516 | 8980.0 | 2 |
+| 2 | `addmm_path` | `baseline` | yes | 6,082 | 27,970 | 15040.7 | 2 |
 
 ## Re-run
 
