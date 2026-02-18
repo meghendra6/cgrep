@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.8] - 2026-02-18
+
+### Changed
+- Bumped package version to `v1.4.8` and synchronized release markers across `Cargo.toml`, `README.md`, and docs hubs (EN/KO).
+- Updated installation guide verification snippets to use `TAG=v1.4.8` in both English and Korean docs.
+- Refreshed docs index highlights so the docs site reflects the latest release state.
+
+### Fixed
+- Restored and validated the docs-site quick link in `README.md` so users can reliably jump to the canonical site.
+- Resolved docs-site freshness drift by aligning release/version text at the primary documentation entry points.
+
 ## [1.4.7] - 2026-02-18
 
 ### Changed
