@@ -4,12 +4,6 @@ Local-first code search and navigation for users and AI agents.
 
 Current release: **v1.4.8**
 
-v1.4.8 highlights:
-- Index builds now respect `.gitignore` / `.ignore` by default, with `cgrep index --include-ignored` as opt-out.
-- Release/version metadata is now synchronized across README, docs hubs, and installation guides.
-- Docs site entry points now consistently reference the canonical docs URL and current release.
-- Manual release verification snippets now default to `TAG=v1.4.8`.
-
 ## Start By Goal
 
 | I want to... | Open this doc |
