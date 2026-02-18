@@ -201,6 +201,8 @@ pub struct IndexConfig {
     pub exclude_paths: Vec<String>,
     /// Maximum file size in bytes to index (default: 1MB)
     pub max_file_size: Option<u64>,
+    /// Whether index build should respect .gitignore/.ignore rules
+    pub respect_git_ignore: Option<bool>,
 }
 
 impl IndexConfig {
@@ -212,6 +214,11 @@ impl IndexConfig {
     /// Get max file size (default: 1MB)
     pub fn max_file_size(&self) -> u64 {
         self.max_file_size.unwrap_or(1024 * 1024)
+    }
+
+    /// Whether index build should respect ignore files (default: true)
+    pub fn respect_git_ignore(&self) -> bool {
+        self.respect_git_ignore.unwrap_or(true)
     }
 }
 

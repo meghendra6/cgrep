@@ -881,6 +881,7 @@ pub struct IndexBuilder {
     schema: Schema,
     fields: IndexFields,
     exclude_patterns: Vec<String>,
+    respect_git_ignore: bool,
     symbol_preview_lines: usize,
     symbol_max_chars: usize,
     max_symbols_per_file: usize,
@@ -900,9 +901,11 @@ impl IndexBuilder {
         let symbol_max_chars = DEFAULT_SYMBOL_MAX_CHARS;
         let max_symbols_per_file = 500;
         let allowed_symbol_kinds = None;
+        let respect_git_ignore = true;
         Self::with_excludes_and_symbols(
             root,
             excludes,
+            respect_git_ignore,
             preview_lines,
             symbol_max_chars,
             max_symbols_per_file,
@@ -914,6 +917,7 @@ impl IndexBuilder {
     pub fn with_excludes_and_symbols(
         root: impl AsRef<Path>,
         excludes: Vec<String>,
+        respect_git_ignore: bool,
         symbol_preview_lines: usize,
         symbol_max_chars: usize,
         max_symbols_per_file: usize,
@@ -950,6 +954,7 @@ impl IndexBuilder {
             schema,
             fields,
             exclude_patterns: excludes,
+            respect_git_ignore,
             symbol_preview_lines,
             symbol_max_chars,
             max_symbols_per_file,
@@ -1014,7 +1019,7 @@ impl IndexBuilder {
             .context("Failed to create index writer")?;
 
         let scanner = FileScanner::with_excludes(&self.root, self.exclude_patterns.clone())
-            .with_gitignore(false);
+            .with_gitignore(self.respect_git_ignore);
         let files = scanner.list_files()?;
         let current_paths: HashSet<String> = files
             .iter()
@@ -1625,6 +1630,7 @@ pub fn run(
     force: bool,
     excludes: Vec<String>,
     high_memory: bool,
+    include_ignored: bool,
     embeddings_mode: &str,
     embeddings_force: bool,
 ) -> Result<()> {
@@ -1639,9 +1645,11 @@ pub fn run(
     let mut all_excludes = excludes;
     all_excludes.extend(config.index().exclude_paths().iter().cloned());
 
+    let respect_git_ignore = config.index().respect_git_ignore() && !include_ignored;
     let builder = IndexBuilder::with_excludes_and_symbols(
         &root,
         all_excludes,
+        respect_git_ignore,
         config.embeddings.symbol_preview_lines(),
         config.embeddings.symbol_max_chars(),
         config.embeddings.max_symbols_per_file(),

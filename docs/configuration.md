@@ -19,6 +19,7 @@ ttl_ms = 600000
 
 [index]
 exclude_paths = ["vendor/", "dist/"]
+respect_git_ignore = true
 
 [profile.agent]
 format = "json2"
@@ -35,3 +36,9 @@ batch_size = 4      # lower = less memory, often faster on CPU
 # command = "embedder"
 # model = "local-model-id"
 ```
+
+## Index Ignore Policy
+
+- `cgrep index` now respects `.gitignore`/`.ignore` by default.
+- Use `cgrep index --include-ignored` to opt out and include ignored paths.
+- Config equivalent: `[index] respect_git_ignore = true|false` (default `true`).
