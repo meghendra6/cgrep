@@ -2,6 +2,8 @@
 
 Generated: 2026-02-17T01:13:05.138969+00:00
 
+> Snapshot note: these numbers were collected at cgrep commit `3606f38`. They are historical benchmark results, not a guarantee for every later release.
+
 ## What This Measures
 
 1. **Baseline (without cgrep):** `grep` locate + incremental snippet expansion tiers.

@@ -2,6 +2,8 @@
 
 Generated: 2026-02-18T08:46:48.528540+00:00
 
+> Snapshot note: these numbers were collected at cgrep commit `47fc4cc`. They are historical benchmark results, not a guarantee for every later release.
+
 ## What This Measures
 
 - Real `codex exec` runs on a local PyTorch repository.

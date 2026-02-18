@@ -4,12 +4,6 @@
 
 현재 릴리즈: **v1.4.8**
 
-v1.4.8 핵심:
-- 인덱스 빌드는 기본적으로 `.gitignore` / `.ignore`를 존중하며, `cgrep index --include-ignored`로 opt-out할 수 있습니다.
-- README, 문서 허브, 설치 가이드의 릴리즈/버전 표기를 최신 버전으로 동기화했습니다.
-- Docs site 진입점에서 공식 문서 URL과 현재 릴리즈 표기가 일관되게 보이도록 정리했습니다.
-- 릴리즈 자산 수동 검증 예시 기본 태그를 `TAG=v1.4.8`로 업데이트했습니다.
-
 ## 목적별 시작점
 
 | 하고 싶은 일 | 문서 |
@@ -59,3 +53,5 @@ cgrep agent expand --id "$ID" -C 8 --compact
 
 - 변경 이력: [CHANGELOG.md](https://github.com/meghendra6/cgrep/blob/main/CHANGELOG.md)
 - 비교 문서: [COMPARISON.md](https://github.com/meghendra6/cgrep/blob/main/COMPARISON.md)
+- 기여 가이드: [CONTRIBUTING.md](https://github.com/meghendra6/cgrep/blob/main/CONTRIBUTING.md)
+- 보안 정책: [SECURITY.md](https://github.com/meghendra6/cgrep/blob/main/SECURITY.md)
