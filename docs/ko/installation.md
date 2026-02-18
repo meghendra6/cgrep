@@ -10,9 +10,7 @@ curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/insta
 
 ### 1) 릴리즈 바이너리 설치 (대부분 사용자 권장)
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh | bash
-```
+위의 빠른 설치 명령을 그대로 사용하면 됩니다.
 
 특정 버전 고정:
 

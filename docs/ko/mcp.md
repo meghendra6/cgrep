@@ -3,10 +3,17 @@
 ## 1분 설정
 
 ```bash
-cgrep mcp install codex
+# Codex (agent 지침 + Codex MCP 설정)
+cgrep agent install codex
+
+# MCP host 설치 예시
 cgrep mcp install claude-code
 cgrep mcp install cursor
 ```
+
+- `cgrep mcp install codex`는 유효한 host 명령이 아닙니다.
+- Codex 연동은 `cgrep agent install codex`를 사용하세요.
+- 지원 host 목록은 `cgrep mcp install --help`에서 확인하세요.
 
 진단용 수동 서버 실행:
 
@@ -22,13 +29,13 @@ cgrep mcp run
 
 ## 지원 Host
 
-```bash
-cgrep mcp install claude-code
-cgrep mcp install cursor
-cgrep mcp install windsurf
-cgrep mcp install vscode
-cgrep mcp install claude-desktop
-```
+| Host | 설치 명령 |
+|---|---|
+| `claude-code` | `cgrep mcp install claude-code` |
+| `cursor` | `cgrep mcp install cursor` |
+| `windsurf` | `cgrep mcp install windsurf` |
+| `vscode` | `cgrep mcp install vscode` |
+| `claude-desktop` | `cgrep mcp install claude-desktop` |
 
 별칭:
 

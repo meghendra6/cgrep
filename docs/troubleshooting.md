@@ -12,6 +12,7 @@
 | `Error: Search query cannot be empty` | query is empty/whitespace (including `--regex ""`) | pass a non-empty query string |
 | `Error: Path cannot be empty` from `read` | missing path argument | pass a valid file path to `cgrep read <path>` |
 | `error: unexpected argument '<path>' found` when query starts with `-` | `--` separator was placed before options/path | put flags/path first, then `--` (e.g., `cgrep search -p src -- --help`) |
+| `invalid value 'codex' for '<HOST>'` from `mcp install` | `codex` is not an MCP host value for this command | use `cgrep agent install codex` for Codex, or choose a host from `cgrep mcp install --help` |
 
 ## Fast Recovery Sequence
 

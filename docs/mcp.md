@@ -3,10 +3,17 @@
 ## 1-Minute Setup
 
 ```bash
-cgrep mcp install codex
+# Codex (agent instructions + Codex MCP wiring)
+cgrep agent install codex
+
+# MCP host install examples
 cgrep mcp install claude-code
 cgrep mcp install cursor
 ```
+
+- `cgrep mcp install codex` is not a valid host command.
+- For Codex, use `cgrep agent install codex`.
+- For host list, run `cgrep mcp install --help`.
 
 Run server manually (for diagnostics):
 
@@ -22,13 +29,13 @@ cgrep mcp run
 
 ## Supported Hosts
 
-```bash
-cgrep mcp install claude-code
-cgrep mcp install cursor
-cgrep mcp install windsurf
-cgrep mcp install vscode
-cgrep mcp install claude-desktop
-```
+| Host | Install command |
+|---|---|
+| `claude-code` | `cgrep mcp install claude-code` |
+| `cursor` | `cgrep mcp install cursor` |
+| `windsurf` | `cgrep mcp install windsurf` |
+| `vscode` | `cgrep mcp install vscode` |
+| `claude-desktop` | `cgrep mcp install claude-desktop` |
 
 Alias:
 

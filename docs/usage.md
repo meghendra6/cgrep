@@ -27,7 +27,7 @@ cgrep search "token validation" src/
 
 # grep/rg + manual open loop
 cgrep d handle_auth
-cgrep r UserService -M auto
+cgrep r UserService
 cgrep rd src/auth.rs
 cgrep mp -d 2
 ```
@@ -74,7 +74,7 @@ cgrep index
 # 2) Core 5 commands
 cgrep search "authentication flow" src/
 cgrep d handle_auth
-cgrep r UserService -M auto
+cgrep r UserService
 cgrep rd src/auth.rs
 cgrep mp -d 2
 
@@ -160,6 +160,32 @@ Common advanced flags:
 - `--context-pack`
 - `--max-chars-per-snippet`, `--max-context-chars`, `--max-total-chars`
 - `--path-alias`, `--dedupe-context`, `--suppress-boilerplate`
+
+## Read guide
+
+```bash
+cgrep read src/auth.rs
+cgrep read src/auth.rs --section 120-220
+cgrep read docs/usage.md --section "Search guide"
+cgrep read src/auth.rs --full
+```
+
+Notes:
+- `read` expects a non-empty file path.
+- `--section` accepts either a line range (`start-end`) or a markdown heading.
+- `--full` disables smart outline mode and prints the full file.
+
+## Map guide
+
+```bash
+cgrep map
+cgrep map -d 2
+cgrep map -p src -d 3
+```
+
+Notes:
+- Default depth is `3`.
+- Use `-p` to focus on a subtree before running follow-up `search/read`.
 
 ## Definition guide (optional tuning)
 

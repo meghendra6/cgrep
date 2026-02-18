@@ -10,9 +10,7 @@ curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/insta
 
 ### 1) Release binary (most users)
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh | bash
-```
+Use the quick-install command above.
 
 Pin a version:
 

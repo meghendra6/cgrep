@@ -51,6 +51,7 @@ cgrep agent uninstall opencode
 Legacy `install-*` and `uninstall-*` commands remain for compatibility.
 
 Auto MCP setup during install:
+- `mcp install` host values are `claude-code`, `cursor`, `windsurf`, `vscode`, `claude-desktop` (Codex uses `agent install codex`).
 - `agent install claude-code` also runs MCP install for `claude-code` host.
 - `agent install codex` also ensures `~/.codex/config.toml` has `[mcp_servers.cgrep]` with `command = "cgrep"`, `args = ["mcp", "serve"]`, and an explicit startup timeout.
 - `agent install copilot` also runs MCP install for `vscode` host (`.vscode/mcp.json`).

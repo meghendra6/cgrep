@@ -27,7 +27,7 @@ cgrep search "token validation" src/
 
 # grep/rg + 수동 파일 열기 반복
 cgrep d handle_auth
-cgrep r UserService -M auto
+cgrep r UserService
 cgrep rd src/auth.rs
 cgrep mp -d 2
 ```
@@ -74,7 +74,7 @@ cgrep index
 # 2) 핵심 5개 명령
 cgrep search "authentication flow" src/
 cgrep d handle_auth
-cgrep r UserService -M auto
+cgrep r UserService
 cgrep rd src/auth.rs
 cgrep mp -d 2
 
@@ -160,6 +160,32 @@ cgrep search --help-advanced
 - `--context-pack`
 - `--max-chars-per-snippet`, `--max-context-chars`, `--max-total-chars`
 - `--path-alias`, `--dedupe-context`, `--suppress-boilerplate`
+
+## Read 가이드
+
+```bash
+cgrep read src/auth.rs
+cgrep read src/auth.rs --section 120-220
+cgrep read docs/ko/usage.md --section "검색 가이드"
+cgrep read src/auth.rs --full
+```
+
+참고:
+- `read`는 비어 있지 않은 파일 경로가 필요합니다.
+- `--section`은 라인 범위(`start-end`) 또는 마크다운 헤딩을 받을 수 있습니다.
+- `--full`을 주면 스마트 개요 모드를 끄고 파일 전체를 출력합니다.
+
+## Map 가이드
+
+```bash
+cgrep map
+cgrep map -d 2
+cgrep map -p src -d 3
+```
+
+참고:
+- 기본 깊이는 `3`입니다.
+- 후속 `search/read` 전에 `-p`로 하위 트리를 먼저 좁히세요.
 
 ## Definition 가이드 (선택 튜닝)
 
