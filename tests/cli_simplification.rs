@@ -483,6 +483,96 @@ fn search_command_supports_literal_query_starting_with_dash() {
 }
 
 #[test]
+fn indexed_search_falls_back_to_scan_for_dash_only_literal_query() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join("sample.txt"), "flags: -n\n");
+    write_file(&dir.path().join("noise.txt"), "n n n n n\n");
+
+    let mut index_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    index_cmd
+        .current_dir(dir.path())
+        .args(["index", "--embeddings", "off"])
+        .assert()
+        .success();
+
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let assert = cmd
+        .current_dir(dir.path())
+        .args(["--format", "json2", "--compact", "search", "-m", "10", "--", "-n"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
+    let json: Value = serde_json::from_str(&stdout).expect("json");
+    assert_eq!(json["meta"]["index_mode"], "scan");
+    let results = json["results"].as_array().expect("results");
+    assert!(!results.is_empty());
+    assert!(results.iter().any(|r| {
+        r["path"]
+            .as_str()
+            .map(|p| p.contains("sample.txt"))
+            .unwrap_or(false)
+            && r["snippet"]
+                .as_str()
+                .map(|s| s.contains("-n"))
+                .unwrap_or(false)
+    }));
+}
+
+#[test]
+fn indexed_search_treats_colon_query_as_literal() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(
+        &dir.path().join("src/match.rs"),
+        "const META: &str = \"schema_version:\";\n",
+    );
+    write_file(
+        &dir.path().join("src/noise.rs"),
+        "const META: &str = \"schema_version\";\n",
+    );
+
+    let mut index_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    index_cmd
+        .current_dir(dir.path())
+        .args(["index", "--embeddings", "off"])
+        .assert()
+        .success();
+
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let assert = cmd
+        .current_dir(dir.path())
+        .args([
+            "--format",
+            "json2",
+            "--compact",
+            "search",
+            "schema_version:",
+            "-p",
+            "src",
+            "-m",
+            "10",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
+    let json: Value = serde_json::from_str(&stdout).expect("json");
+    assert_eq!(json["meta"]["index_mode"], "index");
+    let results = json["results"].as_array().expect("results");
+    assert!(!results.is_empty());
+    assert!(results.iter().any(|r| {
+        r["path"]
+            .as_str()
+            .map(|p| p.contains("src/match.rs"))
+            .unwrap_or(false)
+    }));
+    assert!(results.iter().all(|r| {
+        r["path"]
+            .as_str()
+            .map(|p| !p.contains("src/noise.rs"))
+            .unwrap_or(true)
+    }));
+}
+
+#[test]
 fn root_help_mentions_search_first_usage() {
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
     cmd.args(["--help"])
@@ -509,6 +599,189 @@ fn search_command_accepts_grep_ignore_case_flag() {
     let json: Value = serde_json::from_str(&stdout).expect("json");
     let results = json.as_array().expect("array");
     assert!(!results.is_empty());
+}
+
+#[test]
+fn search_rejects_empty_and_whitespace_queries_in_all_modes() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join("sample.txt"), "needle\n");
+
+    let mut index_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    index_cmd
+        .current_dir(dir.path())
+        .args(["index", "--embeddings", "off"])
+        .assert()
+        .success();
+
+    for query in ["", " "] {
+        let mut indexed = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+        indexed
+            .current_dir(dir.path())
+            .args(["search", query, "-m", "5"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Search query cannot be empty"));
+
+        let mut indexed_regex = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+        indexed_regex
+            .current_dir(dir.path())
+            .args(["search", "--regex", query, "-m", "5"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Search query cannot be empty"));
+
+        let mut scanned = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+        scanned
+            .current_dir(dir.path())
+            .args(["search", "--no-index", query, "-m", "5"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Search query cannot be empty"));
+
+        let mut scanned_regex = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+        scanned_regex
+            .current_dir(dir.path())
+            .args(["search", "--no-index", "--regex", query, "-m", "5"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Search query cannot be empty"));
+    }
+}
+
+#[test]
+fn scan_search_truncates_utf8_snippets_without_panic() {
+    let dir = TempDir::new().expect("tempdir");
+    let long_emoji = "😀".repeat(1200);
+    write_file(
+        &dir.path().join("emoji.rs"),
+        &format!("line0\n// {long_emoji}\nline2\n"),
+    );
+
+    for context in ["0", "2"] {
+        let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+        let assert = cmd
+            .current_dir(dir.path())
+            .args([
+                "--format",
+                "json2",
+                "--compact",
+                "search",
+                "--no-index",
+                "-C",
+                context,
+                "-m",
+                "1",
+                "😀😀😀",
+            ])
+            .assert()
+            .success();
+
+        let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
+        let json: Value = serde_json::from_str(&stdout).expect("json");
+        let results = json["results"].as_array().expect("results");
+        assert!(!results.is_empty());
+
+        let snippet = results[0]["snippet"].as_str().unwrap_or_default();
+        assert!(snippet.contains("😀"));
+        assert!(snippet.chars().count() <= 153);
+    }
+}
+
+#[test]
+fn case_sensitive_search_behaves_consistently_between_index_and_scan() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join("sample.txt"), "Needle marker\n");
+
+    let mut index_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    index_cmd
+        .current_dir(dir.path())
+        .args(["index", "--embeddings", "off"])
+        .assert()
+        .success();
+
+    let mut idx_lower = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let idx_lower_assert = idx_lower
+        .current_dir(dir.path())
+        .args([
+            "--format",
+            "json2",
+            "--compact",
+            "search",
+            "--case-sensitive",
+            "needle",
+            "-m",
+            "5",
+        ])
+        .assert()
+        .success();
+    let idx_lower_stdout =
+        String::from_utf8(idx_lower_assert.get_output().stdout.clone()).expect("utf8");
+    let idx_lower_json: Value = serde_json::from_str(&idx_lower_stdout).expect("json");
+    assert_eq!(idx_lower_json["meta"]["index_mode"], "index");
+    assert_eq!(idx_lower_json["meta"]["total_matches"], 0);
+
+    let mut scan_lower = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let scan_lower_assert = scan_lower
+        .current_dir(dir.path())
+        .args([
+            "--format",
+            "json2",
+            "--compact",
+            "search",
+            "--no-index",
+            "--case-sensitive",
+            "needle",
+            "-m",
+            "5",
+        ])
+        .assert()
+        .success();
+    let scan_lower_stdout =
+        String::from_utf8(scan_lower_assert.get_output().stdout.clone()).expect("utf8");
+    let scan_lower_json: Value = serde_json::from_str(&scan_lower_stdout).expect("json");
+    assert_eq!(scan_lower_json["meta"]["index_mode"], "scan");
+    assert_eq!(scan_lower_json["meta"]["total_matches"], 0);
+
+    let mut idx_exact = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let idx_exact_assert = idx_exact
+        .current_dir(dir.path())
+        .args([
+            "--format",
+            "json2",
+            "--compact",
+            "search",
+            "--case-sensitive",
+            "Needle",
+            "-m",
+            "5",
+        ])
+        .assert()
+        .success();
+    let idx_exact_stdout =
+        String::from_utf8(idx_exact_assert.get_output().stdout.clone()).expect("utf8");
+    let idx_exact_json: Value = serde_json::from_str(&idx_exact_stdout).expect("json");
+    assert!(idx_exact_json["meta"]["total_matches"].as_u64().unwrap_or(0) > 0);
+
+    let mut scan_exact = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let scan_exact_assert = scan_exact
+        .current_dir(dir.path())
+        .args([
+            "--format",
+            "json2",
+            "--compact",
+            "search",
+            "--no-index",
+            "--case-sensitive",
+            "Needle",
+            "-m",
+            "5",
+        ])
+        .assert()
+        .success();
+    let scan_exact_stdout =
+        String::from_utf8(scan_exact_assert.get_output().stdout.clone()).expect("utf8");
+    let scan_exact_json: Value = serde_json::from_str(&scan_exact_stdout).expect("json");
+    assert!(scan_exact_json["meta"]["total_matches"].as_u64().unwrap_or(0) > 0);
 }
 
 #[test]

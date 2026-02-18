@@ -6,6 +6,7 @@ use anyhow::Result;
 use colored::Colorize;
 use regex::Regex;
 use serde::Serialize;
+use std::path::Path;
 
 use crate::cli::{OutputFormat, UsageSearchMode};
 use crate::indexer::scanner::FileScanner;
@@ -38,6 +39,7 @@ pub fn run(
         Some(p) => std::path::PathBuf::from(p).canonicalize()?,
         None => std::env::current_dir()?.canonicalize()?,
     };
+    let workspace_root = std::env::current_dir()?.canonicalize()?;
     let index_root = get_root_with_index(&search_root);
     let files = match find_files_with_content(&index_root, name, Some(&search_root))? {
         Some(indexed_paths) => read_scanned_files(&indexed_paths),
@@ -58,14 +60,10 @@ pub fn run(
     let mut ast = AstUsageExtractor::new();
 
     for file in &files {
-        let rel_path = file
-            .path
-            .strip_prefix(&search_root)
-            .unwrap_or(&file.path)
-            .display()
-            .to_string();
+        let scope_path = scope_relative_path(&file.path, &search_root);
+        let rel_path = workspace_display_path(&file.path, &workspace_root);
         if let Some(filter) = changed_filter.as_ref() {
-            if !filter.matches_rel_path(&rel_path) {
+            if !filter.matches_rel_path(&scope_path) {
                 continue;
             }
         }
@@ -168,4 +166,33 @@ pub fn run(
     }
 
     Ok(())
+}
+
+fn scope_relative_path(full_path: &Path, search_root: &Path) -> String {
+    if let Ok(rel) = full_path.strip_prefix(search_root) {
+        let rendered = rel.display().to_string();
+        if !rendered.is_empty() {
+            return rendered;
+        }
+    }
+
+    full_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| full_path.display().to_string())
+}
+
+fn workspace_display_path(full_path: &Path, workspace_root: &Path) -> String {
+    if workspace_root != Path::new("/") {
+        if let Ok(rel) = full_path.strip_prefix(workspace_root) {
+            let rendered = rel.display().to_string();
+            if !rendered.is_empty() {
+                return rendered;
+            }
+            return ".".to_string();
+        }
+    }
+
+    full_path.display().to_string()
 }
