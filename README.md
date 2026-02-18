@@ -62,6 +62,11 @@ Notes:
 - If query text starts with `-`, pass `--` after `search`.
   Example: `cgrep search -- --literal`
 - Direct shorthand `cgrep "query"` is intentionally not used.
+- `search` result `path` is workspace-relative, so you can pass it directly to `cgrep read`.
+
+For MCP usage:
+- `cgrep_search` treats dash-prefixed queries as literal text automatically.
+- Pass optional `cwd` in MCP tool arguments to pin relative-path resolution.
 
 ## Core Commands
 

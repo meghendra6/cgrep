@@ -88,6 +88,28 @@ fn mcp_initialize_and_list_tools() {
     assert!(names.contains(&"cgrep_read".to_string()));
     assert!(names.contains(&"cgrep_index".to_string()));
 
+    let tools_array = tools["result"]["tools"].as_array().expect("tools array");
+    for tool_name in [
+        "cgrep_search",
+        "cgrep_read",
+        "cgrep_map",
+        "cgrep_symbols",
+        "cgrep_definition",
+        "cgrep_references",
+        "cgrep_callers",
+        "cgrep_dependents",
+        "cgrep_index",
+    ] {
+        let tool = tools_array
+            .iter()
+            .find(|t| t["name"].as_str() == Some(tool_name))
+            .unwrap_or_else(|| panic!("missing tool schema for {tool_name}"));
+        assert!(
+            tool["inputSchema"]["properties"]["cwd"].is_object(),
+            "{tool_name} should expose optional cwd in MCP schema"
+        );
+    }
+
     mcp.stop();
 }
 
@@ -183,6 +205,111 @@ fn mcp_unknown_tool_returns_is_error() {
         .as_str()
         .unwrap_or_default()
         .contains("unknown tool"));
+
+    mcp.stop();
+}
+
+#[test]
+fn mcp_search_accepts_literal_query_starting_with_dash() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join("src/lib.rs"), "--needle marker\n");
+
+    let mut mcp = McpProc::spawn(dir.path());
+    let _ = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    }));
+
+    let search = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_search",
+            "arguments": {
+                "query": "--needle",
+                "path": "src",
+                "no_index": true
+            }
+        }
+    }));
+    let search_text = search["result"]["content"][0]["text"]
+        .as_str()
+        .expect("search text");
+    let search_json: Value = serde_json::from_str(search_text).expect("search json2");
+    assert!(search_json["results"]
+        .as_array()
+        .map(|arr| !arr.is_empty())
+        .unwrap_or(false));
+
+    mcp.stop();
+}
+
+#[test]
+fn mcp_tool_call_honors_cwd_for_relative_paths() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(
+        &dir.path().join("src/lib.rs"),
+        "pub fn needle_token() {}\npub fn run() { needle_token(); }\n",
+    );
+    let cwd = dir.path().to_string_lossy().to_string();
+
+    let mut mcp = McpProc::spawn(std::path::Path::new("/"));
+    let _ = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    }));
+
+    let search = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_search",
+            "arguments": {
+                "query": "needle_token",
+                "path": ".",
+                "cwd": cwd,
+                "no_index": true
+            }
+        }
+    }));
+    let search_text = search["result"]["content"][0]["text"]
+        .as_str()
+        .expect("search text");
+    let search_json: Value = serde_json::from_str(search_text).expect("search json2");
+    let first_path = search_json["results"]
+        .as_array()
+        .and_then(|arr| arr.first())
+        .and_then(|v| v.get("path"))
+        .and_then(Value::as_str)
+        .expect("result path");
+    assert_eq!(first_path, "src/lib.rs");
+
+    let read = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_read",
+            "arguments": {
+                "path": first_path,
+                "cwd": dir.path().to_string_lossy().to_string()
+            }
+        }
+    }));
+    let read_text = read["result"]["content"][0]["text"]
+        .as_str()
+        .expect("read text");
+    let read_json: Value = serde_json::from_str(read_text).expect("read json");
+    assert!(read_json["content"]
+        .as_str()
+        .map(|content| content.contains("needle_token"))
+        .unwrap_or(false));
 
     mcp.stop();
 }

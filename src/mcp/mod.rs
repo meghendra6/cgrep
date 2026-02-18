@@ -188,12 +188,12 @@ fn dispatch_tool(tool: &str, args: &Value) -> Result<String, String> {
 
 fn tool_search(args: &Value) -> Result<String, String> {
     let query = required_str(args, "query")?;
+    let cwd = opt_cwd(args);
     let mut cmd = vec![
         "--format".to_string(),
         "json2".to_string(),
         "--compact".to_string(),
         "search".to_string(),
-        query.to_string(),
     ];
 
     push_opt_flag_value(&mut cmd, "-p", opt_str(args, "path"));
@@ -212,12 +212,15 @@ fn tool_search(args: &Value) -> Result<String, String> {
     );
     push_bool_flag(&mut cmd, "--no-index", opt_bool(args, "no_index"));
     push_bool_flag(&mut cmd, "--fuzzy", opt_bool(args, "fuzzy"));
+    cmd.push("--".to_string());
+    cmd.push(query.to_string());
 
-    run_cgrep(&cmd)
+    run_cgrep(&cmd, cwd)
 }
 
 fn tool_read(args: &Value) -> Result<String, String> {
     let path = required_str(args, "path")?;
+    let cwd = opt_cwd(args);
     let mut cmd = vec![
         "--format".to_string(),
         "json".to_string(),
@@ -227,10 +230,11 @@ fn tool_read(args: &Value) -> Result<String, String> {
     ];
     push_opt_flag_value(&mut cmd, "--section", opt_str(args, "section"));
     push_bool_flag(&mut cmd, "--full", opt_bool(args, "full"));
-    run_cgrep(&cmd)
+    run_cgrep(&cmd, cwd)
 }
 
 fn tool_map(args: &Value) -> Result<String, String> {
+    let cwd = opt_cwd(args);
     let mut cmd = vec![
         "--format".to_string(),
         "json".to_string(),
@@ -239,11 +243,12 @@ fn tool_map(args: &Value) -> Result<String, String> {
     ];
     push_opt_flag_value(&mut cmd, "-p", opt_str(args, "path"));
     push_opt_flag_value_u64(&mut cmd, "--depth", opt_u64(args, "depth"));
-    run_cgrep(&cmd)
+    run_cgrep(&cmd, cwd)
 }
 
 fn tool_symbols(args: &Value) -> Result<String, String> {
     let name = required_str(args, "name")?;
+    let cwd = opt_cwd(args);
     let mut cmd = vec![
         "--format".to_string(),
         "json".to_string(),
@@ -257,11 +262,12 @@ fn tool_symbols(args: &Value) -> Result<String, String> {
     push_opt_flag_value(&mut cmd, "--glob", opt_str(args, "glob"));
     push_opt_flag_value(&mut cmd, "--exclude", opt_str(args, "exclude"));
     push_changed(&mut cmd, args.get("changed"));
-    run_cgrep(&cmd)
+    run_cgrep(&cmd, cwd)
 }
 
 fn tool_definition(args: &Value) -> Result<String, String> {
     let name = required_str(args, "name")?;
+    let cwd = opt_cwd(args);
     let cmd = vec![
         "--format".to_string(),
         "json".to_string(),
@@ -269,11 +275,12 @@ fn tool_definition(args: &Value) -> Result<String, String> {
         "definition".to_string(),
         name.to_string(),
     ];
-    run_cgrep(&cmd)
+    run_cgrep(&cmd, cwd)
 }
 
 fn tool_references(args: &Value) -> Result<String, String> {
     let name = required_str(args, "name")?;
+    let cwd = opt_cwd(args);
     let mut cmd = vec![
         "--format".to_string(),
         "json".to_string(),
@@ -285,11 +292,12 @@ fn tool_references(args: &Value) -> Result<String, String> {
     push_opt_flag_value_u64(&mut cmd, "--limit", opt_u64(args, "limit"));
     push_changed(&mut cmd, args.get("changed"));
     push_opt_flag_value(&mut cmd, "--mode", opt_str(args, "mode"));
-    run_cgrep(&cmd)
+    run_cgrep(&cmd, cwd)
 }
 
 fn tool_callers(args: &Value) -> Result<String, String> {
     let function = required_str(args, "function")?;
+    let cwd = opt_cwd(args);
     let mut cmd = vec![
         "--format".to_string(),
         "json".to_string(),
@@ -298,11 +306,12 @@ fn tool_callers(args: &Value) -> Result<String, String> {
         function.to_string(),
     ];
     push_opt_flag_value(&mut cmd, "--mode", opt_str(args, "mode"));
-    run_cgrep(&cmd)
+    run_cgrep(&cmd, cwd)
 }
 
 fn tool_dependents(args: &Value) -> Result<String, String> {
     let file = required_str(args, "file")?;
+    let cwd = opt_cwd(args);
     let cmd = vec![
         "--format".to_string(),
         "json".to_string(),
@@ -310,10 +319,11 @@ fn tool_dependents(args: &Value) -> Result<String, String> {
         "dependents".to_string(),
         file.to_string(),
     ];
-    run_cgrep(&cmd)
+    run_cgrep(&cmd, cwd)
 }
 
 fn tool_index(args: &Value) -> Result<String, String> {
+    let cwd = opt_cwd(args);
     let mut cmd = vec!["index".to_string()];
     push_opt_flag_value(&mut cmd, "-p", opt_str(args, "path"));
     push_bool_flag(&mut cmd, "--force", opt_bool(args, "force"));
@@ -327,7 +337,7 @@ fn tool_index(args: &Value) -> Result<String, String> {
         }
     }
 
-    run_cgrep(&cmd)
+    run_cgrep(&cmd, cwd)
 }
 
 fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
@@ -352,6 +362,10 @@ fn opt_array_str<'a>(args: &'a Value, key: &str) -> Option<Vec<&'a str>> {
     args.get(key)
         .and_then(Value::as_array)
         .map(|vals| vals.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+}
+
+fn opt_cwd(args: &Value) -> Option<&str> {
+    opt_str(args, "cwd").filter(|value| !value.trim().is_empty())
 }
 
 fn push_opt_flag_value(cmd: &mut Vec<String>, flag: &str, value: Option<&str>) {
@@ -387,12 +401,15 @@ fn push_changed(cmd: &mut Vec<String>, value: Option<&Value>) {
     }
 }
 
-fn run_cgrep(args: &[String]) -> Result<String, String> {
+fn run_cgrep(args: &[String], cwd: Option<&str>) -> Result<String, String> {
     let exe =
         std::env::current_exe().map_err(|e| format!("failed to resolve executable: {}", e))?;
-    let output = Command::new(exe)
-        .args(args)
-        .stdin(Stdio::null())
+    let mut command = Command::new(exe);
+    command.args(args).stdin(Stdio::null());
+    if let Some(cwd) = cwd {
+        command.current_dir(cwd);
+    }
+    let output = command
         .output()
         .map_err(|e| format!("failed to execute cgrep: {}", e))?;
 
@@ -430,6 +447,7 @@ fn tool_definitions() -> Vec<Value> {
                 "properties": {
                     "query": { "type": "string" },
                     "path": { "type": "string" },
+                    "cwd": { "type": "string" },
                     "limit": { "type": "number" },
                     "context": { "type": "number" },
                     "file_type": { "type": "string" },
@@ -452,6 +470,7 @@ fn tool_definitions() -> Vec<Value> {
                 "required": ["path"],
                 "properties": {
                     "path": { "type": "string" },
+                    "cwd": { "type": "string" },
                     "section": { "type": "string" },
                     "full": { "type": "boolean" }
                 }
@@ -463,6 +482,7 @@ fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "cwd": { "type": "string" },
                     "path": { "type": "string" },
                     "depth": { "type": "number" }
                 }
@@ -476,6 +496,7 @@ fn tool_definitions() -> Vec<Value> {
                 "required": ["name"],
                 "properties": {
                     "name": { "type": "string" },
+                    "cwd": { "type": "string" },
                     "symbol_type": { "type": "string" },
                     "lang": { "type": "string" },
                     "file_type": { "type": "string" },
@@ -492,7 +513,8 @@ fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "required": ["name"],
                 "properties": {
-                    "name": { "type": "string" }
+                    "name": { "type": "string" },
+                    "cwd": { "type": "string" }
                 }
             }
         }),
@@ -504,6 +526,7 @@ fn tool_definitions() -> Vec<Value> {
                 "required": ["name"],
                 "properties": {
                     "name": { "type": "string" },
+                    "cwd": { "type": "string" },
                     "path": { "type": "string" },
                     "limit": { "type": "number" },
                     "changed": { "oneOf": [{ "type": "boolean" }, { "type": "string" }] },
@@ -519,6 +542,7 @@ fn tool_definitions() -> Vec<Value> {
                 "required": ["function"],
                 "properties": {
                     "function": { "type": "string" },
+                    "cwd": { "type": "string" },
                     "mode": { "type": "string", "enum": ["auto", "regex", "ast"] }
                 }
             }
@@ -530,7 +554,8 @@ fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "required": ["file"],
                 "properties": {
-                    "file": { "type": "string" }
+                    "file": { "type": "string" },
+                    "cwd": { "type": "string" }
                 }
             }
         }),
@@ -541,6 +566,7 @@ fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "path": { "type": "string" },
+                    "cwd": { "type": "string" },
                     "force": { "type": "boolean" },
                     "high_memory": { "type": "boolean" },
                     "embeddings": { "type": "string", "enum": ["off", "auto", "precompute"] },

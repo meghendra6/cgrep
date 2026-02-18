@@ -119,6 +119,97 @@ fn explicit_path_flag_takes_precedence_over_positional_path() {
 }
 
 #[test]
+fn search_result_path_roundtrips_to_read_with_path_flag() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join("src/lib.rs"), "needle token\n");
+
+    let mut search_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let search_assert = search_cmd
+        .current_dir(dir.path())
+        .args([
+            "--format",
+            "json2",
+            "search",
+            "needle",
+            "-p",
+            "src",
+            "--no-index",
+        ])
+        .assert()
+        .success();
+    let search_stdout = String::from_utf8(search_assert.get_output().stdout.clone()).expect("utf8");
+    let search_json: Value = serde_json::from_str(&search_stdout).expect("json");
+    let path = search_json["results"]
+        .as_array()
+        .and_then(|arr| arr.first())
+        .and_then(|v| v.get("path"))
+        .and_then(Value::as_str)
+        .expect("result path")
+        .to_string();
+    assert_eq!(path, "src/lib.rs");
+
+    let mut read_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    read_cmd
+        .current_dir(dir.path())
+        .args(["--format", "json", "read", &path])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("needle token"));
+}
+
+#[test]
+fn search_file_scope_path_is_non_empty_and_workspace_relative() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join("src/lib.rs"), "needle token\n");
+
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let assert = cmd
+        .current_dir(dir.path())
+        .args([
+            "--format",
+            "json2",
+            "search",
+            "needle",
+            "-p",
+            "src/lib.rs",
+            "--no-index",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
+    let json: Value = serde_json::from_str(&stdout).expect("json");
+    let path = json["results"]
+        .as_array()
+        .and_then(|arr| arr.first())
+        .and_then(|v| v.get("path"))
+        .and_then(Value::as_str)
+        .expect("result path");
+    assert!(!path.is_empty());
+    assert_eq!(path, "src/lib.rs");
+}
+
+#[test]
+fn no_index_does_not_print_using_parent_index_message() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join("src/lib.rs"), "needle token\n");
+
+    let mut index_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    index_cmd
+        .current_dir(dir.path())
+        .args(["index"])
+        .assert()
+        .success();
+
+    let mut search_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    search_cmd
+        .current_dir(dir.path().join("src"))
+        .args(["--format", "json2", "search", "needle", "--no-index"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Using index from:").not());
+}
+
+#[test]
 fn no_ignore_allows_ignored_files_in_search_command() {
     let dir = TempDir::new().expect("tempdir");
     write_file(&dir.path().join(".ignore"), "ignored.txt\n");

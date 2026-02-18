@@ -70,6 +70,12 @@ printf '%s\n' \
 - `cgrep_dependents`
 - `cgrep_index`
 
+## 도구 인자 참고
+
+- MCP 도구는 optional `cwd`를 받아 상대경로 해석 기준을 고정할 수 있습니다.
+- `cgrep_search`는 `-n`, `--help`처럼 `-`로 시작하는 쿼리를 리터럴 검색어로 처리합니다.
+- `cgrep_search` 결과 `path`는 워크스페이스 상대경로(`cwd` 기준)로 반환되므로, 그대로 `cgrep_read`에 전달할 수 있습니다.
+
 ## 설정 파일 대상
 
 | Host | 경로 | 키 |
