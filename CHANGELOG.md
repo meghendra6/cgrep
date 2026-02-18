@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-02-18
+
+### Changed
+- Bumped package version to `v1.5.0` and synchronized release markers across `Cargo.toml`, `README.md`, and docs hubs (EN/KO).
+- Updated installation guide verification snippets to use `TAG=v1.5.0` in both English and Korean docs.
+- Refreshed Codex PyTorch benchmark snapshots to the latest measured run (`89,764` -> `21,092`, `76.5%` billable-token reduction, `runs=1`).
+- Expanded README's "For AI Agents" quick install path across host targets and linked to docs-site guides for agent/MCP details.
+
 ## [1.4.8] - 2026-02-18
 
 ### Changed

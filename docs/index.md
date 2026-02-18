@@ -2,7 +2,7 @@
 
 Local-first code search and navigation for users and AI agents.
 
-Current release: **v1.4.8**
+Current release: **v1.5.0**
 
 ## Start By Goal
 
@@ -40,8 +40,8 @@ cgrep agent expand --id "$ID" -C 8 --compact
 
 - [Benchmark: Agent Token Efficiency (PyTorch)](./benchmarks/pytorch-agent-token-efficiency.md)
 - [Benchmark: Codex Agent Efficiency (PyTorch)](./benchmarks/pytorch-codex-agent-efficiency.md)
-- Latest Codex snapshot (`2026-02-18`, `gpt-5-codex`, `runs=2`, historical benchmark snapshot):
-  baseline `233,825` -> cgrep `134,432` billable tokens (`42.5%` reduction).
+- Latest Codex snapshot (`2026-02-18`, `gpt-5-codex`, `runs=1`):
+  baseline `89,764` -> cgrep `21,092` billable tokens (`76.5%` reduction).
 
 ## Language And Site
 

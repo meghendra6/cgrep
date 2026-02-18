@@ -51,7 +51,7 @@ python3 scripts/benchmark_codex_agent_efficiency.py \
   --cgrep-bin /path/to/cgrep \
   --model gpt-5-codex \
   --reasoning-effort medium \
-  --runs 2
+  --runs 1
 ```
 
 Tracks:
@@ -63,5 +63,5 @@ Outputs:
 - `docs/benchmarks/pytorch-codex-agent-efficiency.md`
 - `local/benchmarks/pytorch-codex-agent-efficiency.json` (local-only)
 
-Latest checked snapshot (`2026-02-18`, `runs=2`, `gpt-5-codex`, `medium`):
-- baseline `233,825` -> cgrep `134,432` billable tokens (`42.5%` reduction)
+Latest checked snapshot (`2026-02-18`, `runs=1`, `gpt-5-codex`, `medium`):
+- baseline `89,764` -> cgrep `21,092` billable tokens (`76.5%` reduction)

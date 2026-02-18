@@ -2,7 +2,7 @@
 
 사람과 AI 에이전트를 위한 로컬 우선 코드 검색/탐색 문서 허브입니다.
 
-현재 릴리즈: **v1.4.8**
+현재 릴리즈: **v1.5.0**
 
 ## 목적별 시작점
 
@@ -40,8 +40,8 @@ cgrep agent expand --id "$ID" -C 8 --compact
 
 - [에이전트 토큰 효율 벤치마크 (PyTorch, 영문)](../benchmarks/pytorch-agent-token-efficiency.md)
 - [Codex 에이전트 효율 벤치마크 (PyTorch, 영문)](../benchmarks/pytorch-codex-agent-efficiency.md)
-- 최신 Codex 스냅샷 (`2026-02-18`, `gpt-5-codex`, `runs=2`):
-  baseline `233,825` -> cgrep `134,432` billable tokens (`42.5%` 절감).
+- 최신 Codex 스냅샷 (`2026-02-18`, `gpt-5-codex`, `runs=1`):
+  baseline `89,764` -> cgrep `21,092` billable tokens (`76.5%` 절감).
 
 ## 언어/사이트
 

@@ -25,7 +25,7 @@ Code search for humans and AI coding agents.
 # 1) Install (release binary)
 curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh | bash
 
-# 2) Build index once per repo
+# 2) Build index once per repo (respects .gitignore/.ignore by default)
 cgrep index
 
 # 3) Search and navigate
@@ -38,13 +38,28 @@ cgrep read src/auth.rs
 ### For AI Agents
 
 ```bash
-# Install agent guidance + MCP wiring
+# Install agent guidance (pick your host)
 cgrep agent install codex
+cgrep agent install claude-code
+cgrep agent install copilot
+cgrep agent install cursor
+cgrep agent install opencode
+
+# Or install MCP server config directly
+cgrep mcp install claude-code
+cgrep mcp install cursor
+cgrep mcp install windsurf
+cgrep mcp install vscode
+cgrep mcp install claude-desktop
 
 # Token-efficient retrieval
 ID=$(cgrep agent locate "where token validation happens" --compact | jq -r '.results[0].id')
 cgrep agent expand --id "$ID" -C 8 --compact
 ```
+
+Details:
+- Agent setup guide: <https://meghendra6.github.io/cgrep/agent/>
+- MCP integration guide: <https://meghendra6.github.io/cgrep/mcp/>
 
 ## Search UX (grep-friendly, explicit)
 
@@ -77,19 +92,6 @@ For MCP usage:
 - After `cgrep agent install codex`, restart the current Codex session so updated MCP config is reloaded.
 - MCP install writes `command = "cgrep"` by default, so binary updates apply without reinstalling MCP config.
 
-## Index Ignore Policy
-
-- `cgrep index` respects `.gitignore` / `.ignore` by default.
-- To include ignored paths for a one-off run, use `cgrep index --include-ignored`.
-- To make behavior explicit in config:
-
-```toml
-[index]
-respect_git_ignore = true
-```
-
-- Set `respect_git_ignore = false` if you intentionally want to index ignored paths by default.
-
 ## Core Commands
 
 ```bash
@@ -120,8 +122,8 @@ cgrep a l "query"     # agent locate
 PyTorch scenario-completion benchmark snapshots:
 - Agent token-efficiency benchmark: `docs/benchmarks/pytorch-agent-token-efficiency.md`
 - Codex real-agent benchmark: `docs/benchmarks/pytorch-codex-agent-efficiency.md`
-- Latest Codex snapshot (`2026-02-18`, `gpt-5-codex`, `runs=2`, historical benchmark snapshot):
-  baseline `233,825` -> cgrep `134,432` billable tokens (`42.5%` reduction).
+- Latest Codex snapshot (`2026-02-18`, `gpt-5-codex`, `runs=1`):
+  baseline `89,764` -> cgrep `21,092` billable tokens (`76.5%` reduction).
 
 ## Documentation
 
@@ -140,7 +142,7 @@ PyTorch scenario-completion benchmark snapshots:
 
 ## Project Notes
 
-- Current release: **v1.4.8**
+- Current release: **v1.5.0**
 - Changelog: `CHANGELOG.md`
 - Comparison material: `COMPARISON.md`
 - Contributing guide: `CONTRIBUTING.md`

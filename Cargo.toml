@@ -2,7 +2,7 @@
 
 [package]
 name = "cgrep"
-version = "1.4.8"
+version = "1.5.0"
 edition = "2021"
 description = "cgrep (codegrep) - Local semantic code search tool for AI agents with AST and BM25 support"
 license = "MIT OR Apache-2.0"
