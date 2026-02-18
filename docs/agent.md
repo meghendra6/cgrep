@@ -52,10 +52,14 @@ Legacy `install-*` and `uninstall-*` commands remain for compatibility.
 
 Auto MCP setup during install:
 - `agent install claude-code` also runs MCP install for `claude-code` host.
-- `agent install codex` also ensures `~/.codex/config.toml` has `[mcp_servers.cgrep]` with `cgrep mcp serve`.
+- `agent install codex` also ensures `~/.codex/config.toml` has `[mcp_servers.cgrep]` with `command = "cgrep"`, `args = ["mcp", "serve"]`, and an explicit startup timeout.
 - `agent install copilot` also runs MCP install for `vscode` host (`.vscode/mcp.json`).
 - `agent install cursor` also writes `.cursor/rules/cgrep.mdc` and runs MCP install for `cursor` host.
 - `agent install opencode` writes the OpenCode tool file only.
+
+Codex runtime note:
+- After `agent install codex`, restart the current Codex session so updated MCP config is reloaded.
+- `agent uninstall codex` removes both `~/.codex/AGENTS.md` skill content and the `[mcp_servers.cgrep]` config block when present.
 
 ## Instruction/skill file outputs
 

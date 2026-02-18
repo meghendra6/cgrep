@@ -22,13 +22,19 @@ struct McpProc {
 
 impl McpProc {
     fn spawn(cwd: &std::path::Path) -> Self {
-        let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin!("cgrep"))
-            .current_dir(cwd)
+        Self::spawn_with_env(cwd, &[])
+    }
+
+    fn spawn_with_env(cwd: &std::path::Path, envs: &[(&str, &str)]) -> Self {
+        let mut base = std::process::Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+        base.current_dir(cwd)
             .args(["mcp", "serve"])
             .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("spawn mcp");
+            .stdout(Stdio::piped());
+        for (key, value) in envs {
+            base.env(key, value);
+        }
+        let mut child = base.spawn().expect("spawn mcp");
         let stdin = child.stdin.take().expect("stdin");
         let stdout = BufReader::new(child.stdout.take().expect("stdout"));
         Self {
@@ -310,6 +316,69 @@ fn mcp_tool_call_honors_cwd_for_relative_paths() {
         .as_str()
         .map(|content| content.contains("needle_token"))
         .unwrap_or(false));
+
+    mcp.stop();
+}
+
+#[test]
+fn mcp_rejects_relative_scope_without_cwd_when_server_runs_from_root() {
+    let mut mcp = McpProc::spawn(std::path::Path::new("/"));
+    let _ = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    }));
+
+    let map = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_map",
+            "arguments": {
+                "path": ".",
+                "depth": 1
+            }
+        }
+    }));
+    assert_eq!(map["result"]["isError"], true);
+    assert!(map["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("requires `cwd`"));
+
+    mcp.stop();
+}
+
+#[test]
+fn mcp_tool_call_times_out_when_child_exceeds_timeout_budget() {
+    let dir = TempDir::new().expect("tempdir");
+    let mut mcp = McpProc::spawn_with_env(dir.path(), &[("CGREP_MCP_TOOL_TIMEOUT_MS", "1")]);
+    let _ = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    }));
+
+    let map = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_map",
+            "arguments": {
+                "path": "/",
+                "depth": 1
+            }
+        }
+    }));
+    assert_eq!(map["result"]["isError"], true);
+    assert!(map["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("timed out"));
 
     mcp.stop();
 }

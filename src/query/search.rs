@@ -2444,18 +2444,22 @@ fn scope_relative_path(full_path: &Path, search_root: &Path) -> Option<String> {
 }
 
 fn workspace_display_path(full_path: &Path, workspace_root: &Path) -> String {
-    if let Ok(rel) = full_path.strip_prefix(workspace_root) {
-        let rendered = rel.display().to_string();
-        if !rendered.is_empty() {
-            return rendered;
+    if workspace_root != Path::new("/") {
+        if let Ok(rel) = full_path.strip_prefix(workspace_root) {
+            let rendered = rel.display().to_string();
+            if !rendered.is_empty() {
+                return rendered;
+            }
         }
     }
 
-    full_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| full_path.display().to_string())
+    if full_path.is_absolute() {
+        return normalize_path(full_path).display().to_string();
+    }
+
+    normalize_path(&workspace_root.join(full_path))
+        .display()
+        .to_string()
 }
 
 #[cfg(test)]

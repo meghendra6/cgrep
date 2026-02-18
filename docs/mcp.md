@@ -54,9 +54,10 @@ printf '%s\n' \
 
 ## Behavior Notes
 
-- `cgrep mcp install <host>` writes `command` as resolved cgrep executable path
-  (absolute when available) to reduce GUI/PATH mismatch failures.
+- `cgrep mcp install <host>` writes `command = "cgrep"` by default so binary updates are picked up without reinstalling MCP config.
+- If you need a fixed path, set `CGREP_MCP_COMMAND` before install.
 - `claude-desktop` auto-path is currently implemented for macOS/Windows.
+- MCP tool calls are internally bounded by a timeout; if exceeded, cgrep returns an explicit MCP error instead of hanging until host timeout.
 
 ## Exposed MCP Tools
 
@@ -74,7 +75,9 @@ printf '%s\n' \
 
 - MCP tools accept optional `cwd` to pin relative path resolution.
 - `cgrep_search` treats dash-prefixed queries (e.g. `-n`, `--help`) as literal search text.
-- `cgrep_search` result `path` values are workspace-relative (relative to `cwd` when provided), so they can be passed directly to `cgrep_read`.
+- `cgrep_search` result `path` values stay reusable:
+  workspace-internal scopes return workspace-relative paths, external scopes return absolute paths.
+- If MCP server cwd is `/`, relative scopes require `cwd` (or an absolute `path`) to avoid scanning system root by mistake.
 
 ## Config File Targets
 

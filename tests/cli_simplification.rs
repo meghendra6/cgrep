@@ -3,7 +3,9 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::fs;
+use std::path::Path;
 use tempfile::TempDir;
 
 fn write_file(path: &std::path::Path, content: &str) {
@@ -186,6 +188,59 @@ fn search_file_scope_path_is_non_empty_and_workspace_relative() {
         .expect("result path");
     assert!(!path.is_empty());
     assert_eq!(path, "src/lib.rs");
+}
+
+#[test]
+fn external_scope_results_use_absolute_paths_and_unique_ids() {
+    let workspace = TempDir::new().expect("workspace");
+    let external = TempDir::new().expect("external");
+    write_file(
+        &external.path().join("a/mod.rs"),
+        "pub fn needle_token() {}\n",
+    );
+    write_file(
+        &external.path().join("b/mod.rs"),
+        "pub fn needle_token() {}\n",
+    );
+
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let assert = cmd
+        .current_dir(workspace.path())
+        .args([
+            "--format",
+            "json2",
+            "search",
+            "needle_token",
+            "-p",
+            external.path().to_str().expect("utf8 path"),
+            "--no-index",
+            "-m",
+            "10",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
+    let json: Value = serde_json::from_str(&stdout).expect("json");
+    let results = json["results"].as_array().expect("results array");
+    assert!(results.len() >= 2);
+
+    let mut paths = HashSet::new();
+    let mut ids = HashSet::new();
+    for result in results {
+        let path = result["path"].as_str().expect("result path");
+        assert!(
+            Path::new(path).is_absolute(),
+            "external scope path should be absolute: {path}"
+        );
+        paths.insert(path.to_string());
+
+        let id = result["id"].as_str().expect("result id");
+        ids.insert(id.to_string());
+    }
+
+    assert_eq!(paths.len(), 2, "both files should remain distinct");
+    assert_eq!(ids.len(), 2, "result ids should stay unique");
+    assert_eq!(json["meta"]["files_with_matches"].as_u64(), Some(2));
 }
 
 #[test]

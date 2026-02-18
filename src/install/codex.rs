@@ -24,23 +24,11 @@ fn get_codex_config_path() -> Result<PathBuf> {
     Ok(home.join(".codex").join("config.toml"))
 }
 
-fn is_cgrep_binary(path: &std::path::Path) -> bool {
-    path.file_stem()
-        .and_then(|stem| stem.to_str())
-        .map(|stem| stem.eq_ignore_ascii_case("cgrep"))
-        .unwrap_or(false)
-}
-
 fn resolve_cgrep_command() -> String {
-    if let Ok(found) = which::which("cgrep") {
-        if is_cgrep_binary(&found) {
-            return found.to_string_lossy().to_string();
-        }
-    }
-
-    if let Ok(exe) = std::env::current_exe() {
-        if is_cgrep_binary(&exe) {
-            return exe.to_string_lossy().to_string();
+    if let Ok(value) = std::env::var("CGREP_MCP_COMMAND") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
         }
     }
 
@@ -53,7 +41,7 @@ fn toml_escape(value: &str) -> String {
 
 fn mcp_section(command: &str) -> String {
     format!(
-        "[mcp_servers.cgrep]\ncommand = \"{}\"\nargs = [\"mcp\", \"serve\"]\n",
+        "[mcp_servers.cgrep]\ncommand = \"{}\"\nargs = [\"mcp\", \"serve\"]\nstartup_timeout_sec = 10.0\n",
         toml_escape(command)
     )
 }
@@ -93,6 +81,40 @@ fn upsert_mcp_section(content: &str, section: &str) -> Result<String> {
     }
 }
 
+fn remove_mcp_section(content: &str) -> (String, bool) {
+    let header = "[mcp_servers.cgrep]";
+    let lines: Vec<&str> = content.lines().collect();
+    let Some(start_idx) = lines.iter().position(|line| line.trim() == header) else {
+        return (content.to_string(), false);
+    };
+
+    let mut end_idx = lines.len();
+    for (idx, line) in lines.iter().enumerate().skip(start_idx + 1) {
+        if line.trim_start().starts_with('[') {
+            end_idx = idx;
+            break;
+        }
+    }
+
+    let mut out: Vec<String> = Vec::new();
+    out.extend(lines[..start_idx].iter().map(|line| (*line).to_string()));
+    out.extend(lines[end_idx..].iter().map(|line| (*line).to_string()));
+
+    let normalized = out.join("\n");
+    let cleaned = normalized
+        .lines()
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string();
+
+    if cleaned.is_empty() {
+        (String::new(), true)
+    } else {
+        (format!("{cleaned}\n"), true)
+    }
+}
+
 fn normalize_invalid_reasoning_effort(content: &str) -> String {
     content.replace(
         "model_reasoning_effort = \"xhigh\"",
@@ -124,6 +146,30 @@ fn ensure_codex_mcp_config() -> Result<bool> {
 
     fs::write(&config_path, updated)
         .with_context(|| format!("Failed to write {}", config_path.display()))?;
+    Ok(true)
+}
+
+fn remove_codex_mcp_config() -> Result<bool> {
+    let config_path = get_codex_config_path()?;
+    if !config_path.exists() {
+        return Ok(false);
+    }
+
+    let existing = fs::read_to_string(&config_path)
+        .with_context(|| format!("Failed to read {}", config_path.display()))?;
+    let (updated, removed) = remove_mcp_section(&existing);
+    if !removed {
+        return Ok(false);
+    }
+
+    if updated.is_empty() {
+        fs::remove_file(&config_path)
+            .with_context(|| format!("Failed to remove {}", config_path.display()))?;
+    } else {
+        fs::write(&config_path, updated)
+            .with_context(|| format!("Failed to write {}", config_path.display()))?;
+    }
+
     Ok(true)
 }
 
@@ -170,31 +216,37 @@ pub fn install() -> Result<()> {
 
 pub fn uninstall() -> Result<()> {
     let path = get_agents_md_path()?;
+    let mut removed_skill = false;
+    if path.exists() {
+        let content = std::fs::read_to_string(&path)?;
+        let skill_content = content::codex_skill();
+        let skill_trimmed = skill_content.trim();
 
-    if !path.exists() {
-        println!("Codex AGENTS.md not found");
-        return Ok(());
+        if content.contains(skill_trimmed) {
+            let updated = content.replace(skill_trimmed, "");
+            let cleaned: String = updated
+                .lines()
+                .collect::<Vec<_>>()
+                .join("\n")
+                .trim()
+                .to_string();
+
+            if cleaned.is_empty() {
+                std::fs::remove_file(&path)?;
+            } else {
+                std::fs::write(&path, cleaned)?;
+            }
+            removed_skill = true;
+        }
     }
 
-    let content = std::fs::read_to_string(&path)?;
-    let skill_content = content::codex_skill();
-    let skill_trimmed = skill_content.trim();
+    let removed_mcp = remove_codex_mcp_config().context("Failed to update Codex MCP config")?;
 
-    if content.contains(skill_trimmed) {
-        let updated = content.replace(skill_trimmed, "");
-        let cleaned: String = updated
-            .lines()
-            .collect::<Vec<_>>()
-            .join("\n")
-            .trim()
-            .to_string();
-
-        if cleaned.is_empty() {
-            std::fs::remove_file(&path)?;
-        } else {
-            std::fs::write(&path, cleaned)?;
-        }
+    if removed_skill || removed_mcp {
         print_uninstall_success("Codex");
+        if removed_mcp {
+            println!("Removed Codex MCP server entry from ~/.codex/config.toml");
+        }
     } else {
         println!("cgrep is not installed in Codex");
     }
@@ -204,7 +256,9 @@ pub fn uninstall() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{mcp_section, normalize_invalid_reasoning_effort, upsert_mcp_section};
+    use super::{
+        mcp_section, normalize_invalid_reasoning_effort, remove_mcp_section, upsert_mcp_section,
+    };
 
     #[test]
     fn upsert_mcp_section_appends_when_missing() {
@@ -212,6 +266,7 @@ mod tests {
         let output = upsert_mcp_section(input, &mcp_section("/tmp/cgrep")).unwrap();
         assert!(output.contains("[mcp_servers.cgrep]"));
         assert!(output.contains("command = \"/tmp/cgrep\""));
+        assert!(output.contains("startup_timeout_sec = 10.0"));
     }
 
     #[test]
@@ -228,6 +283,7 @@ trust_level = "trusted"
         assert!(output.contains("command = \"/opt/cgrep\""));
         assert!(!output.contains("command = \"cgrep\""));
         assert!(output.contains("[projects.\"/tmp/demo\"]"));
+        assert!(output.contains("startup_timeout_sec = 10.0"));
     }
 
     #[test]
@@ -235,5 +291,30 @@ trust_level = "trusted"
         let input = "model_reasoning_effort = \"xhigh\"\n";
         let output = normalize_invalid_reasoning_effort(input);
         assert_eq!(output, "model_reasoning_effort = \"high\"\n");
+    }
+
+    #[test]
+    fn remove_mcp_section_drops_block_and_preserves_other_sections() {
+        let input = r#"
+[mcp_servers.cgrep]
+command = "/tmp/cgrep"
+args = ["mcp", "serve"]
+startup_timeout_sec = 10.0
+
+[projects."/tmp/demo"]
+trust_level = "trusted"
+"#;
+        let (output, removed) = remove_mcp_section(input);
+        assert!(removed);
+        assert!(!output.contains("[mcp_servers.cgrep]"));
+        assert!(output.contains("[projects.\"/tmp/demo\"]"));
+    }
+
+    #[test]
+    fn remove_mcp_section_is_noop_when_missing() {
+        let input = "model = \"gpt-5-codex\"\n";
+        let (output, removed) = remove_mcp_section(input);
+        assert!(!removed);
+        assert_eq!(output, input);
     }
 }
