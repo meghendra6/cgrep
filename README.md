@@ -120,7 +120,7 @@ cgrep a l "query"     # agent locate
 PyTorch scenario-completion benchmark snapshots:
 - Agent token-efficiency benchmark: `docs/benchmarks/pytorch-agent-token-efficiency.md`
 - Codex real-agent benchmark: `docs/benchmarks/pytorch-codex-agent-efficiency.md`
-- Latest Codex snapshot (`2026-02-18`, `gpt-5-codex`, `runs=2`):
+- Latest Codex snapshot (`2026-02-18`, `gpt-5-codex`, `runs=2`, historical benchmark snapshot):
   baseline `233,825` -> cgrep `134,432` billable tokens (`42.5%` reduction).
 
 ## Documentation
@@ -143,3 +143,6 @@ PyTorch scenario-completion benchmark snapshots:
 - Current release: **v1.4.8**
 - Changelog: `CHANGELOG.md`
 - Comparison material: `COMPARISON.md`
+- Contributing guide: `CONTRIBUTING.md`
+- Security policy: `SECURITY.md`
+- Code of conduct: `CODE_OF_CONDUCT.md`

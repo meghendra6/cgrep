@@ -429,16 +429,17 @@ pub fn run(
         }
     )];
 
-    if should_attempt_keyword_fallback(
-        effective_search_mode,
+    let fallback_policy = KeywordFallbackPolicy {
+        mode: effective_search_mode,
         explicit_mode,
         requested_mode,
         no_ignore,
         fuzzy,
-        compiled_regex.is_some(),
+        has_regex: compiled_regex.is_some(),
         confidence,
-        &outcome.results,
-    ) {
+        results: &outcome.results,
+    };
+    if should_attempt_keyword_fallback(&fallback_policy) {
         match hybrid_search(
             query,
             &index_root,
@@ -1582,7 +1583,7 @@ const KEYWORD_FALLBACK_CONFIDENCE_THRESHOLD: f32 = 0.45;
 const MAX_INITIAL_RESULTS_PER_PATH: usize = 2;
 const NOISY_PATH_SEGMENTS: &[&str] = &["target/", "dist/", "build/", "node_modules/", ".venv/"];
 
-fn should_attempt_keyword_fallback(
+struct KeywordFallbackPolicy<'a> {
     mode: HybridSearchMode,
     explicit_mode: bool,
     requested_mode: IndexMode,
@@ -1590,15 +1591,17 @@ fn should_attempt_keyword_fallback(
     fuzzy: bool,
     has_regex: bool,
     confidence: f32,
-    results: &[SearchResult],
-) -> bool {
-    mode == HybridSearchMode::Keyword
-        && !explicit_mode
-        && requested_mode == IndexMode::Index
-        && !no_ignore
-        && !fuzzy
-        && !has_regex
-        && (results.is_empty() || confidence < KEYWORD_FALLBACK_CONFIDENCE_THRESHOLD)
+    results: &'a [SearchResult],
+}
+
+fn should_attempt_keyword_fallback(policy: &KeywordFallbackPolicy<'_>) -> bool {
+    policy.mode == HybridSearchMode::Keyword
+        && !policy.explicit_mode
+        && policy.requested_mode == IndexMode::Index
+        && !policy.no_ignore
+        && !policy.fuzzy
+        && !policy.has_regex
+        && (policy.results.is_empty() || policy.confidence < KEYWORD_FALLBACK_CONFIDENCE_THRESHOLD)
 }
 
 fn estimate_confidence(results: &[SearchResult], mode: HybridSearchMode) -> f32 {
@@ -3080,26 +3083,29 @@ mod tests {
     #[test]
     fn keyword_fallback_policy_respects_explicit_mode() {
         let results = vec![sample_result("src/lib.rs", 1, "needle")];
-        assert!(!should_attempt_keyword_fallback(
-            HybridSearchMode::Keyword,
-            true,
-            IndexMode::Index,
-            false,
-            false,
-            false,
-            0.1,
-            &results,
-        ));
-        assert!(should_attempt_keyword_fallback(
-            HybridSearchMode::Keyword,
-            false,
-            IndexMode::Index,
-            false,
-            false,
-            false,
-            0.1,
-            &results,
-        ));
+        let explicit = KeywordFallbackPolicy {
+            mode: HybridSearchMode::Keyword,
+            explicit_mode: true,
+            requested_mode: IndexMode::Index,
+            no_ignore: false,
+            fuzzy: false,
+            has_regex: false,
+            confidence: 0.1,
+            results: &results,
+        };
+        assert!(!should_attempt_keyword_fallback(&explicit));
+
+        let implicit = KeywordFallbackPolicy {
+            mode: HybridSearchMode::Keyword,
+            explicit_mode: false,
+            requested_mode: IndexMode::Index,
+            no_ignore: false,
+            fuzzy: false,
+            has_regex: false,
+            confidence: 0.1,
+            results: &results,
+        };
+        assert!(should_attempt_keyword_fallback(&implicit));
     }
 
     fn sample_result(path: &str, line: usize, snippet: &str) -> SearchResult {

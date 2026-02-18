@@ -608,7 +608,7 @@ fn recently_failed_bootstrap(search_root: &Path) -> bool {
     let now = Instant::now();
     let mut cache = failure_cache()
         .lock()
-        .expect("bootstrap failure cache lock");
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     cache.retain(|_, at| now.duration_since(*at) <= ttl);
     cache.contains_key(&key)
 }
@@ -617,7 +617,7 @@ fn record_bootstrap_failure(search_root: &Path) {
     let key = search_root.display().to_string();
     let mut cache = failure_cache()
         .lock()
-        .expect("bootstrap failure cache lock");
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     cache.insert(key, Instant::now());
 }
 
@@ -625,7 +625,7 @@ fn clear_bootstrap_failure(search_root: &Path) {
     let key = search_root.display().to_string();
     let mut cache = failure_cache()
         .lock()
-        .expect("bootstrap failure cache lock");
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     cache.remove(&key);
 }
 
