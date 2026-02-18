@@ -274,6 +274,8 @@ pub fn run(
     no_index: bool,
     regex: bool,
     case_sensitive: bool,
+    recursive: bool,
+    no_ignore: bool,
     format: OutputFormat,
     compact: bool,
     search_mode: Option<HybridSearchMode>,
@@ -323,7 +325,7 @@ pub fn run(
         eprintln!("Using index from: {}", index_root.display());
     }
 
-    let requested_mode = if no_index || regex {
+    let requested_mode = if no_index || regex || no_ignore {
         IndexMode::Scan
     } else {
         IndexMode::Index
@@ -345,7 +347,18 @@ pub fn run(
     };
 
     // Check for hybrid search mode
-    let effective_search_mode = search_mode.unwrap_or(HybridSearchMode::Keyword);
+    let mut effective_search_mode = search_mode.unwrap_or(HybridSearchMode::Keyword);
+    if no_ignore
+        && matches!(
+            effective_search_mode,
+            HybridSearchMode::Semantic | HybridSearchMode::Hybrid
+        )
+    {
+        eprintln!(
+            "Warning: --no-ignore is only supported for keyword search; falling back to --mode keyword."
+        );
+        effective_search_mode = HybridSearchMode::Keyword;
+    }
     let effective_cache_ttl = cache_ttl.unwrap_or(DEFAULT_CACHE_TTL_MS);
 
     let mut outcome = match effective_search_mode {
@@ -366,6 +379,7 @@ pub fn run(
                 &config_exclude_patterns,
                 changed_filter.as_ref(),
                 effective_search_mode,
+                recursive,
                 use_cache,
                 effective_cache_ttl,
             )?
@@ -388,6 +402,8 @@ pub fn run(
             fuzzy,
             compiled_regex.as_ref(),
             case_sensitive,
+            recursive,
+            no_ignore,
             use_cache,
             effective_cache_ttl,
         )?,
@@ -1080,6 +1096,7 @@ fn collect_index_candidates(
     compiled_exclude: Option<&CompiledGlob>,
     config_exclude_patterns: &[CompiledGlob],
     changed_filter: Option<&ChangedFiles>,
+    recursive: bool,
     fuzzy: bool,
 ) -> Result<Vec<IndexCandidate>> {
     let index_path = index_root.join(INDEX_DIR);
@@ -1180,6 +1197,9 @@ fn collect_index_candidates(
         let Some(display_path) = scoped_display_path(&full_path, search_root) else {
             continue;
         };
+        if !recursive && Path::new(&display_path).components().count() > 1 {
+            continue;
+        }
         if let Some(filter) = changed_filter {
             if !filter.matches_rel_path(&display_path) {
                 continue;
@@ -1310,6 +1330,8 @@ fn keyword_search(
     fuzzy: bool,
     regex: Option<&Regex>,
     case_sensitive: bool,
+    recursive: bool,
+    no_ignore: bool,
     use_cache: bool,
     cache_ttl_ms: u64,
 ) -> Result<SearchOutcome> {
@@ -1340,11 +1362,16 @@ fn keyword_search(
         .filter(|s| !s.is_empty());
     let cache_key = CacheKey {
         query: normalized_query,
-        mode: if effective_mode == IndexMode::Index {
-            "keyword:index".to_string()
-        } else {
-            "keyword:scan".to_string()
-        },
+        mode: format!(
+            "keyword:{}:r{}:ni{}",
+            if effective_mode == IndexMode::Index {
+                "index"
+            } else {
+                "scan"
+            },
+            usize::from(recursive),
+            usize::from(no_ignore)
+        ),
         max_results,
         context,
         file_type: file_type.map(str::to_string),
@@ -1384,6 +1411,7 @@ fn keyword_search(
             config_exclude_patterns,
             changed_filter,
             fuzzy,
+            recursive,
         )?
     } else {
         scan_search(
@@ -1398,6 +1426,8 @@ fn keyword_search(
             changed_filter,
             regex,
             case_sensitive,
+            recursive,
+            no_ignore,
         )?
     };
 
@@ -1636,6 +1666,7 @@ fn index_search(
     config_exclude_patterns: &[CompiledGlob],
     changed_filter: Option<&ChangedFiles>,
     fuzzy: bool,
+    recursive: bool,
 ) -> Result<SearchOutcome> {
     let candidates = collect_index_candidates(
         query,
@@ -1648,6 +1679,7 @@ fn index_search(
         compiled_exclude,
         config_exclude_patterns,
         changed_filter,
+        recursive,
         fuzzy,
     )?;
 
@@ -1706,6 +1738,8 @@ fn scan_search(
     changed_filter: Option<&ChangedFiles>,
     regex: Option<&Regex>,
     case_sensitive: bool,
+    recursive: bool,
+    no_ignore: bool,
 ) -> Result<SearchOutcome> {
     if regex.is_none() && query.is_empty() {
         anyhow::bail!("Search query cannot be empty");
@@ -1716,7 +1750,9 @@ fn scan_search(
     } else {
         String::new()
     };
-    let scanner = FileScanner::new(root);
+    let scanner = FileScanner::new(root)
+        .with_recursive(recursive)
+        .with_gitignore(!no_ignore);
     let files = scanner.scan()?;
 
     let mut results: Vec<SearchResult> = Vec::new();
@@ -1871,6 +1907,7 @@ fn hybrid_search(
     config_exclude_patterns: &[CompiledGlob],
     changed_filter: Option<&ChangedFiles>,
     mode: HybridSearchMode,
+    recursive: bool,
     use_cache: bool,
     cache_ttl_ms: u64,
 ) -> Result<SearchOutcome> {
@@ -1887,8 +1924,12 @@ fn hybrid_search(
     let weight_text_milli = (weight_text * 1000.0).round() as i32;
     let weight_vector_milli = (weight_vector * 1000.0).round() as i32;
     let cache_mode = format!(
-        "{}:k{}:wt{}:wv{}",
-        mode, candidate_k, weight_text_milli, weight_vector_milli
+        "{}:k{}:wt{}:wv{}:r{}",
+        mode,
+        candidate_k,
+        weight_text_milli,
+        weight_vector_milli,
+        usize::from(recursive)
     );
 
     // Build cache key
@@ -1996,6 +2037,7 @@ fn hybrid_search(
         compiled_exclude,
         config_exclude_patterns,
         changed_filter,
+        recursive,
         false,
     )?;
 
@@ -2409,6 +2451,8 @@ mod tests {
             None,
             None,
             false,
+            true,
+            false,
         )
         .expect("scan");
 
@@ -2436,6 +2480,8 @@ mod tests {
             None,
             Some(&re),
             true,
+            true,
+            false,
         )
         .expect("scan");
 
@@ -2489,6 +2535,7 @@ mod tests {
             &[],
             None,
             false,
+            true,
         )
         .expect("index search");
 
@@ -2528,11 +2575,46 @@ mod tests {
             &[],
             None,
             false,
+            true,
         )
         .expect("index search");
 
         assert_eq!(outcome.results.len(), 1);
         assert_eq!(outcome.results[0].path, "target.txt");
+    }
+
+    #[test]
+    fn index_search_no_recursive_skips_nested_paths() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let nested_dir = root.join("nested");
+        std::fs::create_dir_all(&nested_dir).expect("create nested");
+        std::fs::write(root.join("top.txt"), "needle top\n").expect("write top");
+        std::fs::write(nested_dir.join("deep.txt"), "needle deep\n").expect("write deep");
+
+        let builder = IndexBuilder::new(root).expect("builder");
+        builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("build");
+
+        let outcome = index_search(
+            "needle",
+            root,
+            root,
+            10,
+            0,
+            None,
+            None,
+            None,
+            &[],
+            None,
+            false,
+            false,
+        )
+        .expect("index search");
+
+        assert!(outcome.results.iter().any(|r| r.path == "top.txt"));
+        assert!(outcome.results.iter().all(|r| r.path != "nested/deep.txt"));
     }
 
     #[test]
@@ -2563,6 +2645,7 @@ mod tests {
             &[],
             None,
             false,
+            true,
         )
         .expect("index search");
 

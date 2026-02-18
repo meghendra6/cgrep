@@ -4,7 +4,7 @@
 
 | Command | Description |
 |---|---|
-| `cgrep search <query>` (`s`, `find`, `q`) | Full-text search |
+| `cgrep search <query> [path]` (`s`, `find`, `q`) | Full-text search |
 | `cgrep read <path>` (`rd`, `cat`, `view`) | Smart file read (small file full, large file outline) |
 | `cgrep map` (`mp`, `tree`) | Structural codebase map (file + symbol skeleton) |
 | `cgrep symbols <name>` (`sym`, `sy`) | Symbol search |
@@ -18,6 +18,26 @@
 | `cgrep mcp <serve|install|uninstall>` | MCP server + host config integration |
 | `cgrep agent <...>` (`a`) | Agent locate/expand + integration install |
 | `cgrep completions <shell>` | Generate shell completions |
+
+## grep/rg migration quick path
+
+```bash
+# grep -R "token validation" src/
+cgrep search "token validation" src/
+
+# grep/rg + manual open loop
+cgrep d handle_auth
+cgrep r UserService -M auto
+cgrep rd src/auth.rs
+cgrep mp -d 2
+```
+
+- Use `cgrep search` (or `cgrep s`) for text search.
+- Option-first form is still supported: `cgrep search -r --include '**/*.rs' needle src/`.
+- If query starts with `-`, use `--` after `search` (e.g., `cgrep search -- --literal`).
+- grep-style scope flags are supported: `-r/--recursive`, `--no-recursive`, `--include`, `--exclude-dir`.
+- `--no-ignore` forces scan mode and disables `.gitignore`/`.ignore` filtering during scan.
+- `-p <path>` remains available when you prefer explicit path flags.
 
 ## Shortcut-first flow
 
@@ -37,42 +57,36 @@ cgrep a l "token validation" -B tight -u
 # 1) Build index
 cgrep index
 
-# 2) Basic search
-cgrep search "authentication flow"
-
-# 3) Narrow by language/path
-cgrep search "token refresh" -t rust -p src/
-
-# 4) Search only changed files
-cgrep search "retry logic" -u
-
-# 5) Symbol/navigation commands
-cgrep symbols UserService -T class
+# 2) Core 5 commands
+cgrep search "authentication flow" src/
 cgrep d handle_auth
-cgrep c validate_token -M auto
 cgrep r UserService -M auto
-
-# 6) Dependency lookup
-cgrep dep src/auth.rs
-
-# 7) Smart file reading / map
 cgrep rd src/auth.rs
-cgrep rd README.md -s "## Configuration"
 cgrep mp -d 2
+
+# 3) Optional narrowing / changed-files
+cgrep search "token refresh" -t rust -p src/
+cgrep search "retry logic" -u
 ```
 
 ## Search guide
+
+Use `search` (or alias `s`) explicitly:
 
 Core options:
 
 ```bash
 cgrep search "<query>" \
   -p <path> \
+  -r | --no-recursive \
   -m <limit> \
   -C <context> \
+  -i | --ignore-case \
+  --case-sensitive \
   -t <language> \
-  --glob <pattern> \
-  -x, --exclude <pattern> \
+  --glob|--include <pattern> \
+  -x, --exclude|--exclude-dir <pattern> \
+  --no-ignore \
   -u, --changed [REV] \
   -M, --mode keyword|semantic|hybrid \
   -B, --budget tight|balanced|full|off \
@@ -84,6 +98,7 @@ Examples:
 ```bash
 cgrep search "jwt decode" -m 10
 cgrep s "retry backoff" -u
+cgrep search -r --no-ignore "token validation" src/
 cgrep s "controller middleware" -B tight -P agent
 ```
 

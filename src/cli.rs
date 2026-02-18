@@ -11,7 +11,14 @@ use clap_complete::Shell;
 /// Supports symbol search, dependency tracking, and full-text search.
 #[derive(Parser, Debug)]
 #[command(name = "cgrep")]
-#[command(author, version, about, long_about = None)]
+#[command(
+    author,
+    version,
+    about,
+    long_about = None,
+    override_usage = "cgrep [OPTIONS] <COMMAND>",
+    after_help = "Search quickstart:\n  cgrep s \"token refresh\" src/\n  cgrep search -r --include '**/*.rs' needle src/\n\nLiteral query tips:\n  cgrep search -- --literal\n  cgrep s read"
+)]
 pub struct Cli {
     /// Output format (text or json)
     #[arg(long, global = true)]
@@ -213,15 +220,34 @@ pub enum McpCommands {
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Full-text search with BM25 ranking
-    #[command(visible_aliases = ["s", "find", "q"])]
+    #[command(
+        visible_aliases = ["s", "find", "q"],
+        after_help = "Examples:\n  cgrep s \"token refresh\" src/\n  cgrep search -r --no-ignore \"auth flow\" src/\n  cgrep search \"retry\" -p src/ -C 2"
+    )]
     Search {
         /// Search query (natural language or keywords)
         #[arg(required_unless_present = "help_advanced")]
         query: Option<String>,
 
+        /// Optional path (grep-style positional form)
+        #[arg(value_name = "PATH")]
+        path_positional: Option<String>,
+
         /// Path to search in (defaults to current directory)
         #[arg(short, long, help_heading = "Core")]
         path: Option<String>,
+
+        /// Search subdirectories recursively (grep -r, default)
+        #[arg(short = 'r', long, help_heading = "Scope")]
+        recursive: bool,
+
+        /// Search only the top-level directory in the scope
+        #[arg(long, conflicts_with = "recursive", help_heading = "Scope")]
+        no_recursive: bool,
+
+        /// Do not respect .gitignore/.ignore rules (forces scan mode)
+        #[arg(long, help_heading = "Scope")]
+        no_ignore: bool,
 
         /// Maximum number of results
         #[arg(
@@ -241,11 +267,16 @@ pub enum Commands {
         file_type: Option<String>,
 
         /// Filter files matching glob pattern (e.g., "*.rs", "src/**/*.ts")
-        #[arg(short = 'g', long, help_heading = "Core")]
+        #[arg(short = 'g', long, visible_alias = "include", help_heading = "Core")]
         glob: Option<String>,
 
         /// Exclude files matching pattern
-        #[arg(short = 'x', long, help_heading = "Core")]
+        #[arg(
+            short = 'x',
+            long,
+            visible_alias = "exclude-dir",
+            help_heading = "Core"
+        )]
         exclude: Option<String>,
 
         /// Limit search to files changed since revision (default: HEAD)
@@ -274,8 +305,17 @@ pub enum Commands {
         #[arg(long, help_heading = "Mode")]
         regex: bool,
 
+        /// Grep compatibility flag (ignore case, default behavior)
+        #[arg(
+            short = 'i',
+            long = "ignore-case",
+            conflicts_with = "case_sensitive",
+            help_heading = "Mode"
+        )]
+        ignore_case: bool,
+
         /// Case-sensitive search (scan mode)
-        #[arg(long, help_heading = "Mode")]
+        #[arg(long, conflicts_with = "ignore_case", help_heading = "Mode")]
         case_sensitive: bool,
 
         /// Search mode: keyword, semantic, or hybrid
@@ -424,11 +464,11 @@ pub enum Commands {
         file_type: Option<String>,
 
         /// Filter files matching glob pattern (e.g., "*.rs", "src/**/*.ts")
-        #[arg(short = 'g', long)]
+        #[arg(short = 'g', long, visible_alias = "include")]
         glob: Option<String>,
 
         /// Exclude files matching pattern
-        #[arg(short = 'x', long)]
+        #[arg(short = 'x', long, visible_alias = "exclude-dir")]
         exclude: Option<String>,
 
         /// Limit symbol search to files changed since revision (default: HEAD)
@@ -637,6 +677,46 @@ mod tests {
                 assert_eq!(profile.as_deref(), Some("agent"));
                 assert_eq!(exclude.as_deref(), Some("target/**"));
                 assert_eq!(changed.as_deref(), Some("HEAD"));
+            }
+            other => panic!("expected search command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_with_positional_path_parses() {
+        let cli = Cli::try_parse_from(["cgrep", "search", "auth flow", "src"])
+            .expect("parse search with positional path");
+
+        match cli.command {
+            Commands::Search {
+                query,
+                path_positional,
+                ..
+            } => {
+                assert_eq!(query.as_deref(), Some("auth flow"));
+                assert_eq!(path_positional.as_deref(), Some("src"));
+            }
+            other => panic!("expected search command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_scope_flags_parse() {
+        let cli = Cli::try_parse_from(["cgrep", "search", "-r", "--no-ignore", "needle", "src"])
+            .expect("parse search scope flags");
+
+        match cli.command {
+            Commands::Search {
+                query,
+                path_positional,
+                recursive,
+                no_ignore,
+                ..
+            } => {
+                assert_eq!(query.as_deref(), Some("needle"));
+                assert_eq!(path_positional.as_deref(), Some("src"));
+                assert!(recursive);
+                assert!(no_ignore);
             }
             other => panic!("expected search command, got {other:?}"),
         }

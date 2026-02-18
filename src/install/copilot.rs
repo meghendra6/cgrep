@@ -10,111 +10,7 @@ use std::path::PathBuf;
 
 use crate::cli::McpHost;
 
-use super::{print_install_success, print_uninstall_success, write_file_if_changed};
-
-const LGREP_INSTRUCTIONS: &str = r#"---
-name: cgrep Local Code Search
-description: Use cgrep for local code search instead of built-in grep/search tools.
-applyTo: "**/*"
----
-
-# cgrep Local Code Search Instructions
-
-## CRITICAL: Tool Override
-
-When you need to search for code or files locally, **use cgrep instead of built-in search tools**.
-
-- **AVOID**: Using grep_search for content lookup
-- **AVOID**: Multiple grep attempts to find relevant code
-
-- **USE**: `cgrep search "natural language query"` for keyword search (BM25)
-- **USE**: `cgrep symbols <name>` for symbol search
-- **USE**: `cgrep definition <name>` for finding definitions
-- **USE**: `--format json --compact` or `--format json2 --compact` for structured output
-
-## When to Use cgrep
-
-Use cgrep **IMMEDIATELY** when:
-
-- Searching for code patterns, functions, or implementations
-- Looking up how something is done in the codebase
-- Finding files related to a concept or feature
-- User asks "where is...", "how does...", "find..."
-- You need context about the codebase structure
-
-## Usage Examples
-
-```bash
-cgrep index
-cgrep search "authentication flow implementation"
-cgrep search "error handling patterns" -p src/ -C 2
-cgrep search "validate_token" --regex --no-index
-cgrep read src/auth.rs
-cgrep map --depth 2
-cgrep symbols handleAuth -T function
-cgrep definition UserService
-cgrep callers process_request
-cgrep references MyClass
-cgrep dependents src/auth.rs
-cgrep agent locate "token validation" --compact
-ID=$(cgrep agent locate "token validation" --compact | jq -r '.results[0].id')
-cgrep agent expand --id "$ID" -C 8 --compact
-```
-
-## Options Reference
-
-| Option | Description |
-|--------|-------------|
-| `-m, --limit <n>` | Limit number of results (default: 20) |
-| `-C, --context <n>` | Context lines (default: 0) |
-| `-p, --path <path>` | Search in specific directory |
-| `--no-index` / `--regex` | Scan mode and regex search |
-| `--format json|json2` | Structured output |
-| `--compact` | Compact JSON output |
-| `--mode semantic|hybrid` | Optional; requires embeddings + index |
-| `cgrep read <path>` | Read specific file/section context |
-| `cgrep map --depth <n>` | Structural map for quick codebase orientation |
-| `cgrep agent locate/expand` | Two-stage low-token retrieval flow |
-
-## Best Practices
-
-### Do
-
-- Use natural language queries: `cgrep search "How are database connections managed?"`
-- Specify subdirectories for focused search: `cgrep search "validation logic" -p src/lib/`
-- Run `cgrep index` for repeated searches and large repos
-- Use `--regex --no-index` for regex-only scans
-- Use `cgrep read` and `cgrep map` before broad scans when you need focused context
-- Use `agent locate` then `agent expand` when you need compact multi-step retrieval
-- Treat this as a harness: structured calls + compact JSON + scoped queries first
-
-### Don't
-
-- Use single-word queries: `cgrep search "parser"` (too vague)
-- Fall back to grep when cgrep can answer the question
-
-## Keywords
-
-code search, grep, search, find code, file search, codebase search
-"#;
-
-const COPILOT_INSTRUCTIONS_APPEND: &str = r#"
-
-## cgrep Local Code Search
-
-This project uses **cgrep** for local code search. When searching for code or content:
-
-1. Use `cgrep search "natural language query"` instead of grep-based searches
-2. For symbol lookup: `cgrep symbols <name>` (use `-T` for symbol kind)
-3. For definitions: `cgrep definition <name>`
-4. Use `cgrep read <path>` and `cgrep map --depth <n>` for focused context
-5. Use `cgrep agent locate` then `cgrep agent expand --id <id>` for low-token retrieval
-6. Use `--format json --compact` or `--format json2 --compact` for machine-readable output
-7. Optional: `--mode semantic|hybrid` when embeddings + index are available
-8. MCP mode available: `cgrep mcp serve` (or `cgrep mcp install <host>`)
-
-cgrep uses tantivy + tree-sitter for fast offline code search.
-"#;
+use super::{content, print_install_success, print_uninstall_success, write_file_if_changed};
 
 fn has_cgrep_section(existing: &str) -> bool {
     existing.contains("## cgrep Local Code Search")
@@ -131,10 +27,13 @@ pub fn install() -> Result<()> {
     let instructions_dir = github_dir.join("instructions");
     let cgrep_instructions_path = instructions_dir.join("cgrep.instructions.md");
     let copilot_instructions_path = github_dir.join("copilot-instructions.md");
+    let instructions_content = content::copilot_instructions();
+    let append_content = content::copilot_appendix();
 
     // Create cgrep.instructions.md
-    let created = write_file_if_changed(&cgrep_instructions_path, LGREP_INSTRUCTIONS.trim_start())
-        .context("Failed to write cgrep instructions")?;
+    let created =
+        write_file_if_changed(&cgrep_instructions_path, instructions_content.trim_start())
+            .context("Failed to write cgrep instructions")?;
 
     if created {
         println!(
@@ -153,7 +52,7 @@ pub fn install() -> Result<()> {
                 .append(true)
                 .open(&copilot_instructions_path)?;
             use std::io::Write;
-            write!(file, "{}", COPILOT_INSTRUCTIONS_APPEND)?;
+            write!(file, "{}", append_content)?;
             println!("Added cgrep section to {:?}", copilot_instructions_path);
         } else {
             println!("copilot-instructions already contains a cgrep section");
@@ -183,8 +82,9 @@ pub fn uninstall() -> Result<()> {
 
     if copilot_instructions_path.exists() {
         let content = std::fs::read_to_string(&copilot_instructions_path)?;
-        if content.contains(COPILOT_INSTRUCTIONS_APPEND.trim()) {
-            let updated = content.replace(COPILOT_INSTRUCTIONS_APPEND, "");
+        let append_content = content::copilot_appendix();
+        if content.contains(append_content.trim()) {
+            let updated = content.replace(&append_content, "");
             std::fs::write(&copilot_instructions_path, updated)?;
             println!("Removed cgrep section from {:?}", copilot_instructions_path);
         }
