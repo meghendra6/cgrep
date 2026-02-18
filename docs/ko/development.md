@@ -62,3 +62,6 @@ python3 scripts/benchmark_codex_agent_efficiency.py \
 출력:
 - `docs/benchmarks/pytorch-codex-agent-efficiency.md`
 - `local/benchmarks/pytorch-codex-agent-efficiency.json` (로컬 전용)
+
+최신 점검 스냅샷 (`2026-02-18`, `runs=2`, `gpt-5-codex`, `medium`):
+- baseline `233,825` -> cgrep `134,432` billable tokens (`42.5%` 절감)

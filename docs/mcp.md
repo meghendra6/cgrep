@@ -75,8 +75,10 @@ printf '%s\n' \
 
 - MCP tools accept optional `cwd` to pin relative path resolution.
 - `cgrep_search` treats dash-prefixed queries (e.g. `-n`, `--help`) as literal search text.
+- `cgrep_search` rejects empty/whitespace queries consistently (including `regex=true`).
 - `cgrep_search` result `path` values stay reusable:
   workspace-internal scopes return workspace-relative paths, external scopes return absolute paths.
+- `cgrep_read` rejects empty path arguments (`Error: Path cannot be empty`).
 - If MCP server cwd is `/`, relative scopes require `cwd` (or an absolute `path`) to avoid scanning system root by mistake.
 
 ## Config File Targets

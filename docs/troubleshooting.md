@@ -9,6 +9,9 @@
 | agent output is too large | payload budget too loose | use `--budget tight` or `--profile agent` |
 | semantic/hybrid returns nothing without clear error | embeddings/index not ready | rebuild with `cgrep index --embeddings auto` |
 | keyword works but semantic/hybrid fails | expected behavior without index | `keyword` can scan fallback; `semantic/hybrid` require index |
+| `Error: Search query cannot be empty` | query is empty/whitespace (including `--regex ""`) | pass a non-empty query string |
+| `Error: Path cannot be empty` from `read` | missing path argument | pass a valid file path to `cgrep read <path>` |
+| `error: unexpected argument '<path>' found` when query starts with `-` | `--` separator was placed before options/path | put flags/path first, then `--` (e.g., `cgrep search -p src -- --help`) |
 
 ## Fast Recovery Sequence
 

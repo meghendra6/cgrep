@@ -35,11 +35,23 @@ cgrep mp -d 2
 - 텍스트 검색은 `cgrep search`(또는 `cgrep s`)를 사용하세요.
 - 옵션을 먼저 두는 형태도 그대로 지원합니다: `cgrep search -r --include '**/*.rs' needle src/`.
 - 쿼리가 `-`로 시작하면 `search` 뒤에 `--`를 사용하세요 (예: `cgrep search -- --literal`).
+- `-`로 시작하는 쿼리와 범위 옵션을 함께 쓸 때는 옵션/경로를 `--` 앞에 두세요
+  (예: `cgrep search -p src -- --help`).
 - grep 스타일 범위 옵션을 지원합니다: `-r/--recursive`, `--no-recursive`, `--include`, `--exclude-dir`.
 - `--no-ignore`는 scan 모드를 강제하고 scan 시 `.gitignore`/`.ignore` 필터를 비활성화합니다.
 - 명시적 플래그가 필요하면 기존처럼 `-p <path>`를 사용하면 됩니다.
+- 빈/공백 쿼리는 모든 검색 모드에서 동일하게 거부됩니다 (`--regex` 포함).
+- `cgrep read`에 빈 경로를 넘기면 에러를 반환합니다 (`Error: Path cannot be empty`).
 - `search` 결과 `path`는 항상 round-trip 가능하도록 반환됩니다:
   워크스페이스 내부 스코프는 상대경로, 외부 스코프는 절대경로를 사용합니다.
+
+검증 예시:
+
+```bash
+cgrep search ""            # Error: Search query cannot be empty
+cgrep search --regex ""    # Error: Search query cannot be empty
+cgrep read ""              # Error: Path cannot be empty
+```
 
 ## 단축 위주 사용 흐름
 

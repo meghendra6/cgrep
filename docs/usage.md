@@ -35,11 +35,23 @@ cgrep mp -d 2
 - Use `cgrep search` (or `cgrep s`) for text search.
 - Option-first form is still supported: `cgrep search -r --include '**/*.rs' needle src/`.
 - If query starts with `-`, use `--` after `search` (e.g., `cgrep search -- --literal`).
+- If query starts with `-` and you also pass scope flags, place flags/path before `--`
+  (e.g., `cgrep search -p src -- --help`).
 - grep-style scope flags are supported: `-r/--recursive`, `--no-recursive`, `--include`, `--exclude-dir`.
 - `--no-ignore` forces scan mode and disables `.gitignore`/`.ignore` filtering during scan.
 - `-p <path>` remains available when you prefer explicit path flags.
+- Empty/whitespace queries are rejected consistently in every search mode (including `--regex`).
+- `cgrep read` rejects empty paths (`Error: Path cannot be empty`).
 - `search` result `path` is always round-trip safe:
   workspace-internal scopes return workspace-relative paths, and external scopes return absolute paths.
+
+Validation examples:
+
+```bash
+cgrep search ""            # Error: Search query cannot be empty
+cgrep search --regex ""    # Error: Search query cannot be empty
+cgrep read ""              # Error: Path cannot be empty
+```
 
 ## Shortcut-first flow
 

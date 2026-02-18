@@ -40,6 +40,8 @@ cgrep agent expand --id "$ID" -C 8 --compact
 
 - [에이전트 토큰 효율 벤치마크 (PyTorch, 영문)](../benchmarks/pytorch-agent-token-efficiency.md)
 - [Codex 에이전트 효율 벤치마크 (PyTorch, 영문)](../benchmarks/pytorch-codex-agent-efficiency.md)
+- 최신 Codex 스냅샷 (`2026-02-18`, `gpt-5-codex`, `runs=2`):
+  baseline `233,825` -> cgrep `134,432` billable tokens (`42.5%` 절감).
 
 ## 언어/사이트
 

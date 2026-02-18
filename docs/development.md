@@ -62,3 +62,6 @@ Tracks:
 Outputs:
 - `docs/benchmarks/pytorch-codex-agent-efficiency.md`
 - `local/benchmarks/pytorch-codex-agent-efficiency.json` (local-only)
+
+Latest checked snapshot (`2026-02-18`, `runs=2`, `gpt-5-codex`, `medium`):
+- baseline `233,825` -> cgrep `134,432` billable tokens (`42.5%` reduction)

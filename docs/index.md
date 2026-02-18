@@ -40,6 +40,8 @@ cgrep agent expand --id "$ID" -C 8 --compact
 
 - [Benchmark: Agent Token Efficiency (PyTorch)](./benchmarks/pytorch-agent-token-efficiency.md)
 - [Benchmark: Codex Agent Efficiency (PyTorch)](./benchmarks/pytorch-codex-agent-efficiency.md)
+- Latest Codex snapshot (`2026-02-18`, `gpt-5-codex`, `runs=2`):
+  baseline `233,825` -> cgrep `134,432` billable tokens (`42.5%` reduction).
 
 ## Language And Site
 

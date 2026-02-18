@@ -59,9 +59,13 @@ Common grep-style options are supported:
 - `-i/--ignore-case`, `--case-sensitive`
 
 Notes:
+- Empty/whitespace queries are rejected in all modes (including `--regex`).
 - If query text starts with `-`, pass `--` after `search`.
   Example: `cgrep search -- --literal`
+- If you also pass scope/options, place them before `--`.
+  Example: `cgrep search -p src -- --help`
 - Direct shorthand `cgrep "query"` is intentionally not used.
+- `cgrep read` requires a non-empty path argument.
 - `search` result `path` is always reusable:
   workspace-internal scopes return workspace-relative paths, and external scopes return absolute paths.
 
@@ -101,6 +105,8 @@ cgrep a l "query"     # agent locate
 PyTorch scenario-completion benchmark snapshots:
 - Agent token-efficiency benchmark: `docs/benchmarks/pytorch-agent-token-efficiency.md`
 - Codex real-agent benchmark: `docs/benchmarks/pytorch-codex-agent-efficiency.md`
+- Latest Codex snapshot (`2026-02-18`, `gpt-5-codex`, `runs=2`):
+  baseline `233,825` -> cgrep `134,432` billable tokens (`42.5%` reduction).
 
 ## Documentation
 

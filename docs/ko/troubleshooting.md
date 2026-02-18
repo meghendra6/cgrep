@@ -9,6 +9,9 @@
 | 에이전트 출력이 너무 큼 | 예산 설정이 느슨함 | `--budget tight` 또는 `--profile agent` 사용 |
 | semantic/hybrid가 거의 비어 보임 | 임베딩/인덱스 미준비 | `cgrep index --embeddings auto`로 재생성 |
 | keyword는 되는데 semantic/hybrid는 실패 | 인덱스 필수 조건 차이 | `keyword`는 scan 폴백 가능, `semantic/hybrid`는 인덱스 필수 |
+| `Error: Search query cannot be empty` | 쿼리가 비어 있거나 공백만 있음 (`--regex ""` 포함) | 비어 있지 않은 쿼리를 전달 |
+| `read`에서 `Error: Path cannot be empty` | 경로 인자가 비어 있음 | `cgrep read <path>` 형태로 유효한 파일 경로 전달 |
+| `-`로 시작하는 쿼리 검색 시 `error: unexpected argument '<path>' found` | `--` 구분자를 옵션/경로보다 먼저 둠 | 옵션/경로를 먼저 두고 마지막에 `--` 사용 (예: `cgrep search -p src -- --help`) |
 
 ## 빠른 복구 순서
 
