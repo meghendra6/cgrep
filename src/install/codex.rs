@@ -8,70 +8,7 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::PathBuf;
 
-use super::{home_dir, print_install_success, print_uninstall_success};
-
-const SKILL_CONTENT: &str = r#"
----
-name: cgrep
-description: A local code search tool using tantivy + tree-sitter. Fast, offline code search.
-license: Apache 2.0
----
-
-## When to use this skill
-
-Use cgrep for any local code search or symbol lookup. Prefer it over grep.
-
-## How to use this skill
-
-Default is keyword search (BM25). If an index exists it is used; otherwise it
-falls back to scan mode. Use `cgrep index` for repeated searches.
-
-### Usage Examples
-
-```bash
-cgrep index
-cgrep search "authentication flow"
-cgrep search "auth middleware" -C 2 -p src/
-cgrep search "validate_token" --regex --no-index
-cgrep read src/auth.rs
-cgrep map --depth 2
-cgrep symbols UserService -T class
-cgrep definition handleAuth
-cgrep callers validateToken
-cgrep references MyClass
-cgrep dependents src/auth.rs
-cgrep agent locate "token validation" --compact
-ID=$(cgrep agent locate "token validation" --compact | jq -r '.results[0].id')
-cgrep agent expand --id "$ID" -C 8 --compact
-```
-
-### Options
-
-- `-p, --path <path>` - Search in specific directory
-- `-C, --context <n>` - Context lines around matches (default: 0)
-- `-m, --limit <n>` - Limit number of results (default: 20)
-- `--no-index` / `--regex` - Force scan mode or regex search
-- `--format json|json2` - Structured output
-- `--compact` - Compact JSON output (no pretty formatting)
-- `--mode semantic|hybrid` - Optional; requires embeddings + index
-- `--agent-cache` / `--cache-ttl` - Cache hybrid/semantic sessions
-- `cgrep read` / `cgrep map` - Read focused regions and generate structure maps
-- `cgrep agent locate/expand` - Two-stage low-token agent retrieval flow
-
-### Harness Rules
-
-- Prefer structured calls: `map -> search -> read -> symbols/definition/references`.
-- Use `--format json --compact` or `--format json2 --compact` for deterministic output.
-- Narrow scope early (`-p`, `--glob`, `--changed`) to avoid redundant retries.
-- For MCP workflows, use `cgrep mcp serve` and cgrep tools instead of host built-ins.
-
-## MCP Priority Policy
-
-- For repository navigation, use cgrep MCP tools first: `cgrep_map -> cgrep_search -> cgrep_read -> cgrep_definition/references/callers`.
-- Use host-native grep/read only if cgrep tools fail or return empty twice.
-- Always narrow scope with `path`, `glob`, or `changed` when possible.
-- Keep tool outputs deterministic: prefer compact JSON payloads.
-"#;
+use super::{content, home_dir, print_install_success, print_uninstall_success};
 
 fn get_agents_md_path() -> Result<PathBuf> {
     let home = home_dir()?;
@@ -192,6 +129,7 @@ fn ensure_codex_mcp_config() -> Result<bool> {
 
 pub fn install() -> Result<()> {
     let path = get_agents_md_path()?;
+    let skill_content = content::codex_skill();
     let existing = if path.exists() {
         fs::read_to_string(&path).context("Failed to read existing AGENTS.md")?
     } else {
@@ -208,7 +146,7 @@ pub fn install() -> Result<()> {
         if !merged.trim().is_empty() {
             merged.push('\n');
         }
-        merged.push_str(SKILL_CONTENT.trim());
+        merged.push_str(skill_content.trim());
         merged.push('\n');
         fs::write(&path, merged).context("Failed to update AGENTS.md")?;
         true
@@ -239,7 +177,8 @@ pub fn uninstall() -> Result<()> {
     }
 
     let content = std::fs::read_to_string(&path)?;
-    let skill_trimmed = SKILL_CONTENT.trim();
+    let skill_content = content::codex_skill();
+    let skill_trimmed = skill_content.trim();
 
     if content.contains(skill_trimmed) {
         let updated = content.replace(skill_trimmed, "");

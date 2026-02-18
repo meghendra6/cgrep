@@ -1,29 +1,32 @@
 # 에이전트 워크플로
 
-## 2단계 조회
+## 핵심 정책
 
-`cgrep agent`는 결정적 출력과 낮은 토큰 사용량에 맞게 최적화되어 있습니다.
+- 로컬 코드 탐색은 cgrep을 우선 사용합니다.
+- 기본 흐름은 `map -> search -> read -> definition/references/callers`입니다.
+- `-p`, `--glob`, `--changed`로 범위를 먼저 줄입니다.
+- 에이전트 출력은 `--format json2 --compact`를 기본으로 사용합니다.
 
-1. `locate`: 후보를 작고 간결하게 반환
-2. `expand`: 선택한 ID에 대해서만 풍부한 컨텍스트 조회
+## 2단계 조회 (`agent`)
+
+`cgrep agent`는 저토큰 반복 조회에 최적화되어 있습니다.
 
 ```bash
-# 1단계: locate (json2 중심 출력)
+# 1단계: locate로 후보 수집
 cgrep agent locate "where token validation happens" --changed --budget balanced --compact
-
-# 단축 별칭 형태:
-cgrep a l "where token validation happens" -u -B balanced --compact
 
 # 첫 번째 결과 ID 선택 예시
 ID=$(cgrep agent locate "token validation" --compact | jq -r '.results[0].id')
 
-# 2단계: 선택 결과 확장
+# 2단계: 선택 ID 확장
 cgrep agent expand --id "$ID" -C 8 --compact
 ```
 
-참고:
-- `agent locate/expand`는 페이로드 최소화 기본값 사용
-- `agent locate`는 반복 프롬프트에 대한 캐시를 지원
+단축 별칭 형태:
+
+```bash
+cgrep a l "where token validation happens" -u -B balanced --compact
+```
 
 ## 연동 설치
 
@@ -71,7 +74,7 @@ cgrep agent uninstall opencode
 ## 1분 검증
 
 ```bash
-# Codex MCP 등록 확인
+# Codex host MCP 등록 확인
 codex mcp list
 
 # MCP 서버 응답 확인

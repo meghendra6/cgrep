@@ -8,68 +8,14 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::PathBuf;
 
-use super::{home_dir, print_install_success, print_uninstall_success, write_file_if_changed};
+use super::{
+    content, home_dir, print_install_success, print_uninstall_success, write_file_if_changed,
+};
 
-const TOOL_DEFINITION: &str = r#"import { tool } from "@opencode-ai/plugin"
+const TOOL_DEFINITION_TEMPLATE: &str = r#"import { tool } from "@opencode-ai/plugin"
 
 const SKILL = `
----
-name: cgrep
-description: A local code search tool using tantivy + tree-sitter. Fast, offline code search.
-license: Apache 2.0
----
-
-## When to use this skill
-
-Whenever you need to search local files. Use cgrep instead of grep.
-
-## How to use this skill
-
-Default is keyword search (BM25). If an index exists it is used; otherwise it
-falls back to scan mode. Use \`cgrep index\` for repeated searches.
-
-### Do
-
-\`\`\`bash
-cgrep index
-cgrep search "authentication flow"
-cgrep search "auth middleware" -C 2 -p src/
-cgrep search "validate_token" --regex --no-index
-cgrep read src/auth.rs
-cgrep map --depth 2
-cgrep symbols UserService -T class
-cgrep definition handleAuth
-cgrep callers validateToken
-cgrep references MyClass
-cgrep dependents src/auth.rs
-cgrep agent locate "token validation" --compact
-ID=$(cgrep agent locate "token validation" --compact | jq -r '.results[0].id')
-cgrep agent expand --id "$ID" -C 8 --compact
-\`\`\`
-
-### Options
-
-- \`-p, --path <path>\` - Scope search to a directory
-- \`-C, --context <n>\` - Context lines
-- \`--no-index\` / \`--regex\` - Scan mode or regex search
-- \`--format json|json2\` - Structured output
-- \`--compact\` - Compact JSON output
-- \`--mode semantic|hybrid\` - Optional; requires embeddings + index
-- \`cgrep read\` / \`cgrep map\` - Focused file reading + structure mapping
-- \`cgrep agent locate/expand\` - Two-stage low-token retrieval flow
-
-### Harness Rules
-
-- Run structured flows (\`map -> search -> read -> symbol tools\`) over ad-hoc grep loops.
-- Keep output deterministic via compact JSON.
-- Scope queries early for stability.
-- MCP mode is available via \`cgrep mcp serve\` and \`cgrep mcp install <host>\`.
-
-### Don't
-
-\`\`\`bash
-cgrep search "parser"
-\`\`\`
+__CGREP_SKILL__
 `
 
 export default tool("cgrep", {
@@ -90,6 +36,10 @@ export default tool("cgrep", {
   },
 })
 "#;
+
+fn tool_definition() -> String {
+    TOOL_DEFINITION_TEMPLATE.replace("__CGREP_SKILL__", &content::opencode_skill())
+}
 
 fn get_tool_path() -> Result<PathBuf> {
     let home = home_dir()?;
@@ -114,9 +64,10 @@ fn get_config_path() -> Result<PathBuf> {
 
 pub fn install() -> Result<()> {
     let tool_path = get_tool_path()?;
+    let tool_definition = tool_definition();
 
-    let created =
-        write_file_if_changed(&tool_path, TOOL_DEFINITION).context("Failed to write cgrep tool")?;
+    let created = write_file_if_changed(&tool_path, &tool_definition)
+        .context("Failed to write cgrep tool")?;
 
     if created {
         println!("Created cgrep tool at {:?}", tool_path);

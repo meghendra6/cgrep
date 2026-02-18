@@ -1,29 +1,30 @@
 # Agent Workflow
 
-## Two-stage retrieval
+## Core policy
 
-`cgrep agent` is optimized for low-token loops with deterministic payloads.
+- Use cgrep first for local repository navigation.
+- Prefer this flow: `map -> search -> read -> definition/references/callers`.
+- Scope early with `-p`, `--glob`, `--changed`.
+- Keep payload deterministic for agents: `--format json2 --compact`.
 
-1. `locate`: return compact candidate set
-2. `expand`: fetch richer context only for selected IDs
+## Two-stage retrieval (`agent`)
+
+`cgrep agent` is optimized for low-token loops.
 
 ```bash
-# Stage 1: locate (json2-oriented output)
+# Stage 1: locate compact candidates
 cgrep agent locate "where token validation happens" --changed --budget balanced --compact
-
-# Short alias form:
-cgrep a l "where token validation happens" -u -B balanced --compact
-
-# Select first result ID (example)
 ID=$(cgrep agent locate "token validation" --compact | jq -r '.results[0].id')
 
-# Stage 2: expand chosen result(s)
+# Stage 2: expand selected IDs
 cgrep agent expand --id "$ID" -C 8 --compact
 ```
 
-Notes:
-- `agent locate/expand` use payload minimization defaults
-- `agent locate` supports caching for repeated prompts
+Short alias form:
+
+```bash
+cgrep a l "where token validation happens" -u -B balanced --compact
+```
 
 ## Integration install
 
@@ -71,7 +72,7 @@ Auto MCP setup during install:
 ## Verify in one minute
 
 ```bash
-# Confirm MCP registration (Codex)
+# Confirm MCP registration (Codex host)
 codex mcp list
 
 # Confirm MCP server responds
