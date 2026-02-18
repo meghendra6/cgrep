@@ -16,6 +16,7 @@ use clap_complete::Shell;
     version,
     about,
     long_about = None,
+    override_usage = "cgrep [OPTIONS] <COMMAND>\n       cgrep [OPTIONS] [SEARCH_OPTIONS] <QUERY> [PATH]",
     after_help = "Direct search shorthand:\n  cgrep \"token refresh\" src/\n  cgrep -r --include '**/*.rs' needle src/\n\nLiteral query tips:\n  cgrep -- --literal\n  cgrep -- read"
 )]
 pub struct Cli {
@@ -304,8 +305,17 @@ pub enum Commands {
         #[arg(long, help_heading = "Mode")]
         regex: bool,
 
+        /// Grep compatibility flag (ignore case, default behavior)
+        #[arg(
+            short = 'i',
+            long = "ignore-case",
+            conflicts_with = "case_sensitive",
+            help_heading = "Mode"
+        )]
+        ignore_case: bool,
+
         /// Case-sensitive search (scan mode)
-        #[arg(long, help_heading = "Mode")]
+        #[arg(long, conflicts_with = "ignore_case", help_heading = "Mode")]
         case_sensitive: bool,
 
         /// Search mode: keyword, semantic, or hybrid

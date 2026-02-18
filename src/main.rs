@@ -269,6 +269,7 @@ fn main() -> Result<()> {
             profile,
             quiet,
             regex,
+            ignore_case: _,
             case_sensitive,
             mode,
             keyword,

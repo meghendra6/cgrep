@@ -86,6 +86,8 @@ cgrep search "<query>" \
   -r | --no-recursive \
   -m <limit> \
   -C <context> \
+  -i | --ignore-case \
+  --case-sensitive \
   -t <language> \
   --glob|--include <pattern> \
   -x, --exclude|--exclude-dir <pattern> \

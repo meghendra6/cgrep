@@ -324,8 +324,28 @@ fn root_help_mentions_direct_mode_and_literal_escape() {
     cmd.args(["--help"])
         .assert()
         .success()
+        .stdout(predicate::str::contains(
+            "cgrep [OPTIONS] [SEARCH_OPTIONS] <QUERY> [PATH]",
+        ))
         .stdout(predicate::str::contains("Direct search shorthand:"))
         .stdout(predicate::str::contains("cgrep -- --literal"));
+}
+
+#[test]
+fn direct_mode_accepts_grep_ignore_case_flag() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join("sample.txt"), "Needle marker\n");
+
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let assert = cmd
+        .current_dir(dir.path())
+        .args(["--format", "json", "-i", "needle", "--no-index"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
+    let json: Value = serde_json::from_str(&stdout).expect("json");
+    let results = json.as_array().expect("array");
+    assert!(!results.is_empty());
 }
 
 #[test]
