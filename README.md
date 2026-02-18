@@ -35,7 +35,7 @@ Everything runs locally.
 
 ```bash
 # grep -R "token validation" src/
-cgrep "token validation" src/
+cgrep search "token validation" src/
 
 # grep/rg + manual file-open loop
 cgrep d handle_auth
@@ -44,10 +44,10 @@ cgrep read src/auth.rs
 cgrep map --depth 2
 ```
 
-- `cgrep "query" src/` is supported for direct grep-style usage.
-- `search` keyword is optional, so `cgrep -r --no-ignore "query" src/` works directly.
-- You can place search options before query in direct mode (e.g., `cgrep -r --include '**/*.rs' needle src/`).
-- If query starts with `-` or overlaps a command name, use `--` (e.g., `cgrep -- --literal`, `cgrep -- read`).
+- Use `cgrep search` (or `cgrep s`) for text search.
+- grep-style options remain available: `cgrep search -r --no-ignore "query" src/`.
+- You can place search options before query (e.g., `cgrep search -r --include '**/*.rs' needle src/`).
+- If query starts with `-`, use `--` after `search` (e.g., `cgrep search -- --literal`).
 - Scope flags are grep-friendly: `-r/--recursive`, `--no-recursive`, `--include`, `--exclude-dir`.
 - Case flags follow grep expectations: `-i/--ignore-case` or `--case-sensitive`.
 - `--no-ignore` forces scan mode and disables `.gitignore`/`.ignore` filtering during scan.

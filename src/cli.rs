@@ -16,8 +16,8 @@ use clap_complete::Shell;
     version,
     about,
     long_about = None,
-    override_usage = "cgrep [OPTIONS] <COMMAND>\n       cgrep [OPTIONS] [SEARCH_OPTIONS] <QUERY> [PATH]",
-    after_help = "Direct search shorthand:\n  cgrep \"token refresh\" src/\n  cgrep -r --include '**/*.rs' needle src/\n\nLiteral query tips:\n  cgrep -- --literal\n  cgrep -- read"
+    override_usage = "cgrep [OPTIONS] <COMMAND>",
+    after_help = "Search quickstart:\n  cgrep s \"token refresh\" src/\n  cgrep search -r --include '**/*.rs' needle src/\n\nLiteral query tips:\n  cgrep search -- --literal\n  cgrep s read"
 )]
 pub struct Cli {
     /// Output format (text or json)
@@ -222,7 +222,7 @@ pub enum Commands {
     /// Full-text search with BM25 ranking
     #[command(
         visible_aliases = ["s", "find", "q"],
-        after_help = "Examples:\n  cgrep \"token refresh\" src/\n  cgrep -r --no-ignore \"auth flow\" src/\n  cgrep search \"retry\" -p src/ -C 2"
+        after_help = "Examples:\n  cgrep s \"token refresh\" src/\n  cgrep search -r --no-ignore \"auth flow\" src/\n  cgrep search \"retry\" -p src/ -C 2"
     )]
     Search {
         /// Search query (natural language or keywords)

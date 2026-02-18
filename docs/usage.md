@@ -4,7 +4,7 @@
 
 | Command | Description |
 |---|---|
-| `cgrep [search] <query> [path]` (`s`, `find`, `q`) | Full-text search (`search` keyword optional) |
+| `cgrep search <query> [path]` (`s`, `find`, `q`) | Full-text search |
 | `cgrep read <path>` (`rd`, `cat`, `view`) | Smart file read (small file full, large file outline) |
 | `cgrep map` (`mp`, `tree`) | Structural codebase map (file + symbol skeleton) |
 | `cgrep symbols <name>` (`sym`, `sy`) | Symbol search |
@@ -23,7 +23,7 @@
 
 ```bash
 # grep -R "token validation" src/
-cgrep "token validation" src/
+cgrep search "token validation" src/
 
 # grep/rg + manual open loop
 cgrep d handle_auth
@@ -32,9 +32,9 @@ cgrep rd src/auth.rs
 cgrep mp -d 2
 ```
 
-- `cgrep "query" src/` is supported for direct grep-style usage.
-- Direct mode also accepts option-first form: `cgrep -r --include '**/*.rs' needle src/`.
-- If query starts with `-` or overlaps a command name, use `--` (e.g., `cgrep -- --literal`, `cgrep -- read`).
+- Use `cgrep search` (or `cgrep s`) for text search.
+- Option-first form is still supported: `cgrep search -r --include '**/*.rs' needle src/`.
+- If query starts with `-`, use `--` after `search` (e.g., `cgrep search -- --literal`).
 - grep-style scope flags are supported: `-r/--recursive`, `--no-recursive`, `--include`, `--exclude-dir`.
 - `--no-ignore` forces scan mode and disables `.gitignore`/`.ignore` filtering during scan.
 - `-p <path>` remains available when you prefer explicit path flags.
@@ -58,25 +58,20 @@ cgrep a l "token validation" -B tight -u
 cgrep index
 
 # 2) Core 5 commands
-cgrep "authentication flow" src/
+cgrep search "authentication flow" src/
 cgrep d handle_auth
 cgrep r UserService -M auto
 cgrep rd src/auth.rs
 cgrep mp -d 2
 
 # 3) Optional narrowing / changed-files
-cgrep "token refresh" -t rust -p src/
-cgrep "retry logic" -u
+cgrep search "token refresh" -t rust -p src/
+cgrep search "retry logic" -u
 ```
 
 ## Search guide
 
-`search` keyword is optional. These are equivalent:
-
-```bash
-cgrep "token refresh" src/
-cgrep search "token refresh" src/
-```
+Use `search` (or alias `s`) explicitly:
 
 Core options:
 
@@ -103,7 +98,7 @@ Examples:
 ```bash
 cgrep search "jwt decode" -m 10
 cgrep s "retry backoff" -u
-cgrep -r --no-ignore "token validation" src/
+cgrep search -r --no-ignore "token validation" src/
 cgrep s "controller middleware" -B tight -P agent
 ```
 

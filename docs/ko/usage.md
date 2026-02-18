@@ -4,7 +4,7 @@
 
 | 명령 | 설명 |
 |---|---|
-| `cgrep [search] <query> [path]` (`s`, `find`, `q`) | 전체 텍스트 검색 (`search` 키워드 생략 가능) |
+| `cgrep search <query> [path]` (`s`, `find`, `q`) | 전체 텍스트 검색 |
 | `cgrep read <path>` (`rd`, `cat`, `view`) | 스마트 파일 읽기 (작은 파일은 전체, 큰 파일은 개요) |
 | `cgrep map` (`mp`, `tree`) | 코드베이스 구조 맵 (파일 + 심볼 스켈레톤) |
 | `cgrep symbols <name>` (`sym`, `sy`) | 심볼 검색 |
@@ -23,7 +23,7 @@
 
 ```bash
 # grep -R "token validation" src/
-cgrep "token validation" src/
+cgrep search "token validation" src/
 
 # grep/rg + 수동 파일 열기 반복
 cgrep d handle_auth
@@ -32,9 +32,9 @@ cgrep rd src/auth.rs
 cgrep mp -d 2
 ```
 
-- `cgrep "query" src/` 형태로도 grep 스타일 직접 사용이 가능합니다.
-- direct 모드에서 옵션을 먼저 둘 수 있습니다: `cgrep -r --include '**/*.rs' needle src/`.
-- 쿼리가 `-`로 시작하거나 명령어 이름과 겹치면 `--`를 사용하세요 (예: `cgrep -- --literal`, `cgrep -- read`).
+- 텍스트 검색은 `cgrep search`(또는 `cgrep s`)를 사용하세요.
+- 옵션을 먼저 두는 형태도 그대로 지원합니다: `cgrep search -r --include '**/*.rs' needle src/`.
+- 쿼리가 `-`로 시작하면 `search` 뒤에 `--`를 사용하세요 (예: `cgrep search -- --literal`).
 - grep 스타일 범위 옵션을 지원합니다: `-r/--recursive`, `--no-recursive`, `--include`, `--exclude-dir`.
 - `--no-ignore`는 scan 모드를 강제하고 scan 시 `.gitignore`/`.ignore` 필터를 비활성화합니다.
 - 명시적 플래그가 필요하면 기존처럼 `-p <path>`를 사용하면 됩니다.
@@ -58,25 +58,20 @@ cgrep a l "token validation" -B tight -u
 cgrep index
 
 # 2) 핵심 5개 명령
-cgrep "authentication flow" src/
+cgrep search "authentication flow" src/
 cgrep d handle_auth
 cgrep r UserService -M auto
 cgrep rd src/auth.rs
 cgrep mp -d 2
 
 # 3) 선택: 언어/경로/변경파일 제한
-cgrep "token refresh" -t rust -p src/
-cgrep "retry logic" -u
+cgrep search "token refresh" -t rust -p src/
+cgrep search "retry logic" -u
 ```
 
 ## 검색 가이드
 
-`search` 키워드는 선택입니다. 아래 두 명령은 동일합니다:
-
-```bash
-cgrep "token refresh" src/
-cgrep search "token refresh" src/
-```
+`search`(또는 별칭 `s`)를 명시적으로 사용하세요.
 
 핵심 옵션:
 
@@ -103,7 +98,7 @@ cgrep search "<query>" \
 ```bash
 cgrep search "jwt decode" -m 10
 cgrep s "retry backoff" -u
-cgrep -r --no-ignore "token validation" src/
+cgrep search -r --no-ignore "token validation" src/
 cgrep s "controller middleware" -B tight -P agent
 ```
 
