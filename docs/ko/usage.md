@@ -35,7 +35,7 @@ cgrep mp -d 2
 - `cgrep "query" src/` 형태로도 grep 스타일 직접 사용이 가능합니다.
 - direct 모드에서 옵션을 먼저 둘 수 있습니다: `cgrep -r --include '**/*.rs' needle src/`.
 - grep 스타일 범위 옵션을 지원합니다: `-r/--recursive`, `--no-recursive`, `--include`, `--exclude-dir`.
-- `--no-ignore`를 사용하면 `.gitignore`/`.ignore`로 제외된 파일도 포함합니다(스캔 모드).
+- `--no-ignore`는 scan 모드를 강제하고 scan 시 `.gitignore`/`.ignore` 필터를 비활성화합니다.
 - 명시적 플래그가 필요하면 기존처럼 `-p <path>`를 사용하면 됩니다.
 
 ## 단축 위주 사용 흐름

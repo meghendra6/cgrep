@@ -297,6 +297,28 @@ fn include_and_exclude_dir_aliases_work_in_direct_mode() {
 }
 
 #[test]
+fn direct_mode_supports_literal_query_starting_with_dash() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join("sample.txt"), "--needle marker\n");
+
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let assert = cmd
+        .current_dir(dir.path())
+        .args(["--format", "json", "--no-index", "--", "--needle"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
+    let json: Value = serde_json::from_str(&stdout).expect("json");
+    let results = json.as_array().expect("array");
+    assert!(results.iter().any(|r| {
+        r["path"]
+            .as_str()
+            .map(|p| p.contains("sample.txt"))
+            .unwrap_or(false)
+    }));
+}
+
+#[test]
 fn search_help_includes_grep_transition_examples() {
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
     cmd.args(["search", "--help"])

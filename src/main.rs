@@ -182,7 +182,12 @@ fn rewrite_args_for_search_shorthand(raw_args: &[String]) -> Option<Vec<String>>
     while idx < raw_args.len() {
         let token = raw_args[idx].as_str();
         if token == "--" {
-            return None;
+            if idx + 1 >= raw_args.len() {
+                return None;
+            }
+            let mut rewritten = raw_args.to_vec();
+            rewritten.insert(idx, "search".to_string());
+            return Some(rewritten);
         }
 
         match token {
@@ -748,6 +753,25 @@ mod tests {
                 "-r".to_string(),
                 "needle".to_string(),
                 "src".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn rewrites_double_dash_literal_query() {
+        let raw = vec![
+            "cgrep".to_string(),
+            "--".to_string(),
+            "--literal".to_string(),
+        ];
+        let rewritten = rewrite_args_for_search_shorthand(&raw).expect("rewritten");
+        assert_eq!(
+            rewritten,
+            vec![
+                "cgrep".to_string(),
+                "search".to_string(),
+                "--".to_string(),
+                "--literal".to_string(),
             ]
         );
     }
