@@ -44,6 +44,93 @@ fn deprecated_mode_alias_prints_warning() {
 }
 
 #[test]
+fn grep_alias_with_positional_path_filters_scope() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join("src/hit.txt"), "needle\n");
+    write_file(&dir.path().join("other.txt"), "needle\n");
+
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let assert = cmd
+        .current_dir(dir.path())
+        .args(["--format", "json", "grep", "needle", "src", "--no-index"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
+    let json: Value = serde_json::from_str(&stdout).expect("json");
+    let results = json.as_array().expect("array");
+    assert!(!results.is_empty());
+    assert!(results.iter().any(|r| {
+        r["path"]
+            .as_str()
+            .map(|p| p.contains("hit.txt"))
+            .unwrap_or(false)
+    }));
+    assert!(
+        results.iter().all(|r| {
+            r["path"]
+                .as_str()
+                .map(|p| !p.contains("other.txt"))
+                .unwrap_or(false)
+        }),
+        "grep alias + positional path should exclude out-of-scope files"
+    );
+}
+
+#[test]
+fn explicit_path_flag_takes_precedence_over_positional_path() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join("a/a.txt"), "needle\n");
+    write_file(&dir.path().join("b/b.txt"), "needle\n");
+
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let assert = cmd
+        .current_dir(dir.path())
+        .args([
+            "--format",
+            "json",
+            "search",
+            "needle",
+            "a",
+            "--path",
+            "b",
+            "--no-index",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
+    let json: Value = serde_json::from_str(&stdout).expect("json");
+    let results = json.as_array().expect("array");
+    assert!(!results.is_empty());
+    assert!(results.iter().any(|r| {
+        r["path"]
+            .as_str()
+            .map(|p| p.contains("b.txt"))
+            .unwrap_or(false)
+    }));
+    assert!(
+        results.iter().all(|r| {
+            r["path"]
+                .as_str()
+                .map(|p| !p.contains("a.txt"))
+                .unwrap_or(false)
+        }),
+        "--path should win over positional path"
+    );
+}
+
+#[test]
+fn search_help_includes_grep_transition_examples() {
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    cmd.args(["search", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Optional path (grep-style positional form)",
+        ))
+        .stdout(predicate::str::contains("cgrep grep \"auth flow\" src/"));
+}
+
+#[test]
 fn agent_locate_and_expand_roundtrip() {
     let dir = TempDir::new().expect("tempdir");
     write_file(

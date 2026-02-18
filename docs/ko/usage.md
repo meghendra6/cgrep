@@ -19,6 +19,22 @@
 | `cgrep agent <...>` (`a`) | 에이전트 locate/expand + 연동 설치 |
 | `cgrep completions <shell>` | 셸 자동완성 생성 |
 
+## grep/rg 전환 빠른 경로
+
+```bash
+# grep -R "token validation" src/
+cgrep search "token validation" src/
+
+# grep/rg + 수동 파일 열기 반복
+cgrep d handle_auth
+cgrep r UserService -M auto
+cgrep rd src/auth.rs
+cgrep mp -d 2
+```
+
+- `cgrep grep "query" src/` 형태도 grep 스타일 별칭으로 지원합니다.
+- 명시적 플래그가 필요하면 기존처럼 `-p <path>`를 사용하면 됩니다.
+
 ## 단축 위주 사용 흐름
 
 ```bash
@@ -37,28 +53,16 @@ cgrep a l "token validation" -B tight -u
 # 1) 인덱스 생성
 cgrep index
 
-# 2) 기본 검색
-cgrep search "authentication flow"
-
-# 3) 언어/경로 제한
-cgrep search "token refresh" -t rust -p src/
-
-# 4) 변경 파일만 검색
-cgrep search "retry logic" -u
-
-# 5) 심볼/탐색 명령
-cgrep symbols UserService -T class
+# 2) 핵심 5개 명령
+cgrep search "authentication flow" src/
 cgrep d handle_auth
-cgrep c validate_token -M auto
 cgrep r UserService -M auto
-
-# 6) 의존성 조회
-cgrep dep src/auth.rs
-
-# 7) 스마트 파일 읽기 / 맵
 cgrep rd src/auth.rs
-cgrep rd README.md -s "## Configuration"
 cgrep mp -d 2
+
+# 3) 선택: 언어/경로/변경파일 제한
+cgrep search "token refresh" -t rust -p src/
+cgrep search "retry logic" -u
 ```
 
 ## 검색 가이드

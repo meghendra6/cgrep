@@ -213,11 +213,18 @@ pub enum McpCommands {
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Full-text search with BM25 ranking
-    #[command(visible_aliases = ["s", "find", "q"])]
+    #[command(
+        visible_aliases = ["s", "find", "q", "grep"],
+        after_help = "Examples:\n  cgrep search \"token refresh\" src/\n  cgrep grep \"auth flow\" src/\n  cgrep search \"retry\" -p src/ -C 2"
+    )]
     Search {
         /// Search query (natural language or keywords)
         #[arg(required_unless_present = "help_advanced")]
         query: Option<String>,
+
+        /// Optional path (grep-style positional form)
+        #[arg(value_name = "PATH")]
+        path_positional: Option<String>,
 
         /// Path to search in (defaults to current directory)
         #[arg(short, long, help_heading = "Core")]
@@ -637,6 +644,24 @@ mod tests {
                 assert_eq!(profile.as_deref(), Some("agent"));
                 assert_eq!(exclude.as_deref(), Some("target/**"));
                 assert_eq!(changed.as_deref(), Some("HEAD"));
+            }
+            other => panic!("expected search command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn grep_alias_with_positional_path_parses() {
+        let cli =
+            Cli::try_parse_from(["cgrep", "grep", "auth flow", "src"]).expect("parse grep alias");
+
+        match cli.command {
+            Commands::Search {
+                query,
+                path_positional,
+                ..
+            } => {
+                assert_eq!(query.as_deref(), Some("auth flow"));
+                assert_eq!(path_positional.as_deref(), Some("src"));
             }
             other => panic!("expected search command, got {other:?}"),
         }

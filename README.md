@@ -31,6 +31,22 @@ Everything runs locally.
 | Feed context to AI coding agents | Large, noisy payloads | Budgeted, structured payloads (`agent`, `json2`) |
 | Keep retrieval stable over time | Ad-hoc scripts per repo | Built-in index/watch/daemon + MCP integration |
 
+## From grep/rg in 30 seconds
+
+```bash
+# grep -R "token validation" src/
+cgrep search "token validation" src/
+
+# grep/rg + manual file-open loop
+cgrep d handle_auth
+cgrep r UserService -M auto
+cgrep read src/auth.rs
+cgrep map --depth 2
+```
+
+- `cgrep grep "query" src/` is also supported as a grep-style alias.
+- Use `-p <path>` when you prefer explicit path flags.
+
 ## Benchmark Snapshot (PyTorch)
 
 - Measured on February 17, 2026 across 6 AI-coding scenarios (implementation/structure tracing on PyTorch).
@@ -85,14 +101,10 @@ Detailed setup: `docs/installation.md`
 # Build index once (recommended)
 cgrep index
 
-# Keyword search
-cgrep search "authentication flow" -t rust -p src/
-
-# Symbol navigation
+# Core 5 commands
+cgrep search "authentication flow" src/
 cgrep definition handle_auth
 cgrep references UserService --mode auto
-
-# Smart read/map
 cgrep read src/auth.rs
 cgrep map --depth 2
 ```

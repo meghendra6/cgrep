@@ -141,6 +141,7 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Search {
             query,
+            path_positional,
             path,
             limit,
             context,
@@ -178,8 +179,8 @@ fn main() -> Result<()> {
             let query = query.ok_or_else(|| {
                 anyhow::anyhow!("search query is required (use `cgrep search --help`)")
             })?;
-            let config = path
-                .as_deref()
+            let effective_path = path.as_deref().or(path_positional.as_deref());
+            let config = effective_path
                 .map(cgrep::config::Config::load_for_dir)
                 .unwrap_or_else(cgrep::config::Config::load);
             let profile_config = profile.as_deref().map(|name| config.profile(name));
@@ -264,7 +265,7 @@ fn main() -> Result<()> {
 
             query::search::run(
                 &query,
-                path.as_deref(),
+                effective_path,
                 effective_max_results,
                 effective_context,
                 file_type.as_deref(),
