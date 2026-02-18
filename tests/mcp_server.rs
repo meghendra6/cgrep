@@ -248,6 +248,44 @@ fn mcp_search_accepts_literal_query_starting_with_dash() {
 }
 
 #[test]
+fn mcp_search_accepts_literal_query_that_looks_like_help_flag() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join("src/lib.rs"), "--help marker\n");
+
+    let mut mcp = McpProc::spawn(dir.path());
+    let _ = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    }));
+
+    let search = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_search",
+            "arguments": {
+                "query": "--help",
+                "path": "src",
+                "no_index": true
+            }
+        }
+    }));
+    let search_text = search["result"]["content"][0]["text"]
+        .as_str()
+        .expect("search text");
+    let search_json: Value = serde_json::from_str(search_text).expect("search json2");
+    assert!(search_json["results"]
+        .as_array()
+        .map(|arr| !arr.is_empty())
+        .unwrap_or(false));
+
+    mcp.stop();
+}
+
+#[test]
 fn mcp_tool_call_honors_cwd_for_relative_paths() {
     let dir = TempDir::new().expect("tempdir");
     write_file(
@@ -310,6 +348,56 @@ fn mcp_tool_call_honors_cwd_for_relative_paths() {
         .as_str()
         .map(|content| content.contains("needle_token"))
         .unwrap_or(false));
+
+    mcp.stop();
+}
+
+#[test]
+fn mcp_rejects_relative_scope_without_cwd_when_server_runs_from_root() {
+    let mut mcp = McpProc::spawn(std::path::Path::new("/"));
+    let _ = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    }));
+
+    let search = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_search",
+            "arguments": {
+                "query": "needle_token",
+                "path": ".",
+                "no_index": true
+            }
+        }
+    }));
+    assert_eq!(search["result"]["isError"], true);
+    assert!(search["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("requires `cwd`"));
+
+    let map = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_map",
+            "arguments": {
+                "path": ".",
+                "depth": 1
+            }
+        }
+    }));
+    assert_eq!(map["result"]["isError"], true);
+    assert!(map["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("requires `cwd`"));
 
     mcp.stop();
 }

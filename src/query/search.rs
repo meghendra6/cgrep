@@ -2451,11 +2451,12 @@ fn workspace_display_path(full_path: &Path, workspace_root: &Path) -> String {
         }
     }
 
-    full_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| full_path.display().to_string())
+    if full_path.is_absolute() {
+        return normalize_path(full_path).display().to_string();
+    }
+
+    let joined = normalize_path(&workspace_root.join(full_path));
+    joined.display().to_string()
 }
 
 #[cfg(test)]

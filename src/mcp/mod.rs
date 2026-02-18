@@ -7,6 +7,7 @@ pub mod install;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 const PROTOCOL_VERSION: &str = "2024-11-05";
@@ -189,6 +190,7 @@ fn dispatch_tool(tool: &str, args: &Value) -> Result<String, String> {
 fn tool_search(args: &Value) -> Result<String, String> {
     let query = required_str(args, "query")?;
     let cwd = opt_cwd(args);
+    require_bounded_relative_scope("cgrep_search", cwd, opt_str(args, "path"), true)?;
     let mut cmd = vec![
         "--format".to_string(),
         "json2".to_string(),
@@ -221,6 +223,7 @@ fn tool_search(args: &Value) -> Result<String, String> {
 fn tool_read(args: &Value) -> Result<String, String> {
     let path = required_str(args, "path")?;
     let cwd = opt_cwd(args);
+    require_bounded_relative_scope("cgrep_read", cwd, Some(path), false)?;
     let mut cmd = vec![
         "--format".to_string(),
         "json".to_string(),
@@ -235,6 +238,7 @@ fn tool_read(args: &Value) -> Result<String, String> {
 
 fn tool_map(args: &Value) -> Result<String, String> {
     let cwd = opt_cwd(args);
+    require_bounded_relative_scope("cgrep_map", cwd, opt_str(args, "path"), true)?;
     let mut cmd = vec![
         "--format".to_string(),
         "json".to_string(),
@@ -281,6 +285,7 @@ fn tool_definition(args: &Value) -> Result<String, String> {
 fn tool_references(args: &Value) -> Result<String, String> {
     let name = required_str(args, "name")?;
     let cwd = opt_cwd(args);
+    require_bounded_relative_scope("cgrep_references", cwd, opt_str(args, "path"), false)?;
     let mut cmd = vec![
         "--format".to_string(),
         "json".to_string(),
@@ -312,6 +317,7 @@ fn tool_callers(args: &Value) -> Result<String, String> {
 fn tool_dependents(args: &Value) -> Result<String, String> {
     let file = required_str(args, "file")?;
     let cwd = opt_cwd(args);
+    require_bounded_relative_scope("cgrep_dependents", cwd, Some(file), false)?;
     let cmd = vec![
         "--format".to_string(),
         "json".to_string(),
@@ -324,6 +330,7 @@ fn tool_dependents(args: &Value) -> Result<String, String> {
 
 fn tool_index(args: &Value) -> Result<String, String> {
     let cwd = opt_cwd(args);
+    require_bounded_relative_scope("cgrep_index", cwd, opt_str(args, "path"), true)?;
     let mut cmd = vec!["index".to_string()];
     push_opt_flag_value(&mut cmd, "-p", opt_str(args, "path"));
     push_bool_flag(&mut cmd, "--force", opt_bool(args, "force"));
@@ -366,6 +373,36 @@ fn opt_array_str<'a>(args: &'a Value, key: &str) -> Option<Vec<&'a str>> {
 
 fn opt_cwd(args: &Value) -> Option<&str> {
     opt_str(args, "cwd").filter(|value| !value.trim().is_empty())
+}
+
+fn require_bounded_relative_scope(
+    tool_name: &str,
+    cwd: Option<&str>,
+    path_value: Option<&str>,
+    defaults_to_cwd: bool,
+) -> Result<(), String> {
+    if cwd.is_some() {
+        return Ok(());
+    }
+
+    let resolves_from_server_cwd = match path_value {
+        Some(path) => !Path::new(path).is_absolute(),
+        None => defaults_to_cwd,
+    };
+
+    if !resolves_from_server_cwd {
+        return Ok(());
+    }
+
+    let server_cwd =
+        std::env::current_dir().map_err(|err| format!("failed to resolve server cwd: {err}"))?;
+    if server_cwd == Path::new("/") {
+        return Err(format!(
+            "{tool_name} requires `cwd` (or an absolute `path`) when server cwd is `/` to avoid scanning the system root"
+        ));
+    }
+
+    Ok(())
 }
 
 fn push_opt_flag_value(cmd: &mut Vec<String>, flag: &str, value: Option<&str>) {

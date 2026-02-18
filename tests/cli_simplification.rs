@@ -3,7 +3,9 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::fs;
+use std::path::Path;
 use tempfile::TempDir;
 
 fn write_file(path: &std::path::Path, content: &str) {
@@ -186,6 +188,73 @@ fn search_file_scope_path_is_non_empty_and_workspace_relative() {
         .expect("result path");
     assert!(!path.is_empty());
     assert_eq!(path, "src/lib.rs");
+}
+
+#[test]
+fn external_scope_results_are_absolute_and_roundtrip_with_unique_ids() {
+    let workspace = TempDir::new().expect("workspace");
+    let external = TempDir::new().expect("external");
+    write_file(
+        &external.path().join("a/mod.rs"),
+        "pub fn needle_token() {}\n",
+    );
+    write_file(
+        &external.path().join("b/mod.rs"),
+        "pub fn needle_token() {}\n",
+    );
+
+    let mut search_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let search_assert = search_cmd
+        .current_dir(workspace.path())
+        .args([
+            "--format",
+            "json2",
+            "search",
+            "needle_token",
+            "-p",
+            external.path().to_str().expect("utf8 path"),
+            "--no-index",
+            "-m",
+            "10",
+        ])
+        .assert()
+        .success();
+    let search_stdout = String::from_utf8(search_assert.get_output().stdout.clone()).expect("utf8");
+    let search_json: Value = serde_json::from_str(&search_stdout).expect("json2");
+    let results = search_json["results"].as_array().expect("results array");
+    assert!(results.len() >= 2);
+
+    let mut paths = HashSet::new();
+    let mut ids = HashSet::new();
+    for result in results {
+        let path = result["path"].as_str().expect("result path");
+        assert!(
+            Path::new(path).is_absolute(),
+            "external scope path should be absolute: {path}"
+        );
+        paths.insert(path.to_string());
+
+        let id = result["id"].as_str().expect("result id");
+        ids.insert(id.to_string());
+    }
+
+    assert_eq!(paths.len(), 2, "should keep both files distinct");
+    assert_eq!(ids.len(), 2, "result id should stay unique across files");
+    assert_eq!(
+        search_json["meta"]["files_with_matches"].as_u64(),
+        Some(2),
+        "files_with_matches should reflect unique files"
+    );
+
+    for path in &paths {
+        let mut read_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+        read_cmd
+            .current_dir(workspace.path())
+            .args(["--format", "json", "read", path])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("needle_token"));
+    }
 }
 
 #[test]

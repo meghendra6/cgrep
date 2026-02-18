@@ -38,7 +38,8 @@ cgrep mp -d 2
 - grep-style scope flags are supported: `-r/--recursive`, `--no-recursive`, `--include`, `--exclude-dir`.
 - `--no-ignore` forces scan mode and disables `.gitignore`/`.ignore` filtering during scan.
 - `-p <path>` remains available when you prefer explicit path flags.
-- `search` results always return workspace-relative `path`, so `search -> read` round-trip works directly.
+- `search` result `path` is always round-trip safe:
+  workspace-internal scopes return workspace-relative paths, and external scopes return absolute paths.
 
 ## Shortcut-first flow
 
