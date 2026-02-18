@@ -4,6 +4,7 @@
 
 - Use cgrep first for local repository navigation.
 - Prefer this flow: `map -> search -> read -> definition/references/callers`.
+- In MCP/Codex loops, prefer `cgrep_agent_locate -> cgrep_agent_expand` before direct `cgrep_search`.
 - Scope early with `-p`, `--glob`, `--changed`.
 - Keep payload deterministic for agents: `--format json2 --compact`.
 

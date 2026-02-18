@@ -60,6 +60,23 @@ impl McpProc {
     }
 }
 
+fn resolved_paths(payload: &Value) -> Vec<String> {
+    let aliases = payload["meta"]["path_aliases"].as_object();
+    payload["results"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|row| row.get("path").and_then(Value::as_str))
+        .map(|raw| {
+            aliases
+                .and_then(|map| map.get(raw))
+                .and_then(Value::as_str)
+                .unwrap_or(raw)
+                .to_string()
+        })
+        .collect()
+}
+
 #[test]
 fn mcp_initialize_and_list_tools() {
     let dir = TempDir::new().expect("tempdir");
@@ -91,12 +108,16 @@ fn mcp_initialize_and_list_tools() {
         .map(ToOwned::to_owned)
         .collect();
     assert!(names.contains(&"cgrep_search".to_string()));
+    assert!(names.contains(&"cgrep_agent_locate".to_string()));
+    assert!(names.contains(&"cgrep_agent_expand".to_string()));
     assert!(names.contains(&"cgrep_read".to_string()));
     assert!(names.contains(&"cgrep_index".to_string()));
 
     let tools_array = tools["result"]["tools"].as_array().expect("tools array");
     for tool_name in [
         "cgrep_search",
+        "cgrep_agent_locate",
+        "cgrep_agent_expand",
         "cgrep_read",
         "cgrep_map",
         "cgrep_symbols",
@@ -180,6 +201,184 @@ fn mcp_tool_call_executes_search_and_read() {
         .expect("read text");
     let read_json: Value = serde_json::from_str(read_text).expect("read json");
     assert!(read_json.is_object() || read_json.is_array());
+
+    mcp.stop();
+}
+
+#[test]
+fn mcp_search_applies_default_budget_metadata() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(
+        &dir.path().join("src/lib.rs"),
+        "pub fn budget_meta_marker() {}\n",
+    );
+
+    let mut index_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    index_cmd
+        .current_dir(dir.path())
+        .args(["index", "--embeddings", "off"])
+        .assert()
+        .success();
+
+    let mut mcp = McpProc::spawn(dir.path());
+    let _ = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    }));
+
+    let search = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_search",
+            "arguments": {
+                "query": "budget_meta_marker",
+                "path": "src",
+                "limit": 5
+            }
+        }
+    }));
+    let text = search["result"]["content"][0]["text"]
+        .as_str()
+        .expect("search text");
+    let payload: Value = serde_json::from_str(text).expect("json");
+    assert_eq!(payload["meta"]["max_total_chars"], 6000);
+    assert_eq!(payload["meta"]["dedupe_context"], true);
+    assert_eq!(payload["meta"]["path_alias"], true);
+    assert_eq!(payload["meta"]["suppress_boilerplate"], true);
+    assert!(payload["meta"]["fallback_chain"].as_array().is_some());
+    assert!(payload["meta"]["payload_chars"].as_u64().is_some());
+    assert!(payload["meta"]["payload_tokens_estimate"]
+        .as_u64()
+        .is_some());
+
+    mcp.stop();
+}
+
+#[test]
+fn mcp_agent_locate_and_expand_roundtrip() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(
+        &dir.path().join("src/lib.rs"),
+        "pub fn roundtrip_marker() {}\npub fn call_roundtrip() { roundtrip_marker(); }\n",
+    );
+
+    let mut index_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    index_cmd
+        .current_dir(dir.path())
+        .args(["index", "--embeddings", "off"])
+        .assert()
+        .success();
+
+    let mut mcp = McpProc::spawn(dir.path());
+    let _ = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    }));
+
+    let locate = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_agent_locate",
+            "arguments": {
+                "query": "roundtrip_marker"
+            }
+        }
+    }));
+    let locate_text = locate["result"]["content"][0]["text"]
+        .as_str()
+        .expect("locate text");
+    let locate_json: Value = serde_json::from_str(locate_text).expect("locate json");
+    let first_id = locate_json["results"][0]["id"]
+        .as_str()
+        .expect("first id")
+        .to_string();
+
+    let expand = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_agent_expand",
+            "arguments": {
+                "ids": [first_id],
+                "context": 2
+            }
+        }
+    }));
+    let expand_text = expand["result"]["content"][0]["text"]
+        .as_str()
+        .expect("expand text");
+    let expand_json: Value = serde_json::from_str(expand_text).expect("expand json");
+    assert!(expand_json["meta"]["resolved_ids"].as_u64().unwrap_or(0) >= 1);
+    assert!(expand_json["results"]
+        .as_array()
+        .map(|arr| !arr.is_empty())
+        .unwrap_or(false));
+
+    mcp.stop();
+}
+
+#[test]
+fn mcp_search_auto_indexes_once_when_missing() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(
+        &dir.path().join("src/lib.rs"),
+        "pub fn bootstrap_index_marker() {}\n",
+    );
+
+    let mut mcp = McpProc::spawn(dir.path());
+    let _ = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    }));
+
+    let first = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_search",
+            "arguments": {
+                "query": "bootstrap_index_marker",
+                "path": "src"
+            }
+        }
+    }));
+    let first_text = first["result"]["content"][0]["text"]
+        .as_str()
+        .expect("first search text");
+    let first_json: Value = serde_json::from_str(first_text).expect("first search json");
+    assert_eq!(first_json["meta"]["index_mode"], "index");
+    assert_eq!(first_json["meta"]["bootstrap_index"], true);
+
+    let second = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_search",
+            "arguments": {
+                "query": "bootstrap_index_marker",
+                "path": "src"
+            }
+        }
+    }));
+    let second_text = second["result"]["content"][0]["text"]
+        .as_str()
+        .expect("second search text");
+    let second_json: Value = serde_json::from_str(second_text).expect("second search json");
+    assert_eq!(second_json["meta"]["index_mode"], "index");
+    assert_eq!(second_json["meta"]["bootstrap_index"], false);
 
     mcp.stop();
 }
@@ -298,20 +497,10 @@ fn mcp_search_treats_colon_query_as_literal_in_index_mode() {
         .expect("search text");
     let search_json: Value = serde_json::from_str(search_text).expect("search json2");
     assert_eq!(search_json["meta"]["index_mode"], "index");
-    let results = search_json["results"].as_array().expect("results");
-    assert!(!results.is_empty());
-    assert!(results.iter().any(|r| {
-        r["path"]
-            .as_str()
-            .map(|p| p.contains("src/match.rs"))
-            .unwrap_or(false)
-    }));
-    assert!(results.iter().all(|r| {
-        r["path"]
-            .as_str()
-            .map(|p| !p.contains("src/noise.rs"))
-            .unwrap_or(true)
-    }));
+    let paths = resolved_paths(&search_json);
+    assert!(!paths.is_empty());
+    assert!(paths.iter().any(|p| p.contains("src/match.rs")));
+    assert!(paths.iter().all(|p| !p.contains("src/noise.rs")));
 
     mcp.stop();
 }
@@ -329,7 +518,12 @@ fn mcp_search_rejects_empty_or_whitespace_query() {
         "params": {}
     }));
 
-    for (id, query, regex) in [(2, "", false), (3, " ", false), (4, "", true), (5, " ", true)] {
+    for (id, query, regex) in [
+        (2, "", false),
+        (3, " ", false),
+        (4, "", true),
+        (5, " ", true),
+    ] {
         let search = mcp.call(json!({
             "jsonrpc": "2.0",
             "id": id,
@@ -503,12 +697,17 @@ fn mcp_tool_call_honors_cwd_for_relative_paths() {
         .as_str()
         .expect("search text");
     let search_json: Value = serde_json::from_str(search_text).expect("search json2");
-    let first_path = search_json["results"]
+    let first_raw_path = search_json["results"]
         .as_array()
         .and_then(|arr| arr.first())
         .and_then(|v| v.get("path"))
         .and_then(Value::as_str)
         .expect("result path");
+    let first_path = search_json["meta"]["path_aliases"]
+        .as_object()
+        .and_then(|aliases| aliases.get(first_raw_path))
+        .and_then(Value::as_str)
+        .unwrap_or(first_raw_path);
     assert_eq!(first_path, "src/lib.rs");
 
     let read = mcp.call(json!({
