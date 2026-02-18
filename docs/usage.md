@@ -34,6 +34,7 @@ cgrep mp -d 2
 
 - `cgrep "query" src/` is supported for direct grep-style usage.
 - Direct mode also accepts option-first form: `cgrep -r --include '**/*.rs' needle src/`.
+- If query starts with `-` or overlaps a command name, use `--` (e.g., `cgrep -- --literal`, `cgrep -- read`).
 - grep-style scope flags are supported: `-r/--recursive`, `--no-recursive`, `--include`, `--exclude-dir`.
 - `--no-ignore` forces scan mode and disables `.gitignore`/`.ignore` filtering during scan.
 - `-p <path>` remains available when you prefer explicit path flags.

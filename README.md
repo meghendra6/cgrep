@@ -47,6 +47,7 @@ cgrep map --depth 2
 - `cgrep "query" src/` is supported for direct grep-style usage.
 - `search` keyword is optional, so `cgrep -r --no-ignore "query" src/` works directly.
 - You can place search options before query in direct mode (e.g., `cgrep -r --include '**/*.rs' needle src/`).
+- If query starts with `-` or overlaps a command name, use `--` (e.g., `cgrep -- --literal`, `cgrep -- read`).
 - Scope flags are grep-friendly: `-r/--recursive`, `--no-recursive`, `--include`, `--exclude-dir`.
 - `--no-ignore` forces scan mode and disables `.gitignore`/`.ignore` filtering during scan.
 - Use `-p <path>` when you prefer explicit path flags.

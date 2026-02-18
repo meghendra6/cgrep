@@ -11,7 +11,13 @@ use clap_complete::Shell;
 /// Supports symbol search, dependency tracking, and full-text search.
 #[derive(Parser, Debug)]
 #[command(name = "cgrep")]
-#[command(author, version, about, long_about = None)]
+#[command(
+    author,
+    version,
+    about,
+    long_about = None,
+    after_help = "Direct search shorthand:\n  cgrep \"token refresh\" src/\n  cgrep -r --include '**/*.rs' needle src/\n\nLiteral query tips:\n  cgrep -- --literal\n  cgrep -- read"
+)]
 pub struct Cli {
     /// Output format (text or json)
     #[arg(long, global = true)]

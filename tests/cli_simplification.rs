@@ -319,6 +319,16 @@ fn direct_mode_supports_literal_query_starting_with_dash() {
 }
 
 #[test]
+fn root_help_mentions_direct_mode_and_literal_escape() {
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    cmd.args(["--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Direct search shorthand:"))
+        .stdout(predicate::str::contains("cgrep -- --literal"));
+}
+
+#[test]
 fn search_help_includes_grep_transition_examples() {
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
     cmd.args(["search", "--help"])
