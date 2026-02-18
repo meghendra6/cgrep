@@ -7,6 +7,7 @@
 
 const CORE_FLOW: &str =
     "- Prefer structured flow: `map -> search -> read -> definition/references/callers`.\n\
+- In MCP/Codex loops, prefer `cgrep_agent_locate -> cgrep_agent_expand`; use `cgrep_search` only when locate/expand is insufficient.\n\
 - Scope early with `-p`, `--glob`, `--changed`.\n\
 - Keep outputs deterministic for agents: `--format json2 --compact`.\n\
 - Use `agent locate` then `agent expand` for low-token loops.\n";

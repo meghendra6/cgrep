@@ -498,7 +498,16 @@ fn indexed_search_falls_back_to_scan_for_dash_only_literal_query() {
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
     let assert = cmd
         .current_dir(dir.path())
-        .args(["--format", "json2", "--compact", "search", "-m", "10", "--", "-n"])
+        .args([
+            "--format",
+            "json2",
+            "--compact",
+            "search",
+            "-m",
+            "10",
+            "--",
+            "-n",
+        ])
         .assert()
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
@@ -760,7 +769,12 @@ fn case_sensitive_search_behaves_consistently_between_index_and_scan() {
     let idx_exact_stdout =
         String::from_utf8(idx_exact_assert.get_output().stdout.clone()).expect("utf8");
     let idx_exact_json: Value = serde_json::from_str(&idx_exact_stdout).expect("json");
-    assert!(idx_exact_json["meta"]["total_matches"].as_u64().unwrap_or(0) > 0);
+    assert!(
+        idx_exact_json["meta"]["total_matches"]
+            .as_u64()
+            .unwrap_or(0)
+            > 0
+    );
 
     let mut scan_exact = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
     let scan_exact_assert = scan_exact
@@ -781,7 +795,12 @@ fn case_sensitive_search_behaves_consistently_between_index_and_scan() {
     let scan_exact_stdout =
         String::from_utf8(scan_exact_assert.get_output().stdout.clone()).expect("utf8");
     let scan_exact_json: Value = serde_json::from_str(&scan_exact_stdout).expect("json");
-    assert!(scan_exact_json["meta"]["total_matches"].as_u64().unwrap_or(0) > 0);
+    assert!(
+        scan_exact_json["meta"]["total_matches"]
+            .as_u64()
+            .unwrap_or(0)
+            > 0
+    );
 }
 
 #[test]
