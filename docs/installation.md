@@ -1,75 +1,81 @@
 # Installation
 
-## Prerequisites
-
-- Rust toolchain (stable)
-- A writable project directory for `.cgrep/` index files
-
-## Install from source
+## Quick Install (Recommended)
 
 ```bash
-cargo install --path .
+curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh | bash
 ```
 
-## Install from GitHub release (recommended for most users)
+## Choose Your Install Path
+
+### 1) Release binary (most users)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh \
-  | bash
+curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh | bash
 ```
 
-Pin a specific version:
+Pin a version:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh \
   | bash -s -- --version <tag>
 ```
 
-Custom install directory:
+Custom binary directory:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh \
   | bash -s -- --bin-dir ~/.local/bin
 ```
 
-## Build manually
+### 2) Install from source
+
+Prerequisite: Rust stable toolchain
+
+```bash
+cargo install --path .
+```
+
+### 3) Build manually
 
 ```bash
 cargo build --release
 cp target/release/cgrep ~/.local/bin/
 ```
 
-## Manual release asset verification
-
-```bash
-# Example (macOS Apple Silicon)
-TAG=v1.4.6
-ASSET="cgrep-${TAG}-aarch64-apple-darwin.tar.gz"
-curl -LO "https://github.com/meghendra6/cgrep/releases/download/${TAG}/${ASSET}"
-curl -LO "https://github.com/meghendra6/cgrep/releases/download/${TAG}/${ASSET}.sha256"
-shasum -a 256 -c "${ASSET}.sha256"
-```
-
-## macOS Gatekeeper note
-
-Downloaded binaries can be quarantined by the browser.
-
-```bash
-xattr -d com.apple.quarantine ~/.local/bin/cgrep
-```
-
-## Verify install
+## Verify Install
 
 ```bash
 cgrep --help
 ```
 
-## First-time setup
+## First Run In A Repository
 
 ```bash
-# Build initial index in your repository
 cgrep index
+cgrep s "token validation" src/
+```
 
-# Optional: generate shell completions
+## Optional: Shell Completions
+
+```bash
 cgrep completions zsh
+```
+
+## macOS Gatekeeper Note
+
+If macOS blocks a downloaded binary:
+
+```bash
+xattr -d com.apple.quarantine ~/.local/bin/cgrep
+```
+
+## Manual Release Asset Verification
+
+```bash
+TAG=v1.4.6
+ASSET="cgrep-${TAG}-aarch64-apple-darwin.tar.gz"
+curl -LO "https://github.com/meghendra6/cgrep/releases/download/${TAG}/${ASSET}"
+curl -LO "https://github.com/meghendra6/cgrep/releases/download/${TAG}/${ASSET}.sha256"
+shasum -a 256 -c "${ASSET}.sha256"
 ```

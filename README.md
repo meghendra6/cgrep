@@ -1,156 +1,115 @@
 # cgrep
 
-`grep` finds text. `cgrep` finds code intent.
+Code search for humans and AI coding agents.
 
-Built for humans and AI agents working in real repositories.
-Current release: **v1.4.6**.
+`grep` finds lines. `cgrep` finds code intent.
 
-`cgrep` combines:
-- BM25 full-text search (Tantivy)
-- AST symbol extraction (tree-sitter)
-- optional semantic/hybrid search with embeddings
-- deterministic JSON output for tool/agent workflows
+- Local-first: no cloud index required
+- Code-aware navigation: `definition`, `references`, `callers`, `dependents`, `map`, `read`
+- Agent-ready output: deterministic `json2` + compact mode
+- Proven efficiency on PyTorch retrieval workflows (large token and latency reductions)
 
-Everything runs locally.
+## Why It Stands Out
 
-## Why Teams Choose cgrep
-
-- Proven on large codebases: in PyTorch scenario-completion workflows, cgrep cut tokens-to-complete by **95.2%** (**20.79x**) and reduced retrieval loop latency by about **59.5x** after indexing.
-- Get answers, not just matching lines: `definition`, `references`, `callers`, `dependents`, `map`, `read`.
-- Keep AI-agent loops small with `agent locate` + `agent expand` and compact `json2` output.
-- Ergonomic CLI shortcuts: `s`, `d`, `r`, `c`, `dep`, `i`, `a l`, plus short flags like `-u`, `-M`, `-B`, `-P`.
-- One-step agent installs now auto-wire MCP for `codex`, `claude-code`, `copilot`, and `cursor`.
-- Stay local-first for speed and privacy (no cloud index required).
-- Scale safely on large repos with indexing, watch/daemon, and MCP server mode.
-
-## grep vs cgrep (Practical)
-
-| You need to... | Plain grep workflow | cgrep workflow |
+| Problem | Typical flow | cgrep flow |
 |---|---|---|
-| Find where logic is implemented | Iterate patterns + open many files manually | `cgrep definition/references/callers` directly |
-| Feed context to AI coding agents | Large, noisy payloads | Budgeted, structured payloads (`agent`, `json2`) |
-| Keep retrieval stable over time | Ad-hoc scripts per repo | Built-in index/watch/daemon + MCP integration |
+| Locate real implementation points | repeat grep + manual file opens | `search -> definition/references -> read` |
+| Keep agent loops small | noisy context payloads | `agent locate -> agent expand` |
+| Maintain stable retrieval in large repos | ad-hoc scripts | index/watch/daemon + MCP server |
 
-## From grep/rg in 30 seconds
+## 60-Second Quick Start
 
-```bash
-# grep -R "token validation" src/
-cgrep search "token validation" src/
-
-# grep/rg + manual file-open loop
-cgrep d handle_auth
-cgrep r UserService -M auto
-cgrep read src/auth.rs
-cgrep map --depth 2
-```
-
-- Use `cgrep search` (or `cgrep s`) for text search.
-- grep-style options remain available: `cgrep search -r --no-ignore "query" src/`.
-- You can place search options before query (e.g., `cgrep search -r --include '**/*.rs' needle src/`).
-- If query starts with `-`, use `--` after `search` (e.g., `cgrep search -- --literal`).
-- Scope flags are grep-friendly: `-r/--recursive`, `--no-recursive`, `--include`, `--exclude-dir`.
-- Case flags follow grep expectations: `-i/--ignore-case` or `--case-sensitive`.
-- `--no-ignore` forces scan mode and disables `.gitignore`/`.ignore` filtering during scan.
-- Use `-p <path>` when you prefer explicit path flags.
-
-## Benchmark Snapshot (PyTorch)
-
-- Measured on February 17, 2026 across 6 AI-coding scenarios (implementation/structure tracing on PyTorch).
-- Completion model: iterative retrieval loops run until each scenario’s completion criteria is satisfied.
-- One-time index build: **5.11s**.
-
-| Metric | Baseline (`grep`) | cgrep (`agent locate/expand`) | Improvement |
-|---|---:|---:|---:|
-| Total tokens-to-complete | 128,042 | 6,159 | **95.2% less** |
-| Avg tokens-to-complete per task | 21,340 | 1,027 | **20.79x smaller** |
-| Avg retrieval latency to completion | 1,287.7 ms | 21.7 ms | **~59.5x faster** |
-
-- Practical meaning: for the same completed scenarios, cgrep used only **4.8%** of the token volume of a plain `grep` workflow.
-- Full methodology and raw data: `docs/benchmarks/pytorch-agent-token-efficiency.md`.
-- Real Codex-agent benchmark (provider telemetry): `docs/benchmarks/pytorch-codex-agent-efficiency.md`.
-
-## Codex Real-Agent Snapshot (PyTorch)
-
-- Measured on February 17, 2026 with `gpt-5-codex`, reasoning effort `medium`, `runs=2`.
-
-| Metric | Baseline | cgrep | Notes |
-|---|---:|---:|---|
-| Success rate (all cases) | 91.7% | 100.0% | strict command-policy validation enabled (one baseline timeout) |
-| Total billable tokens (all cases) | 167,409 | 89,967 | cgrep **46.3% less** |
-
-- Detailed run log and per-scenario breakdown: `docs/benchmarks/pytorch-codex-agent-efficiency.md`.
-
-## Install
+### For Users
 
 ```bash
-# Option 1: install latest GitHub release binary (macOS/Linux)
-curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh \
-  | bash
+# 1) Install (release binary)
+curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh | bash
 
-# Option 2: install from source
-cargo install --path .
-
-# Option 3: build manually
-cargo build --release
-cp target/release/cgrep ~/.local/bin/
-```
-
-macOS note:
-- If Gatekeeper blocks first launch for a downloaded binary, run:
-  `xattr -d com.apple.quarantine ~/.local/bin/cgrep`
-
-Detailed setup: `docs/installation.md`
-
-## Quick Start
-
-```bash
-# Build index once (recommended)
+# 2) Build index once per repo
 cgrep index
 
-# Core 5 commands
-cgrep search "authentication flow" src/
-cgrep definition handle_auth
-cgrep references UserService --mode auto
+# 3) Search and navigate
+cgrep s "token validation" src/
+cgrep d handle_auth
+cgrep r UserService
 cgrep read src/auth.rs
-cgrep map --depth 2
 ```
 
-Shortcut-first equivalents:
+### For AI Agents
 
 ```bash
-cgrep i                       # index
-cgrep s "authentication flow" # search
-cgrep d handle_auth           # definition
-cgrep r UserService           # references
-cgrep c validate_token        # callers
-cgrep dep src/auth.rs         # dependents
-```
+# Install agent guidance + MCP wiring
+cgrep agent install codex
 
-Agent workflow example:
-
-```bash
+# Token-efficient retrieval
 ID=$(cgrep agent locate "where token validation happens" --compact | jq -r '.results[0].id')
 cgrep agent expand --id "$ID" -C 8 --compact
 ```
 
+## Search UX (grep-friendly, explicit)
+
+Use explicit search entrypoints:
+- `cgrep search "query" [path]`
+- `cgrep s "query" [path]`
+
+Common grep-style options are supported:
+- `-r/--recursive`, `--no-recursive`
+- `--include`, `--exclude-dir`
+- `--no-ignore`
+- `-i/--ignore-case`, `--case-sensitive`
+
+Notes:
+- If query text starts with `-`, pass `--` after `search`.
+  Example: `cgrep search -- --literal`
+- Direct shorthand `cgrep "query"` is intentionally not used.
+
+## Core Commands
+
+```bash
+cgrep search "authentication flow" src/
+cgrep symbols UserService
+cgrep definition handleAuth
+cgrep callers validateToken
+cgrep references UserService
+cgrep dependents src/auth.rs
+cgrep read src/auth.rs
+cgrep map --depth 2
+```
+
+Shortcut aliases:
+
+```bash
+cgrep s "query"      # search
+cgrep d name          # definition
+cgrep r name          # references
+cgrep c function      # callers
+cgrep dep file        # dependents
+cgrep i               # index
+cgrep a l "query"     # agent locate
+```
+
+## Benchmarks
+
+PyTorch scenario-completion benchmark snapshots:
+- Agent token-efficiency benchmark: `docs/benchmarks/pytorch-agent-token-efficiency.md`
+- Codex real-agent benchmark: `docs/benchmarks/pytorch-codex-agent-efficiency.md`
+
 ## Documentation
 
-- Docs hub (GitHub): `docs/index.md`
-- Docs site: <https://meghendra6.github.io/cgrep/>
+- Docs hub: `docs/index.md`
 - Korean docs: `docs/ko/index.md`
-- Getting started: `docs/installation.md`
-- CLI usage and search options: `docs/usage.md`
-- Agent workflow and integration install: `docs/agent.md`
-- MCP server and harness guidance: `docs/mcp.md`
-- Indexing, watch, and daemon: `docs/indexing-watch.md`
+- Installation: `docs/installation.md`
+- Usage: `docs/usage.md`
+- Agent workflow: `docs/agent.md`
+- MCP integration: `docs/mcp.md`
+- Indexing/watch/daemon: `docs/indexing-watch.md`
 - Configuration: `docs/configuration.md`
 - Embeddings mode: `docs/embeddings.md`
-- Agent token benchmark: `docs/benchmarks/pytorch-agent-token-efficiency.md`
-- Codex real-agent benchmark: `docs/benchmarks/pytorch-codex-agent-efficiency.md`
 - Troubleshooting: `docs/troubleshooting.md`
-- Development and validation: `docs/development.md`
+- Development: `docs/development.md`
 
-## Notes
+## Project Notes
 
+- Current release: **v1.4.6**
 - Changelog: `CHANGELOG.md`
 - Comparison material: `COMPARISON.md`
