@@ -108,7 +108,16 @@ fn resolve_root(cwd: &Path, raw_path: Option<&str>) -> PathBuf {
 }
 
 fn display_root(cwd: &Path, root: &Path) -> String {
-    root.strip_prefix(cwd).unwrap_or(root).display().to_string()
+    if cwd != Path::new("/") {
+        if let Ok(rel) = root.strip_prefix(cwd) {
+            if rel.as_os_str().is_empty() {
+                return ".".to_string();
+            }
+            return rel.display().to_string();
+        }
+    }
+
+    root.display().to_string()
 }
 
 fn to_json_entries(entries: &[MapEntryData]) -> Vec<MapEntry> {

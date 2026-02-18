@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use assert_cmd::Command;
+use predicates::str::contains;
 use serde_json::Value;
 use std::fs;
 use tempfile::TempDir;
@@ -79,6 +80,18 @@ fn read_section_line_range_returns_subset() {
 }
 
 #[test]
+fn read_empty_path_is_rejected() {
+    let dir = TempDir::new().expect("tempdir");
+
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    cmd.current_dir(dir.path())
+        .args(["--format", "json", "read", ""])
+        .assert()
+        .failure()
+        .stderr(contains("Path cannot be empty"));
+}
+
+#[test]
 fn map_json2_includes_symbols() {
     let dir = TempDir::new().expect("tempdir");
     write_file(&dir.path().join("src/a.rs"), "pub fn alpha() {}\n");
@@ -105,4 +118,47 @@ fn map_json2_includes_symbols() {
         .expect("src/a.rs entry");
     let symbols = a_rs["symbols"].as_array().expect("symbols");
     assert!(symbols.iter().any(|name| name == "alpha"));
+}
+
+#[test]
+fn map_dot_root_reports_dot() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join("src/a.rs"), "pub fn alpha() {}\n");
+
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let assert = cmd
+        .current_dir(dir.path())
+        .args(["--format", "json", "--compact", "map", "-p", ".", "--depth", "1"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
+    let json: Value = serde_json::from_str(&stdout).expect("json");
+    assert_eq!(json["root"], ".");
+}
+
+#[test]
+fn map_absolute_root_preserves_leading_slash() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join("src/a.rs"), "pub fn alpha() {}\n");
+
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let assert = cmd
+        .current_dir("/")
+        .args([
+            "--format",
+            "json",
+            "--compact",
+            "map",
+            "-p",
+            dir.path().to_string_lossy().as_ref(),
+            "--depth",
+            "1",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
+    let json: Value = serde_json::from_str(&stdout).expect("json");
+    assert_eq!(json["root"], dir.path().to_string_lossy().as_ref());
 }

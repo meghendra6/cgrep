@@ -113,3 +113,59 @@ def run():
     assert_eq!(results[0]["line"], 6);
     assert_eq!(results[0]["code"], "target()");
 }
+
+#[test]
+fn references_file_scope_paths_roundtrip_to_read() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(
+        &dir.path().join("src/install/codex.rs"),
+        r#"
+fn resolve_cgrep_command() -> String {
+    "cgrep".to_string()
+}
+
+fn mcp_section() {
+    let _cmd = resolve_cgrep_command();
+}
+"#,
+    );
+
+    let mut refs_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let refs_assert = refs_cmd
+        .current_dir(dir.path())
+        .args([
+            "--format",
+            "json",
+            "--compact",
+            "references",
+            "resolve_cgrep_command",
+            "-p",
+            "src/install/codex.rs",
+            "--mode",
+            "regex",
+        ])
+        .assert()
+        .success();
+    let refs_stdout = String::from_utf8(refs_assert.get_output().stdout.clone()).expect("utf8");
+    let refs_json: Value = serde_json::from_str(&refs_stdout).expect("json");
+    let results = refs_json.as_array().expect("array");
+    assert!(!results.is_empty());
+    for result in results {
+        let path = result["path"].as_str().expect("path");
+        assert_eq!(path, "src/install/codex.rs");
+    }
+
+    let read_path = results[0]["path"].as_str().expect("read path");
+    let mut read_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let read_assert = read_cmd
+        .current_dir(dir.path())
+        .args(["--format", "json", "read", read_path])
+        .assert()
+        .success();
+    let read_stdout = String::from_utf8(read_assert.get_output().stdout.clone()).expect("utf8");
+    let read_json: Value = serde_json::from_str(&read_stdout).expect("json");
+    assert!(read_json["content"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("resolve_cgrep_command"));
+}

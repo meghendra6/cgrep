@@ -84,6 +84,10 @@ pub fn run(
     format: OutputFormat,
     compact: bool,
 ) -> Result<()> {
+    if path.trim().is_empty() {
+        bail!("Path cannot be empty");
+    }
+
     let cwd = std::env::current_dir().context("Cannot determine current directory")?;
     let absolute = resolve_path(&cwd, path);
     if !absolute.exists() {
@@ -153,7 +157,16 @@ fn resolve_path(cwd: &Path, raw_path: &str) -> PathBuf {
 }
 
 fn display_path(cwd: &Path, path: &Path) -> String {
-    path.strip_prefix(cwd).unwrap_or(path).display().to_string()
+    if cwd != Path::new("/") {
+        if let Ok(rel) = path.strip_prefix(cwd) {
+            if rel.as_os_str().is_empty() {
+                return ".".to_string();
+            }
+            return rel.display().to_string();
+        }
+    }
+
+    path.display().to_string()
 }
 
 fn render_directory(cwd: &Path, path: &Path) -> Result<ReadRender> {

@@ -293,6 +293,10 @@ pub fn run(
     let start_time = Instant::now();
     let use_color = use_colors() && format == OutputFormat::Text;
 
+    if query.trim().is_empty() {
+        anyhow::bail!("Search query cannot be empty");
+    }
+
     // Precompile glob patterns for efficient repeated matching
     let compiled_glob = glob_pattern.and_then(CompiledGlob::new);
     let compiled_exclude = exclude_pattern.and_then(CompiledGlob::new);
@@ -1103,6 +1107,7 @@ fn collect_index_candidates(
     changed_filter: Option<&ChangedFiles>,
     recursive: bool,
     fuzzy: bool,
+    case_sensitive: bool,
 ) -> Result<Vec<IndexCandidate>> {
     let index_path = index_root.join(INDEX_DIR);
     if !index_path.exists() {
@@ -1138,6 +1143,13 @@ fn collect_index_candidates(
         .context("Missing line_number field")?;
     let path_exact_field = schema.get_field("path_exact").ok();
 
+    let literal_query = !fuzzy && query_requires_literal_handling(query);
+    let query_for_parser = if literal_query {
+        escape_as_query_phrase(query)
+    } else {
+        query.to_string()
+    };
+
     let text_query: Box<dyn tantivy::query::Query> = if fuzzy {
         let terms: Vec<&str> = query.split_whitespace().collect();
         if terms.is_empty() {
@@ -1163,7 +1175,7 @@ fn collect_index_candidates(
             QueryParser::for_index(&index, vec![content_field, symbols_field, path_field]);
         query_parser.set_field_boost(symbols_field, 2.5);
         query_parser.set_field_boost(path_field, 0.3);
-        let (parsed_query, _errors) = query_parser.parse_query_lenient(query);
+        let (parsed_query, _errors) = query_parser.parse_query_lenient(&query_for_parser);
         parsed_query
     };
 
@@ -1236,6 +1248,19 @@ fn collect_index_candidates(
             .get_first(symbols_field)
             .and_then(|v| v.as_str())
             .unwrap_or("");
+
+        let enforce_literal_filter = literal_query || (case_sensitive && !fuzzy);
+        if enforce_literal_filter
+            && !matches_literal_query(
+                content_value,
+                symbols_value,
+                path_value,
+                query,
+                case_sensitive,
+            )
+        {
+            continue;
+        }
 
         let line_offset = doc
             .get_first(line_offset_field)
@@ -1342,7 +1367,12 @@ fn keyword_search(
     use_cache: bool,
     cache_ttl_ms: u64,
 ) -> Result<SearchOutcome> {
-    let use_index = requested_mode == IndexMode::Index && index_path.exists();
+    let force_scan_for_literal_query = requested_mode == IndexMode::Index
+        && regex.is_none()
+        && !fuzzy
+        && should_force_scan_for_literal_query(query);
+    let use_index =
+        requested_mode == IndexMode::Index && index_path.exists() && !force_scan_for_literal_query;
     if requested_mode == IndexMode::Index && !index_path.exists() {
         eprintln!(
             "Index not found at {}. Falling back to scan mode.",
@@ -1358,11 +1388,7 @@ fn keyword_search(
     let normalized_query = if regex.is_some() {
         query.to_string()
     } else {
-        normalize_query(
-            query,
-            effective_mode == IndexMode::Index || !case_sensitive,
-            effective_mode == IndexMode::Index,
-        )
+        normalize_query(query, !case_sensitive, effective_mode == IndexMode::Index)
     };
     let changed_component = changed_filter
         .map(|f| format!("{}:{}", f.rev(), f.signature()))
@@ -1419,6 +1445,7 @@ fn keyword_search(
             config_exclude_patterns,
             changed_filter,
             fuzzy,
+            case_sensitive,
             recursive,
         )?
     } else {
@@ -1473,6 +1500,75 @@ fn query_tokens_for_ranking(query: &str) -> Vec<String> {
         .filter(|t| t.len() >= 3)
         .map(|t| t.to_ascii_lowercase())
         .collect()
+}
+
+fn query_requires_literal_handling(query: &str) -> bool {
+    query.chars().any(is_query_parser_metachar)
+}
+
+fn should_force_scan_for_literal_query(query: &str) -> bool {
+    query_requires_literal_handling(query) && !has_index_seed_token(query)
+}
+
+fn has_index_seed_token(query: &str) -> bool {
+    query
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .map(str::trim)
+        .any(|token| token.len() >= 2)
+}
+
+fn is_query_parser_metachar(ch: char) -> bool {
+    matches!(
+        ch,
+        '+' | '-'
+            | '!'
+            | '('
+            | ')'
+            | '{'
+            | '}'
+            | '['
+            | ']'
+            | '^'
+            | '"'
+            | '~'
+            | '*'
+            | '?'
+            | ':'
+            | '\\'
+            | '/'
+    )
+}
+
+fn escape_as_query_phrase(query: &str) -> String {
+    let mut out = String::with_capacity(query.len() + 2);
+    out.push('"');
+    for ch in query.chars() {
+        if ch == '"' || ch == '\\' {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out.push('"');
+    out
+}
+
+fn matches_literal_query(
+    content: &str,
+    symbols: &str,
+    path: &str,
+    query: &str,
+    case_sensitive: bool,
+) -> bool {
+    literal_contains(content, query, case_sensitive)
+        || literal_contains(symbols, query, case_sensitive)
+        || literal_contains(path, query, case_sensitive)
+}
+
+fn literal_contains(text: &str, query: &str, case_sensitive: bool) -> bool {
+    if case_sensitive {
+        return text.contains(query);
+    }
+    text.to_ascii_lowercase().contains(&query.to_ascii_lowercase())
 }
 
 fn single_identifier_query(query: &str) -> Option<String> {
@@ -1676,6 +1772,7 @@ fn index_search(
     config_exclude_patterns: &[CompiledGlob],
     changed_filter: Option<&ChangedFiles>,
     fuzzy: bool,
+    case_sensitive: bool,
     recursive: bool,
 ) -> Result<SearchOutcome> {
     let candidates = collect_index_candidates(
@@ -1692,6 +1789,7 @@ fn index_search(
         changed_filter,
         recursive,
         fuzzy,
+        case_sensitive,
     )?;
 
     let mut files_with_matches: HashSet<String> = HashSet::new();
@@ -1753,7 +1851,7 @@ fn scan_search(
     recursive: bool,
     no_ignore: bool,
 ) -> Result<SearchOutcome> {
-    if regex.is_none() && query.is_empty() {
+    if query.trim().is_empty() {
         anyhow::bail!("Search query cannot be empty");
     }
 
@@ -1819,11 +1917,7 @@ fn scan_search(
                 total_matches += 1;
 
                 let trimmed = line.trim();
-                let snippet = if trimmed.len() <= 150 {
-                    trimmed.to_string()
-                } else {
-                    format!("{}...", &trimmed[..150])
-                };
+                let snippet = truncate_with_ellipsis(trimmed, 150);
 
                 results.push(SearchResult {
                     path: display_path.clone(),
@@ -1863,11 +1957,7 @@ fn scan_search(
                 total_matches += 1;
 
                 let trimmed = line.trim();
-                let snippet = if trimmed.len() <= 150 {
-                    trimmed.to_string()
-                } else {
-                    format!("{}...", &trimmed[..150])
-                };
+                let snippet = truncate_with_ellipsis(trimmed, 150);
 
                 let (context_before, context_after) =
                     get_context_from_lines(&lines, idx + 1, context);
@@ -2049,6 +2139,7 @@ fn hybrid_search(
         config_exclude_patterns,
         changed_filter,
         recursive,
+        false,
         false,
     )?;
 
@@ -2582,6 +2673,7 @@ mod tests {
             &[],
             None,
             false,
+            false,
             true,
         )
         .expect("index search");
@@ -2623,6 +2715,7 @@ mod tests {
             &[],
             None,
             false,
+            false,
             true,
         )
         .expect("index search");
@@ -2657,6 +2750,7 @@ mod tests {
             None,
             &[],
             None,
+            false,
             false,
             false,
         )
@@ -2694,6 +2788,7 @@ mod tests {
             None,
             &[],
             None,
+            false,
             false,
             true,
         )
