@@ -126,6 +126,6 @@ PyTorch scenario-completion benchmark snapshots:
 
 ## Project Notes
 
-- Current release: **v1.4.6**
+- Current release: **v1.4.7**
 - Changelog: `CHANGELOG.md`
 - Comparison material: `COMPARISON.md`

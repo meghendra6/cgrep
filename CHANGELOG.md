@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.7] - 2026-02-18
+
+### Changed
+- Search UX is now consistently explicit and grep-friendly: use `cgrep search`/`cgrep s` with positional scope (`[path]`) and familiar scope flags.
+- Agent install guidance was compacted and unified so providers share the same low-token `map -> search -> read -> symbol` core flow.
+- Documentation (README + docs site, EN/KO) was refactored for readability and consistency, including clearer `read`/`map` guidance and Codex-vs-MCP install separation.
+- Codex PyTorch benchmark snapshots were refreshed to the latest re-run (`233,825` -> `134,432`, `42.5%` billable-token reduction).
+
+### Fixed
+- MCP search/read round-trip reliability: search result paths are reusable across workspace-internal and external scopes, and empty path artifacts were removed.
+- MCP path resolution stability in agent environments: optional `cwd` handling and bounded MCP tool execution now prevent root-scan accidents and host-timeout hangs.
+- Dash-prefixed query handling now stays literal in MCP search flows, and query/path validation was hardened (`empty/whitespace` query rejection and empty `read` path rejection).
+- Scan-mode snippet extraction no longer panics on invalid UTF-8 slices.
+
 ## [1.4.6] - 2026-02-17
 
 ### Changed

@@ -71,7 +71,7 @@ xattr -d com.apple.quarantine ~/.local/bin/cgrep
 ## 릴리즈 자산 수동 검증
 
 ```bash
-TAG=v1.4.6
+TAG=v1.4.7
 ASSET="cgrep-${TAG}-aarch64-apple-darwin.tar.gz"
 curl -LO "https://github.com/meghendra6/cgrep/releases/download/${TAG}/${ASSET}"
 curl -LO "https://github.com/meghendra6/cgrep/releases/download/${TAG}/${ASSET}.sha256"

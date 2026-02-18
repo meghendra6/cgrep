@@ -2,7 +2,12 @@
 
 Local-first code search and navigation for users and AI agents.
 
-Current release: **v1.4.6**
+Current release: **v1.4.7**
+
+v1.4.7 highlights:
+- Search and MCP UX are now stricter and more predictable for both users and coding agents.
+- MCP reliability fixes cover literal dash queries, cwd-scoped path resolution, and round-trip-safe search paths.
+- Docs and benchmark snapshots were refreshed to the latest Codex PyTorch rerun.
 
 ## Start By Goal
 
