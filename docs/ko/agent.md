@@ -54,10 +54,14 @@ cgrep agent uninstall opencode
 
 설치 시 MCP 자동 연동:
 - `agent install claude-code`는 `claude-code` host MCP 설정도 함께 적용합니다.
-- `agent install codex`는 `~/.codex/config.toml`의 `[mcp_servers.cgrep]`를 자동 보정합니다.
+- `agent install codex`는 `~/.codex/config.toml`의 `[mcp_servers.cgrep]`를 자동 보정하며, `command = "cgrep"`, `args = ["mcp", "serve"]`, startup timeout을 명시합니다.
 - `agent install copilot`는 `vscode` host MCP 설정(`.vscode/mcp.json`)도 함께 적용합니다.
 - `agent install cursor`는 `.cursor/rules/cgrep.mdc` 생성 + `cursor` host MCP 설정을 함께 적용합니다.
 - `agent install opencode`는 OpenCode tool 파일만 생성합니다.
+
+Codex 런타임 참고:
+- `agent install codex` 후에는 현재 Codex 세션을 재시작해 MCP 설정을 다시 로드하세요.
+- `agent uninstall codex`는 `~/.codex/AGENTS.md`의 skill 블록과 `~/.codex/config.toml`의 `[mcp_servers.cgrep]` 블록을 함께 제거합니다.
 
 ## instruction/skill 파일 생성 위치
 

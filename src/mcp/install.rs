@@ -26,23 +26,11 @@ fn required_home_dir() -> Result<PathBuf> {
     dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))
 }
 
-fn is_cgrep_binary(path: &std::path::Path) -> bool {
-    path.file_stem()
-        .and_then(|stem| stem.to_str())
-        .map(|stem| stem.eq_ignore_ascii_case("cgrep"))
-        .unwrap_or(false)
-}
-
 fn resolve_cgrep_command() -> String {
-    if let Ok(found) = which::which("cgrep") {
-        if is_cgrep_binary(&found) {
-            return found.to_string_lossy().to_string();
-        }
-    }
-
-    if let Ok(exe) = std::env::current_exe() {
-        if is_cgrep_binary(&exe) {
-            return exe.to_string_lossy().to_string();
+    if let Ok(value) = std::env::var("CGREP_MCP_COMMAND") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
         }
     }
 

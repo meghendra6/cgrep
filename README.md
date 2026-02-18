@@ -62,11 +62,14 @@ Notes:
 - If query text starts with `-`, pass `--` after `search`.
   Example: `cgrep search -- --literal`
 - Direct shorthand `cgrep "query"` is intentionally not used.
-- `search` result `path` is workspace-relative, so you can pass it directly to `cgrep read`.
+- `search` result `path` is always reusable:
+  workspace-internal scopes return workspace-relative paths, and external scopes return absolute paths.
 
 For MCP usage:
 - `cgrep_search` treats dash-prefixed queries as literal text automatically.
 - Pass optional `cwd` in MCP tool arguments to pin relative-path resolution.
+- After `cgrep agent install codex`, restart the current Codex session so updated MCP config is reloaded.
+- MCP install writes `command = "cgrep"` by default, so future cgrep binary updates apply without reinstalling MCP config.
 
 ## Core Commands
 
