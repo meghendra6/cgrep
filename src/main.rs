@@ -120,6 +120,114 @@ fn uninstall_for_provider(provider: AgentProvider) -> Result<()> {
     }
 }
 
+fn is_known_top_level_command(token: &str) -> bool {
+    matches!(
+        token,
+        "search"
+            | "s"
+            | "find"
+            | "q"
+            | "read"
+            | "rd"
+            | "cat"
+            | "view"
+            | "map"
+            | "mp"
+            | "tree"
+            | "agent"
+            | "a"
+            | "daemon"
+            | "bg"
+            | "mcp"
+            | "symbols"
+            | "sym"
+            | "sy"
+            | "definition"
+            | "def"
+            | "d"
+            | "callers"
+            | "calls"
+            | "c"
+            | "references"
+            | "refs"
+            | "r"
+            | "dependents"
+            | "deps"
+            | "dep"
+            | "index"
+            | "ix"
+            | "i"
+            | "watch"
+            | "wt"
+            | "w"
+            | "completions"
+            | "help"
+            | "install-claude-code"
+            | "uninstall-claude-code"
+            | "install-codex"
+            | "uninstall-codex"
+            | "install-copilot"
+            | "uninstall-copilot"
+            | "install-opencode"
+            | "uninstall-opencode"
+    )
+}
+
+fn rewrite_args_for_search_shorthand(raw_args: &[String]) -> Option<Vec<String>> {
+    if raw_args.len() <= 1 {
+        return None;
+    }
+
+    let mut idx = 1usize;
+    while idx < raw_args.len() {
+        let token = raw_args[idx].as_str();
+        if token == "--" {
+            return None;
+        }
+
+        match token {
+            "--format" => {
+                if idx + 1 >= raw_args.len() {
+                    return None;
+                }
+                idx += 2;
+                continue;
+            }
+            "--compact" => {
+                idx += 1;
+                continue;
+            }
+            "-h" | "--help" | "-V" | "--version" => return None,
+            _ => {}
+        }
+
+        if is_known_top_level_command(token) {
+            return None;
+        }
+
+        let mut rewritten = raw_args.to_vec();
+        rewritten.insert(idx, "search".to_string());
+        return Some(rewritten);
+    }
+
+    None
+}
+
+fn parse_cli_with_search_shorthand() -> Cli {
+    let raw_args: Vec<String> = std::env::args().collect();
+    match Cli::try_parse_from(raw_args.clone()) {
+        Ok(cli) => cli,
+        Err(parse_err) => {
+            if let Some(rewritten) = rewrite_args_for_search_shorthand(&raw_args) {
+                if let Ok(cli) = Cli::try_parse_from(rewritten) {
+                    return cli;
+                }
+            }
+            parse_err.exit();
+        }
+    }
+}
+
 fn main() -> Result<()> {
     // Initialize tracing with CGREP_LOG env var (e.g., CGREP_LOG=debug cgrep search "query")
     tracing_subscriber::fmt()
@@ -128,7 +236,7 @@ fn main() -> Result<()> {
         )
         .init();
 
-    let cli = Cli::parse();
+    let cli = parse_cli_with_search_shorthand();
     let global_config = cgrep::config::Config::load();
     let default_format = global_config
         .output_format()
@@ -143,6 +251,9 @@ fn main() -> Result<()> {
             query,
             path_positional,
             path,
+            recursive: _,
+            no_recursive,
+            no_ignore,
             limit,
             context,
             file_type,
@@ -179,6 +290,7 @@ fn main() -> Result<()> {
             let query = query.ok_or_else(|| {
                 anyhow::anyhow!("search query is required (use `cgrep search --help`)")
             })?;
+            let effective_recursive = !no_recursive;
             let effective_path = path.as_deref().or(path_positional.as_deref());
             let config = effective_path
                 .map(cgrep::config::Config::load_for_dir)
@@ -277,6 +389,8 @@ fn main() -> Result<()> {
                 no_index,
                 regex,
                 case_sensitive,
+                effective_recursive,
+                no_ignore,
                 effective_format,
                 compact,
                 effective_mode,
@@ -334,6 +448,8 @@ fn main() -> Result<()> {
                     false,
                     false,
                     false,
+                    false,
+                    true,
                     false,
                     cli::OutputFormat::Json2,
                     compact,
@@ -534,4 +650,105 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rewrite_args_for_search_shorthand;
+
+    #[test]
+    fn rewrites_direct_query_and_path_to_search_command() {
+        let raw = vec![
+            "cgrep".to_string(),
+            "token validation".to_string(),
+            "src".to_string(),
+        ];
+        let rewritten = rewrite_args_for_search_shorthand(&raw).expect("rewritten");
+        assert_eq!(
+            rewritten,
+            vec![
+                "cgrep".to_string(),
+                "search".to_string(),
+                "token validation".to_string(),
+                "src".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn rewrites_after_global_flags() {
+        let raw = vec![
+            "cgrep".to_string(),
+            "--format".to_string(),
+            "json".to_string(),
+            "--compact".to_string(),
+            "needle".to_string(),
+            "src".to_string(),
+            "--no-index".to_string(),
+        ];
+        let rewritten = rewrite_args_for_search_shorthand(&raw).expect("rewritten");
+        assert_eq!(
+            rewritten,
+            vec![
+                "cgrep".to_string(),
+                "--format".to_string(),
+                "json".to_string(),
+                "--compact".to_string(),
+                "search".to_string(),
+                "needle".to_string(),
+                "src".to_string(),
+                "--no-index".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn does_not_rewrite_known_command() {
+        let raw = vec![
+            "cgrep".to_string(),
+            "search".to_string(),
+            "needle".to_string(),
+        ];
+        assert!(rewrite_args_for_search_shorthand(&raw).is_none());
+    }
+
+    #[test]
+    fn rewrites_when_long_search_flag_is_first_token() {
+        let raw = vec![
+            "cgrep".to_string(),
+            "--no-index".to_string(),
+            "needle".to_string(),
+        ];
+        let rewritten = rewrite_args_for_search_shorthand(&raw).expect("rewritten");
+        assert_eq!(
+            rewritten,
+            vec![
+                "cgrep".to_string(),
+                "search".to_string(),
+                "--no-index".to_string(),
+                "needle".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn rewrites_when_short_search_flag_is_first_token() {
+        let raw = vec![
+            "cgrep".to_string(),
+            "-r".to_string(),
+            "needle".to_string(),
+            "src".to_string(),
+        ];
+        let rewritten = rewrite_args_for_search_shorthand(&raw).expect("rewritten");
+        assert_eq!(
+            rewritten,
+            vec![
+                "cgrep".to_string(),
+                "search".to_string(),
+                "-r".to_string(),
+                "needle".to_string(),
+                "src".to_string(),
+            ]
+        );
+    }
 }

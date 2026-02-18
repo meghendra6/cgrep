@@ -34,7 +34,8 @@
 ## 개선안
 - 공통 코어 지침 + provider 얇은 레이어로 구조를 통합한다.
 - 지침은 핵심 규칙/최소 예시만 남기고 deprecated 표기/중복 옵션표를 제거한다.
-- `cgrep search`에 grep 친화 진입(`grep` alias, positional path)을 추가한다.
+- `cgrep search`에 grep 친화 진입(직접 shorthand, positional path, 옵션 우선 입력)을 추가한다.
+- `-r/--no-recursive`, `--no-ignore`, `--include`, `--exclude-dir` 등 grep 전환 옵션을 단순 노출한다.
 - 문서는 "grep/rg -> cgrep 전환" 섹션을 앞쪽으로 배치해 핵심 5개 명령 중심으로 재구성한다.
 
 ## 기준선 수치 (설치 지침 문자 수, char)

@@ -20,11 +20,12 @@ pub struct ScannedFile {
     pub language: Option<String>,
 }
 
-/// File scanner that respects .gitignore and custom excludes
+/// File scanner that respects ignore files and custom excludes
 pub struct FileScanner {
     root: PathBuf,
     exclude_patterns: Vec<String>,
     respect_git_ignore: bool,
+    recursive: bool,
 }
 
 impl FileScanner {
@@ -33,6 +34,7 @@ impl FileScanner {
             root: root.as_ref().to_path_buf(),
             exclude_patterns: Vec::new(),
             respect_git_ignore: true,
+            recursive: true,
         }
     }
 
@@ -43,20 +45,34 @@ impl FileScanner {
         scanner
     }
 
-    /// Enable or disable respect for git ignore rules
+    /// Enable or disable respect for ignore files (.ignore/.gitignore)
     pub fn with_gitignore(mut self, enabled: bool) -> Self {
         self.respect_git_ignore = enabled;
+        self
+    }
+
+    /// Enable or disable recursive traversal
+    pub fn with_recursive(mut self, enabled: bool) -> Self {
+        self.recursive = enabled;
         self
     }
 
     fn make_builder(&self) -> WalkBuilder {
         let mut builder = WalkBuilder::new(&self.root);
         builder.hidden(false);
+        if !self.recursive {
+            builder.max_depth(Some(1));
+        }
 
         if self.respect_git_ignore {
-            builder.git_ignore(true).git_exclude(true).git_global(true);
+            builder
+                .ignore(true)
+                .git_ignore(true)
+                .git_exclude(true)
+                .git_global(true);
         } else {
             builder
+                .ignore(false)
                 .git_ignore(false)
                 .git_exclude(false)
                 .git_global(false);
@@ -214,8 +230,8 @@ mod tests {
     #[test]
     fn detectable_code_extensions_are_indexable() {
         for ext in [
-            "rs", "ts", "tsx", "js", "jsx", "py", "go", "java", "c", "h", "cpp", "cc", "hpp",
-            "cs", "rb", "php", "swift", "kt", "kts", "scala", "lua",
+            "rs", "ts", "tsx", "js", "jsx", "py", "go", "java", "c", "h", "cpp", "cc", "hpp", "cs",
+            "rb", "php", "swift", "kt", "kts", "scala", "lua",
         ] {
             assert!(is_indexable_extension(ext), "{ext} should be indexable");
         }

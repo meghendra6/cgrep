@@ -4,7 +4,7 @@
 
 | Command | Description |
 |---|---|
-| `cgrep search <query>` (`s`, `find`, `q`) | Full-text search |
+| `cgrep [search] <query> [path]` (`s`, `find`, `q`) | Full-text search (`search` keyword optional) |
 | `cgrep read <path>` (`rd`, `cat`, `view`) | Smart file read (small file full, large file outline) |
 | `cgrep map` (`mp`, `tree`) | Structural codebase map (file + symbol skeleton) |
 | `cgrep symbols <name>` (`sym`, `sy`) | Symbol search |
@@ -23,7 +23,7 @@
 
 ```bash
 # grep -R "token validation" src/
-cgrep search "token validation" src/
+cgrep "token validation" src/
 
 # grep/rg + manual open loop
 cgrep d handle_auth
@@ -32,7 +32,10 @@ cgrep rd src/auth.rs
 cgrep mp -d 2
 ```
 
-- `cgrep grep "query" src/` is supported as a grep-style alias.
+- `cgrep "query" src/` is supported for direct grep-style usage.
+- Direct mode also accepts option-first form: `cgrep -r --include '**/*.rs' needle src/`.
+- grep-style scope flags are supported: `-r/--recursive`, `--no-recursive`, `--include`, `--exclude-dir`.
+- `--no-ignore` includes `.gitignore`/`.ignore`-excluded files (scan mode).
 - `-p <path>` remains available when you prefer explicit path flags.
 
 ## Shortcut-first flow
@@ -54,29 +57,38 @@ cgrep a l "token validation" -B tight -u
 cgrep index
 
 # 2) Core 5 commands
-cgrep search "authentication flow" src/
+cgrep "authentication flow" src/
 cgrep d handle_auth
 cgrep r UserService -M auto
 cgrep rd src/auth.rs
 cgrep mp -d 2
 
 # 3) Optional narrowing / changed-files
-cgrep search "token refresh" -t rust -p src/
-cgrep search "retry logic" -u
+cgrep "token refresh" -t rust -p src/
+cgrep "retry logic" -u
 ```
 
 ## Search guide
+
+`search` keyword is optional. These are equivalent:
+
+```bash
+cgrep "token refresh" src/
+cgrep search "token refresh" src/
+```
 
 Core options:
 
 ```bash
 cgrep search "<query>" \
   -p <path> \
+  -r | --no-recursive \
   -m <limit> \
   -C <context> \
   -t <language> \
-  --glob <pattern> \
-  -x, --exclude <pattern> \
+  --glob|--include <pattern> \
+  -x, --exclude|--exclude-dir <pattern> \
+  --no-ignore \
   -u, --changed [REV] \
   -M, --mode keyword|semantic|hybrid \
   -B, --budget tight|balanced|full|off \
@@ -88,6 +100,7 @@ Examples:
 ```bash
 cgrep search "jwt decode" -m 10
 cgrep s "retry backoff" -u
+cgrep -r --no-ignore "token validation" src/
 cgrep s "controller middleware" -B tight -P agent
 ```
 

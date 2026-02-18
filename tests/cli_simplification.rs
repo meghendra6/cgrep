@@ -44,7 +44,7 @@ fn deprecated_mode_alias_prints_warning() {
 }
 
 #[test]
-fn grep_alias_with_positional_path_filters_scope() {
+fn direct_query_with_positional_path_filters_scope() {
     let dir = TempDir::new().expect("tempdir");
     write_file(&dir.path().join("src/hit.txt"), "needle\n");
     write_file(&dir.path().join("other.txt"), "needle\n");
@@ -52,7 +52,7 @@ fn grep_alias_with_positional_path_filters_scope() {
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
     let assert = cmd
         .current_dir(dir.path())
-        .args(["--format", "json", "grep", "needle", "src", "--no-index"])
+        .args(["--format", "json", "needle", "src", "--no-index"])
         .assert()
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
@@ -72,7 +72,7 @@ fn grep_alias_with_positional_path_filters_scope() {
                 .map(|p| !p.contains("other.txt"))
                 .unwrap_or(false)
         }),
-        "grep alias + positional path should exclude out-of-scope files"
+        "direct query + positional path should exclude out-of-scope files"
     );
 }
 
@@ -88,7 +88,6 @@ fn explicit_path_flag_takes_precedence_over_positional_path() {
         .args([
             "--format",
             "json",
-            "search",
             "needle",
             "a",
             "--path",
@@ -119,6 +118,185 @@ fn explicit_path_flag_takes_precedence_over_positional_path() {
 }
 
 #[test]
+fn no_ignore_allows_ignored_files_in_direct_mode() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join(".ignore"), "ignored.txt\n");
+    write_file(&dir.path().join("ignored.txt"), "needle\n");
+
+    let mut default_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let default_assert = default_cmd
+        .current_dir(dir.path())
+        .args(["--format", "json", "needle", "--no-index"])
+        .assert()
+        .success();
+    let default_stdout =
+        String::from_utf8(default_assert.get_output().stdout.clone()).expect("utf8");
+    let default_json: Value = serde_json::from_str(&default_stdout).expect("json");
+    let default_results = default_json.as_array().expect("array");
+    assert!(
+        default_results.iter().all(|r| {
+            r["path"]
+                .as_str()
+                .map(|p| !p.contains("ignored.txt"))
+                .unwrap_or(true)
+        }),
+        "default scan should respect ignore files"
+    );
+
+    let mut no_ignore_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let no_ignore_assert = no_ignore_cmd
+        .current_dir(dir.path())
+        .args(["--format", "json", "--no-ignore", "needle", "--no-index"])
+        .assert()
+        .success();
+    let no_ignore_stdout =
+        String::from_utf8(no_ignore_assert.get_output().stdout.clone()).expect("utf8");
+    let no_ignore_json: Value = serde_json::from_str(&no_ignore_stdout).expect("json");
+    let no_ignore_results = no_ignore_json.as_array().expect("array");
+    assert!(no_ignore_results.iter().any(|r| {
+        r["path"]
+            .as_str()
+            .map(|p| p.contains("ignored.txt"))
+            .unwrap_or(false)
+    }));
+}
+
+#[test]
+fn no_ignore_forces_scan_even_when_index_exists() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join(".ignore"), "ignored.txt\n");
+    write_file(&dir.path().join("visible.txt"), "needle\n");
+    write_file(&dir.path().join("ignored.txt"), "needle\n");
+
+    let mut index_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    index_cmd
+        .current_dir(dir.path())
+        .args(["index"])
+        .assert()
+        .success();
+
+    let mut indexed_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let indexed_assert = indexed_cmd
+        .current_dir(dir.path())
+        .args(["--format", "json2", "needle"])
+        .assert()
+        .success();
+    let indexed_stdout =
+        String::from_utf8(indexed_assert.get_output().stdout.clone()).expect("utf8");
+    let indexed_json: Value = serde_json::from_str(&indexed_stdout).expect("json");
+    assert_eq!(indexed_json["meta"]["index_mode"], "index");
+
+    let mut no_ignore_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let no_ignore_assert = no_ignore_cmd
+        .current_dir(dir.path())
+        .args(["--format", "json2", "--no-ignore", "needle"])
+        .assert()
+        .success();
+    let no_ignore_stdout =
+        String::from_utf8(no_ignore_assert.get_output().stdout.clone()).expect("utf8");
+    let no_ignore_json: Value = serde_json::from_str(&no_ignore_stdout).expect("json");
+    assert_eq!(no_ignore_json["meta"]["index_mode"], "scan");
+}
+
+#[test]
+fn no_recursive_limits_scope_and_recursive_short_flag_reenables_depth() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join("src/top.txt"), "needle\n");
+    write_file(&dir.path().join("src/nested/deep.txt"), "needle\n");
+
+    let mut shallow_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let shallow_assert = shallow_cmd
+        .current_dir(dir.path())
+        .args([
+            "--format",
+            "json",
+            "needle",
+            "src",
+            "--no-index",
+            "--no-recursive",
+        ])
+        .assert()
+        .success();
+    let shallow_stdout =
+        String::from_utf8(shallow_assert.get_output().stdout.clone()).expect("utf8");
+    let shallow_json: Value = serde_json::from_str(&shallow_stdout).expect("json");
+    let shallow_results = shallow_json.as_array().expect("array");
+    assert!(shallow_results.iter().any(|r| {
+        r["path"]
+            .as_str()
+            .map(|p| p.contains("top.txt"))
+            .unwrap_or(false)
+    }));
+    assert!(
+        shallow_results.iter().all(|r| {
+            r["path"]
+                .as_str()
+                .map(|p| !p.contains("deep.txt"))
+                .unwrap_or(true)
+        }),
+        "--no-recursive should skip nested paths"
+    );
+
+    let mut recursive_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let recursive_assert = recursive_cmd
+        .current_dir(dir.path())
+        .args(["--format", "json", "-r", "needle", "src", "--no-index"])
+        .assert()
+        .success();
+    let recursive_stdout =
+        String::from_utf8(recursive_assert.get_output().stdout.clone()).expect("utf8");
+    let recursive_json: Value = serde_json::from_str(&recursive_stdout).expect("json");
+    let recursive_results = recursive_json.as_array().expect("array");
+    assert!(recursive_results.iter().any(|r| {
+        r["path"]
+            .as_str()
+            .map(|p| p.contains("deep.txt"))
+            .unwrap_or(false)
+    }));
+}
+
+#[test]
+fn include_and_exclude_dir_aliases_work_in_direct_mode() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join("src/keep/hit.rs"), "needle\n");
+    write_file(&dir.path().join("src/skip/hit.rs"), "needle\n");
+    write_file(&dir.path().join("src/keep/ignore.txt"), "needle\n");
+
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let assert = cmd
+        .current_dir(dir.path())
+        .args([
+            "--format",
+            "json",
+            "--include",
+            "**/*.rs",
+            "needle",
+            "src",
+            "--no-index",
+            "--exclude-dir",
+            "skip/**",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
+    let json: Value = serde_json::from_str(&stdout).expect("json");
+    let results = json.as_array().expect("array");
+    assert!(results.iter().any(|r| {
+        r["path"]
+            .as_str()
+            .map(|p| p.contains("keep/hit.rs"))
+            .unwrap_or(false)
+    }));
+    assert!(
+        results.iter().all(|r| {
+            let path = r["path"].as_str().unwrap_or_default();
+            !path.contains("skip/hit.rs") && !path.contains("ignore.txt")
+        }),
+        "--include/--exclude-dir aliases should filter paths like grep/rg users expect"
+    );
+}
+
+#[test]
 fn search_help_includes_grep_transition_examples() {
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
     cmd.args(["search", "--help"])
@@ -127,7 +305,10 @@ fn search_help_includes_grep_transition_examples() {
         .stdout(predicate::str::contains(
             "Optional path (grep-style positional form)",
         ))
-        .stdout(predicate::str::contains("cgrep grep \"auth flow\" src/"));
+        .stdout(predicate::str::contains("--include"))
+        .stdout(predicate::str::contains("--exclude-dir"))
+        .stdout(predicate::str::contains("--no-ignore"))
+        .stdout(predicate::str::contains("cgrep \"token refresh\" src/"));
 }
 
 #[test]
