@@ -297,6 +297,8 @@ pub fn run(
     let compiled_glob = glob_pattern.and_then(CompiledGlob::new);
     let compiled_exclude = exclude_pattern.and_then(CompiledGlob::new);
 
+    let workspace_root =
+        normalize_path(&std::env::current_dir().context("Cannot determine current directory")?);
     let search_root = resolve_search_root(path)?;
 
     // Find index root (may be in parent directory)
@@ -320,10 +322,6 @@ pub fn run(
     let changed_filter = changed
         .map(|rev| ChangedFiles::from_scope(&search_root, rev))
         .transpose()?;
-
-    if using_parent {
-        eprintln!("Using index from: {}", index_root.display());
-    }
 
     let requested_mode = if no_index || regex || no_ignore {
         IndexMode::Scan
@@ -368,6 +366,7 @@ pub fn run(
                 query,
                 &index_root,
                 &search_root,
+                &workspace_root,
                 &config,
                 effective_max_results,
                 context,
@@ -388,6 +387,7 @@ pub fn run(
             query,
             &index_root,
             &search_root,
+            &workspace_root,
             &index_path,
             effective_max_results,
             context,
@@ -408,6 +408,10 @@ pub fn run(
             effective_cache_ttl,
         )?,
     };
+
+    if using_parent && outcome.mode == IndexMode::Index {
+        eprintln!("Using index from: {}", index_root.display());
+    }
 
     let effective_context_pack = context_pack.filter(|v| *v > 0);
     if let Some(pack_gap) = effective_context_pack {
@@ -1089,6 +1093,7 @@ fn collect_index_candidates(
     query: &str,
     index_root: &Path,
     search_root: &Path,
+    workspace_root: &Path,
     max_candidates: usize,
     doc_type: &str,
     file_type: Option<&str>,
@@ -1194,30 +1199,31 @@ fn collect_index_candidates(
             .unwrap_or("unknown");
 
         let full_path = resolve_full_path(path_value, index_root);
-        let Some(display_path) = scoped_display_path(&full_path, search_root) else {
+        let Some(scope_path) = scope_relative_path(&full_path, search_root) else {
             continue;
         };
-        if !recursive && Path::new(&display_path).components().count() > 1 {
+        let display_path = workspace_display_path(&full_path, workspace_root);
+        if !recursive && Path::new(&scope_path).components().count() > 1 {
             continue;
         }
         if let Some(filter) = changed_filter {
-            if !filter.matches_rel_path(&display_path) {
+            if !filter.matches_rel_path(&scope_path) {
                 continue;
             }
         }
 
-        if !matches_file_type(&display_path, file_type) {
+        if !matches_file_type(&scope_path, file_type) {
             continue;
         }
-        if !matches_glob_compiled(&display_path, compiled_glob) {
+        if !matches_glob_compiled(&scope_path, compiled_glob) {
             continue;
         }
-        if should_exclude_compiled(&display_path, compiled_exclude) {
+        if should_exclude_compiled(&scope_path, compiled_exclude) {
             continue;
         }
         if config_exclude_patterns
             .iter()
-            .any(|p| should_exclude_compiled(&display_path, Some(p)))
+            .any(|p| should_exclude_compiled(&scope_path, Some(p)))
         {
             continue;
         }
@@ -1241,7 +1247,7 @@ fn collect_index_candidates(
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let rank_boost = 1.0
-            + path_ranking_bonus(&display_path, &ranking_tokens)
+            + path_ranking_bonus(&scope_path, &ranking_tokens)
             + symbol_ranking_bonus(doc_type_value, symbols_value, ranking_identifier.as_deref());
         let adjusted_score = *score * rank_boost;
 
@@ -1316,6 +1322,7 @@ fn keyword_search(
     query: &str,
     index_root: &Path,
     search_root: &Path,
+    workspace_root: &Path,
     index_path: &Path,
     max_results: usize,
     context: usize,
@@ -1363,7 +1370,7 @@ fn keyword_search(
     let cache_key = CacheKey {
         query: normalized_query,
         mode: format!(
-            "keyword:{}:r{}:ni{}",
+            "keyword:{}:r{}:ni{}:pv2",
             if effective_mode == IndexMode::Index {
                 "index"
             } else {
@@ -1403,6 +1410,7 @@ fn keyword_search(
             query,
             index_root,
             search_root,
+            workspace_root,
             max_results,
             context,
             file_type,
@@ -1417,6 +1425,7 @@ fn keyword_search(
         scan_search(
             query,
             search_root,
+            workspace_root,
             max_results,
             context,
             file_type,
@@ -1658,6 +1667,7 @@ fn index_search(
     query: &str,
     index_root: &Path,
     search_root: &Path,
+    workspace_root: &Path,
     max_results: usize,
     context: usize,
     file_type: Option<&str>,
@@ -1672,6 +1682,7 @@ fn index_search(
         query,
         index_root,
         search_root,
+        workspace_root,
         max_results,
         "file",
         file_type,
@@ -1729,6 +1740,7 @@ fn index_search(
 fn scan_search(
     query: &str,
     root: &std::path::Path,
+    workspace_root: &Path,
     max_results: usize,
     context: usize,
     file_type: Option<&str>,
@@ -1760,30 +1772,27 @@ fn scan_search(
     let mut total_matches = 0;
 
     'files: for file in files {
-        let rel_path = file
-            .path
-            .strip_prefix(root)
-            .unwrap_or(&file.path)
-            .display()
-            .to_string();
+        let scope_path = scope_relative_path(&file.path, root)
+            .unwrap_or_else(|| file.path.display().to_string());
+        let display_path = workspace_display_path(&file.path, workspace_root);
         if let Some(filter) = changed_filter {
-            if !filter.matches_rel_path(&rel_path) {
+            if !filter.matches_rel_path(&scope_path) {
                 continue;
             }
         }
 
-        if !matches_file_type(&rel_path, file_type) {
+        if !matches_file_type(&scope_path, file_type) {
             continue;
         }
-        if !matches_glob_compiled(&rel_path, compiled_glob) {
+        if !matches_glob_compiled(&scope_path, compiled_glob) {
             continue;
         }
-        if should_exclude_compiled(&rel_path, compiled_exclude) {
+        if should_exclude_compiled(&scope_path, compiled_exclude) {
             continue;
         }
         if config_exclude_patterns
             .iter()
-            .any(|p| should_exclude_compiled(&rel_path, Some(p)))
+            .any(|p| should_exclude_compiled(&scope_path, Some(p)))
         {
             continue;
         }
@@ -1806,7 +1815,7 @@ fn scan_search(
                     continue;
                 }
 
-                files_with_matches.insert(rel_path.clone());
+                files_with_matches.insert(display_path.clone());
                 total_matches += 1;
 
                 let trimmed = line.trim();
@@ -1817,7 +1826,7 @@ fn scan_search(
                 };
 
                 results.push(SearchResult {
-                    path: rel_path.clone(),
+                    path: display_path.clone(),
                     score: 1.0,
                     snippet,
                     line: Some(idx + 1),
@@ -1850,7 +1859,7 @@ fn scan_search(
                     continue;
                 }
 
-                files_with_matches.insert(rel_path.clone());
+                files_with_matches.insert(display_path.clone());
                 total_matches += 1;
 
                 let trimmed = line.trim();
@@ -1864,7 +1873,7 @@ fn scan_search(
                     get_context_from_lines(&lines, idx + 1, context);
 
                 results.push(SearchResult {
-                    path: rel_path.clone(),
+                    path: display_path.clone(),
                     score: 1.0,
                     snippet,
                     line: Some(idx + 1),
@@ -1896,6 +1905,7 @@ fn hybrid_search(
     query: &str,
     index_root: &Path,
     search_root: &Path,
+    workspace_root: &Path,
     config: &Config,
     max_results: usize,
     context: usize,
@@ -1924,7 +1934,7 @@ fn hybrid_search(
     let weight_text_milli = (weight_text * 1000.0).round() as i32;
     let weight_vector_milli = (weight_vector * 1000.0).round() as i32;
     let cache_mode = format!(
-        "{}:k{}:wt{}:wv{}:r{}",
+        "{}:k{}:wt{}:wv{}:r{}:pv2",
         mode,
         candidate_k,
         weight_text_milli,
@@ -1956,10 +1966,10 @@ fn hybrid_search(
                 let results: Vec<SearchResult> = entry
                     .data
                     .iter()
-                    .filter_map(|hr| {
+                    .map(|hr| {
                         let full_path = resolve_full_path(&hr.path, index_root);
-                        let display_path = scoped_display_path(&full_path, search_root)?;
-                        Some(SearchResult {
+                        let display_path = workspace_display_path(&full_path, workspace_root);
+                        SearchResult {
                             path: display_path,
                             score: hr.score,
                             snippet: hr.snippet.clone(),
@@ -1972,7 +1982,7 @@ fn hybrid_search(
                             result_id: hr.result_id.clone(),
                             chunk_start: hr.chunk_start,
                             chunk_end: hr.chunk_end,
-                        })
+                        }
                     })
                     .collect();
 
@@ -2030,6 +2040,7 @@ fn hybrid_search(
         query,
         index_root,
         search_root,
+        workspace_root,
         candidate_k,
         "symbol",
         file_type,
@@ -2157,23 +2168,24 @@ fn hybrid_search(
         }
 
         let full_path = resolve_full_path(&hr.path, index_root);
-        let Some(display_path) = scoped_display_path(&full_path, search_root) else {
+        let Some(scope_path) = scope_relative_path(&full_path, search_root) else {
             continue;
         };
+        let display_path = workspace_display_path(&full_path, workspace_root);
 
         // Apply filters
-        if !matches_file_type(&display_path, file_type) {
+        if !matches_file_type(&scope_path, file_type) {
             continue;
         }
-        if !matches_glob_compiled(&display_path, compiled_glob) {
+        if !matches_glob_compiled(&scope_path, compiled_glob) {
             continue;
         }
-        if should_exclude_compiled(&display_path, compiled_exclude) {
+        if should_exclude_compiled(&scope_path, compiled_exclude) {
             continue;
         }
         if config_exclude_patterns
             .iter()
-            .any(|p| should_exclude_compiled(&display_path, Some(p)))
+            .any(|p| should_exclude_compiled(&scope_path, Some(p)))
         {
             continue;
         }
@@ -2418,11 +2430,32 @@ fn resolve_full_path(path_value: &str, index_root: &Path) -> PathBuf {
     }
 }
 
-fn scoped_display_path(full_path: &Path, search_root: &Path) -> Option<String> {
+fn scope_relative_path(full_path: &Path, search_root: &Path) -> Option<String> {
+    let rel = full_path.strip_prefix(search_root).ok()?;
+    let rendered = rel.display().to_string();
+    if !rendered.is_empty() {
+        return Some(rendered);
+    }
+
     full_path
-        .strip_prefix(search_root)
-        .ok()
-        .map(|rel| rel.display().to_string())
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(ToOwned::to_owned)
+}
+
+fn workspace_display_path(full_path: &Path, workspace_root: &Path) -> String {
+    if let Ok(rel) = full_path.strip_prefix(workspace_root) {
+        let rendered = rel.display().to_string();
+        if !rendered.is_empty() {
+            return rendered;
+        }
+    }
+
+    full_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| full_path.display().to_string())
 }
 
 #[cfg(test)]
@@ -2441,6 +2474,7 @@ mod tests {
 
         let outcome = scan_search(
             "world",
+            dir.path(),
             dir.path(),
             10,
             0,
@@ -2471,6 +2505,7 @@ mod tests {
         let outcome = scan_search(
             r"\d{3}",
             dir.path(),
+            dir.path(),
             10,
             0,
             None,
@@ -2489,6 +2524,13 @@ mod tests {
         assert_eq!(outcome.results[0].path, "numbers.txt");
         assert_eq!(outcome.results[0].line, Some(1));
         assert_eq!(outcome.results[1].line, Some(3));
+    }
+
+    #[test]
+    fn scope_relative_path_for_file_scope_is_non_empty() {
+        let root = Path::new("/tmp/work/src/lib.rs");
+        let rel = scope_relative_path(root, root).expect("scope path");
+        assert_eq!(rel, "lib.rs");
     }
 
     #[test]
@@ -2527,6 +2569,7 @@ mod tests {
             "needle",
             root,
             &subdir,
+            root,
             10,
             0,
             None,
@@ -2540,7 +2583,7 @@ mod tests {
         .expect("index search");
 
         assert_eq!(outcome.results.len(), 1);
-        assert_eq!(outcome.results[0].path, "sub.rs");
+        assert_eq!(outcome.results[0].path, "src/sub.rs");
     }
 
     #[test]
@@ -2567,6 +2610,7 @@ mod tests {
             "needle",
             root,
             &scoped,
+            root,
             1,
             0,
             None,
@@ -2580,7 +2624,7 @@ mod tests {
         .expect("index search");
 
         assert_eq!(outcome.results.len(), 1);
-        assert_eq!(outcome.results[0].path, "target.txt");
+        assert_eq!(outcome.results[0].path, "scoped/target.txt");
     }
 
     #[test]
@@ -2599,6 +2643,7 @@ mod tests {
 
         let outcome = index_search(
             "needle",
+            root,
             root,
             root,
             10,
@@ -2635,6 +2680,7 @@ mod tests {
 
         let outcome = index_search(
             "cpu_fallback_path",
+            root,
             root,
             root,
             10,
