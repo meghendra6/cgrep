@@ -51,7 +51,7 @@ cgrep agent expand --id "$ID" -C 8 --compact
 ## 언어/사이트
 
 - 영어 문서 허브: [../index.md](../index.md)
-- 문서 사이트: <https://meghendra6.github.io/cgrep/>
+- 공식 문서 사이트: <https://meghendra6.github.io/cgrep/>
 - 저장소 README: [README.md](https://github.com/meghendra6/cgrep/blob/main/README.md)
 
 ## 관련 파일

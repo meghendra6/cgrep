@@ -51,7 +51,7 @@ cgrep agent expand --id "$ID" -C 8 --compact
 ## Language And Site
 
 - Korean docs hub: [ko/index.md](./ko/index.md)
-- Docs site: <https://meghendra6.github.io/cgrep/>
+- Canonical docs site: <https://meghendra6.github.io/cgrep/>
 - Repository README: [README.md](https://github.com/meghendra6/cgrep/blob/main/README.md)
 
 ## Related Files

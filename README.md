@@ -112,6 +112,7 @@ PyTorch scenario-completion benchmark snapshots:
 
 ## Documentation
 
+- Docs site: <https://meghendra6.github.io/cgrep/>
 - Docs hub: `docs/index.md`
 - Korean docs: `docs/ko/index.md`
 - Installation: `docs/installation.md`
