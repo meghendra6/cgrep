@@ -329,6 +329,16 @@ fn root_help_mentions_direct_mode_and_literal_escape() {
 }
 
 #[test]
+fn symbols_help_includes_include_and_exclude_dir_aliases() {
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    cmd.args(["symbols", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--include"))
+        .stdout(predicate::str::contains("--exclude-dir"));
+}
+
+#[test]
 fn search_help_includes_grep_transition_examples() {
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
     cmd.args(["search", "--help"])

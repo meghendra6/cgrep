@@ -454,11 +454,11 @@ pub enum Commands {
         file_type: Option<String>,
 
         /// Filter files matching glob pattern (e.g., "*.rs", "src/**/*.ts")
-        #[arg(short = 'g', long)]
+        #[arg(short = 'g', long, visible_alias = "include")]
         glob: Option<String>,
 
         /// Exclude files matching pattern
-        #[arg(short = 'x', long)]
+        #[arg(short = 'x', long, visible_alias = "exclude-dir")]
         exclude: Option<String>,
 
         /// Limit symbol search to files changed since revision (default: HEAD)
