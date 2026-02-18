@@ -1,44 +1,64 @@
 # MCP
 
-## Run MCP server
+## 1-Minute Setup
+
+```bash
+cgrep mcp install codex
+cgrep mcp install claude-code
+cgrep mcp install cursor
+```
+
+Run server manually (for diagnostics):
 
 ```bash
 cgrep mcp serve
+```
+
+Alias form:
+
+```bash
 cgrep mcp run
 ```
 
-## Install host config
+## Supported Hosts
 
 ```bash
 cgrep mcp install claude-code
-cgrep mcp add claude-code
 cgrep mcp install cursor
 cgrep mcp install windsurf
 cgrep mcp install vscode
 cgrep mcp install claude-desktop
 ```
 
-`cgrep mcp install <host>` writes `command` as the resolved cgrep executable path
-(absolute when available) to avoid GUI/PATH mismatches in editor hosts.
-
-## Remove host config
+Alias:
 
 ```bash
-cgrep mcp uninstall claude-code
-cgrep mcp rm claude-code
+cgrep mcp add <host>
 ```
 
-## Harness guidance
+Remove config:
 
-MCP mode follows harness-style principles for reliable tool-calling:
-- Use structured tool chains (`search -> read -> symbol navigation`) instead of ad-hoc grep loops
-- Keep outputs deterministic (`json/json2` + `--compact`) to reduce retry churn
-- Narrow path/scope early for stable, low-token retrieval
-- Expose read/search primitives only (no mutation tools)
+```bash
+cgrep mcp uninstall <host>
+cgrep mcp rm <host>
+```
 
-Reference: <https://blog.can.ac/2026/02/12/the-harness-problem/>
+## Verification
 
-## Exposed MCP tools
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+| cgrep mcp serve
+```
+
+## Behavior Notes
+
+- `cgrep mcp install <host>` writes `command` as resolved cgrep executable path
+  (absolute when available) to reduce GUI/PATH mismatch failures.
+- `claude-desktop` auto-path is currently implemented for macOS/Windows.
+
+## Exposed MCP Tools
 
 - `cgrep_search`
 - `cgrep_read`
@@ -50,7 +70,7 @@ Reference: <https://blog.can.ac/2026/02/12/the-harness-problem/>
 - `cgrep_dependents`
 - `cgrep_index`
 
-## Config file targets
+## Config File Targets
 
 | Host | Path | Key |
 |---|---|---|
@@ -59,6 +79,3 @@ Reference: <https://blog.can.ac/2026/02/12/the-harness-problem/>
 | `windsurf` | `~/.codeium/windsurf/mcp_config.json` | `mcpServers` |
 | `vscode` | `.vscode/mcp.json` | `servers` |
 | `claude-desktop` | OS-specific desktop config path | `mcpServers` |
-
-Note:
-- `claude-desktop` auto-path is currently implemented for macOS/Windows.

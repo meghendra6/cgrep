@@ -1,67 +1,53 @@
 # cgrep 문서 (한국어)
 
-`grep`은 텍스트를 찾고, `cgrep`은 코드 의도를 찾습니다.
+사람과 AI 에이전트를 위한 로컬 우선 코드 검색/탐색 문서 허브입니다.
 
-실제 저장소에서 사람과 AI 에이전트가 함께 작업할 때를 위한 로컬 우선 코드 검색 도구입니다.
-현재 릴리즈: **v1.4.6**.
+현재 릴리즈: **v1.4.6**
 
-v1.4.6 핵심:
-- `definition`에 `-p/--path`, `-m/--limit`가 추가되어 대규모 저장소에서 범위 제한 조회가 쉬워졌습니다.
-- C/C++의 forward declaration 및 선언 전용 시그니처 노이즈를 기본적으로 줄이도록 `definition` 동작이 개선되었습니다.
-- Codex 벤치마크 문서(집계 + Per Scenario 표)가 최신 재측정 결과로 동기화되었습니다.
+## 목적별 시작점
 
+| 하고 싶은 일 | 문서 |
+|---|---|
+| 빠르게 설치하고 첫 명령 실행 | [설치](./installation.md) |
+| 일상 검색/탐색 명령 익히기 | [사용법](./usage.md) |
+| 저토큰 에이전트 조회 흐름 적용 | [에이전트 워크플로](./agent.md) |
+| 에디터/호스트 MCP 연동 | [MCP](./mcp.md) |
+| 대형 저장소 인덱스 운용 | [인덱싱과 Watch](./indexing-watch.md) |
+| 기본값/프로필 튜닝 | [설정](./configuration.md) |
+| semantic/hybrid 검색 사용 | [임베딩](./embeddings.md) |
+| 자주 발생하는 문제 해결 | [문제 해결](./troubleshooting.md) |
+| 빌드/테스트/성능 검증 | [개발](./development.md) |
+
+## 자주 쓰는 흐름
+
+### 사용자 흐름 (2분)
+
+```bash
+cgrep index
+cgrep s "token validation" src/
+cgrep d handle_auth
+cgrep read src/auth.rs
+```
+
+### 에이전트 흐름 (저토큰 조회)
+
+```bash
+ID=$(cgrep agent locate "where token validation happens" --compact | jq -r '.results[0].id')
+cgrep agent expand --id "$ID" -C 8 --compact
+```
+
+## 벤치마크 문서
+
+- [에이전트 토큰 효율 벤치마크 (PyTorch, 영문)](../benchmarks/pytorch-agent-token-efficiency.md)
+- [Codex 에이전트 효율 벤치마크 (PyTorch, 영문)](../benchmarks/pytorch-codex-agent-efficiency.md)
+
+## 언어/사이트
+
+- 영어 문서 허브: [../index.md](../index.md)
 - 문서 사이트: <https://meghendra6.github.io/cgrep/>
 - 저장소 README: [README.md](https://github.com/meghendra6/cgrep/blob/main/README.md)
-- 영어 문서 허브: [../index.md](../index.md)
 
-## 왜 cgrep인가
-
-- AI 코딩 루프에 맞춘 구조: 작고 결정적인 `json2` 출력 + 2단계 `agent locate/expand`.
-- 코드 구조 중심 탐색: `definition`, `references`, `callers`, `dependents`, `map`, `read`.
-- CLI 사용성: `s`, `d`, `r`, `c`, `dep`, `i`, `a l` 같은 짧은 별칭 제공.
-- 로컬 우선 운영: 빠른 검색, 프라이버시 보호, 클라우드 의존 없음.
-
-## 벤치마크 스냅샷 (PyTorch)
-
-2026년 2월 17일 기준, 구현 추적 시나리오 6개를 측정했습니다.
-완료 기준: 각 시나리오가 충족될 때까지 반복 조회를 수행합니다.
-
-| 지표 | 기준 (`grep`) | cgrep (`agent locate/expand`) | 개선 |
-|---|---:|---:|---:|
-| 완료까지 필요한 토큰 합계 | 128,042 | 6,159 | **95.2% 감소** |
-| 작업당 평균 완료 토큰 | 21,340 | 1,027 | **20.79x 축소** |
-| 완료까지 평균 검색 지연 | 1,287.7 ms | 21.7 ms | **약 59.5x 향상** |
-
-자세한 방법/결과: [Agent Token Efficiency 벤치마크](../benchmarks/pytorch-agent-token-efficiency.md)
-
-## Codex 실사용 스냅샷 (PyTorch)
-
-2026년 2월 17일, `gpt-5-codex` (`reasoning_effort=medium`, `runs=2`) 기준 측정입니다.
-
-| 지표 | baseline | cgrep | 비고 |
-|---|---:|---:|---|
-| 성공률 (전체 케이스) | 91.7% | 100.0% | 엄격한 명령 정책 검증 포함 (baseline 1회 타임아웃) |
-| 청구 토큰 합계 (전체 케이스) | 167,409 | 89,967 | cgrep **46.3% 감소** |
-
-자세한 결과: [Codex Agent Efficiency 벤치마크(영문)](../benchmarks/pytorch-codex-agent-efficiency.md)
-
-## 문서 시작점
-
-| 문서 | 설명 |
-|---|---|
-| [설치](./installation.md) | 설치와 첫 실행 |
-| [사용법](./usage.md) | CLI 명령과 검색 옵션 |
-| [에이전트 워크플로](./agent.md) | 2단계 `locate` / `expand` 흐름 |
-| [MCP](./mcp.md) | MCP 서버 모드와 harness 사용법 |
-| [인덱싱과 감시](./indexing-watch.md) | 인덱싱, watch, daemon 운용 |
-| [설정](./configuration.md) | `.cgreprc.toml` 설정과 우선순위 |
-| [임베딩](./embeddings.md) | semantic/hybrid 모드 설정과 튜닝 |
-| [에이전트 토큰 효율 벤치마크(영문)](../benchmarks/pytorch-agent-token-efficiency.md) | PyTorch 기준 토큰 절감 효과 측정 |
-| [Codex 에이전트 효율 벤치마크(영문)](../benchmarks/pytorch-codex-agent-efficiency.md) | PyTorch 기준 실제 `codex exec` 토큰/성공률 측정 |
-| [문제 해결](./troubleshooting.md) | 자주 발생하는 문제와 해결 |
-| [개발](./development.md) | 빌드, 테스트, 검증 명령 |
-
-## 빠른 링크
+## 관련 파일
 
 - 변경 이력: [CHANGELOG.md](https://github.com/meghendra6/cgrep/blob/main/CHANGELOG.md)
 - 비교 문서: [COMPARISON.md](https://github.com/meghendra6/cgrep/blob/main/COMPARISON.md)

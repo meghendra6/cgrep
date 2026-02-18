@@ -1,44 +1,64 @@
 # MCP
 
-## MCP 서버 실행
+## 1분 설정
+
+```bash
+cgrep mcp install codex
+cgrep mcp install claude-code
+cgrep mcp install cursor
+```
+
+진단용 수동 서버 실행:
 
 ```bash
 cgrep mcp serve
+```
+
+별칭:
+
+```bash
 cgrep mcp run
 ```
 
-## Host 설정 설치
+## 지원 Host
 
 ```bash
 cgrep mcp install claude-code
-cgrep mcp add claude-code
 cgrep mcp install cursor
 cgrep mcp install windsurf
 cgrep mcp install vscode
 cgrep mcp install claude-desktop
 ```
 
-`cgrep mcp install <host>`는 가능하면 cgrep 실행 파일의 절대경로를 `command`로 기록해
-에디터 GUI 환경의 PATH 차이로 인한 실행 실패를 줄입니다.
-
-## Host 설정 제거
+별칭:
 
 ```bash
-cgrep mcp uninstall claude-code
-cgrep mcp rm claude-code
+cgrep mcp add <host>
 ```
 
-## Harness 가이드
+설정 제거:
 
-MCP 모드는 안정적인 tool-calling을 위해 harness 원칙을 따릅니다.
-- ad-hoc grep 반복 대신 구조화된 체인(`search -> read -> symbol navigation`) 사용
-- 재시도/불안정을 줄이기 위해 결정적 출력 유지(`json/json2` + `--compact`)
-- 경로/범위를 먼저 좁혀 저토큰, 안정적 조회 유지
-- 변경(write) 도구 없이 read/search 도구만 노출
+```bash
+cgrep mcp uninstall <host>
+cgrep mcp rm <host>
+```
 
-참고 문서: <https://blog.can.ac/2026/02/12/the-harness-problem/>
+## 검증
 
-## 노출되는 MCP 도구
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+| cgrep mcp serve
+```
+
+## 동작 참고
+
+- `cgrep mcp install <host>`는 cgrep 실행 경로를 `command`에 기록합니다.
+  (가능하면 절대경로) GUI/PATH 불일치 이슈를 줄이기 위함입니다.
+- `claude-desktop` 자동 경로는 현재 macOS/Windows에서 구현되어 있습니다.
+
+## 노출 MCP 도구
 
 - `cgrep_search`
 - `cgrep_read`
@@ -59,6 +79,3 @@ MCP 모드는 안정적인 tool-calling을 위해 harness 원칙을 따릅니다
 | `windsurf` | `~/.codeium/windsurf/mcp_config.json` | `mcpServers` |
 | `vscode` | `.vscode/mcp.json` | `servers` |
 | `claude-desktop` | OS별 desktop 설정 경로 | `mcpServers` |
-
-참고:
-- `claude-desktop` 자동 경로는 현재 macOS/Windows만 구현되어 있습니다.
