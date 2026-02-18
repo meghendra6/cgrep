@@ -70,6 +70,12 @@ printf '%s\n' \
 - `cgrep_dependents`
 - `cgrep_index`
 
+## Tool Argument Notes
+
+- MCP tools accept optional `cwd` to pin relative path resolution.
+- `cgrep_search` treats dash-prefixed queries (e.g. `-n`, `--help`) as literal search text.
+- `cgrep_search` result `path` values are workspace-relative (relative to `cwd` when provided), so they can be passed directly to `cgrep_read`.
+
 ## Config File Targets
 
 | Host | Path | Key |

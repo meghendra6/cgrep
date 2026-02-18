@@ -38,6 +38,7 @@ cgrep mp -d 2
 - grep 스타일 범위 옵션을 지원합니다: `-r/--recursive`, `--no-recursive`, `--include`, `--exclude-dir`.
 - `--no-ignore`는 scan 모드를 강제하고 scan 시 `.gitignore`/`.ignore` 필터를 비활성화합니다.
 - 명시적 플래그가 필요하면 기존처럼 `-p <path>`를 사용하면 됩니다.
+- `search` 결과의 `path`는 항상 워크스페이스 기준 상대경로이므로 `search -> read`를 바로 연결할 수 있습니다.
 
 ## 단축 위주 사용 흐름
 
