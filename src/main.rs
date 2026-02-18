@@ -174,6 +174,7 @@ fn main() -> Result<()> {
             suppress_boilerplate,
             fuzzy,
             no_index,
+            bootstrap_index,
         } => {
             if help_advanced {
                 print_search_advanced_help();
@@ -267,6 +268,7 @@ fn main() -> Result<()> {
                     })
                     .or(config_mode)
             };
+            let explicit_mode = mode.is_some() || keyword || semantic || hybrid;
 
             query::search::run(
                 &query,
@@ -297,6 +299,8 @@ fn main() -> Result<()> {
                 effective_path_alias,
                 effective_suppress_boilerplate,
                 false,
+                explicit_mode,
+                bootstrap_index,
             )?;
         }
         Commands::Read {
@@ -357,6 +361,8 @@ fn main() -> Result<()> {
                     true,
                     true,
                     true,
+                    true,
+                    false,
                 )?;
             }
             cli::AgentCommands::Expand { ids, path, context } => {
@@ -462,6 +468,7 @@ fn main() -> Result<()> {
             embeddings,
             embeddings_force,
             high_memory,
+            include_ignored,
             exclude_paths,
         } => {
             indexer::index::run(
@@ -469,6 +476,7 @@ fn main() -> Result<()> {
                 force,
                 exclude_paths,
                 high_memory,
+                include_ignored,
                 &embeddings,
                 embeddings_force,
             )?;

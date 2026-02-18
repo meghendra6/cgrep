@@ -128,7 +128,16 @@ fn map_dot_root_reports_dot() {
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
     let assert = cmd
         .current_dir(dir.path())
-        .args(["--format", "json", "--compact", "map", "-p", ".", "--depth", "1"])
+        .args([
+            "--format",
+            "json",
+            "--compact",
+            "map",
+            "-p",
+            ".",
+            "--depth",
+            "1",
+        ])
         .assert()
         .success();
 

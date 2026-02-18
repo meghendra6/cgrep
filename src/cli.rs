@@ -396,6 +396,10 @@ pub enum Commands {
         /// Do not use the index; scan files directly
         #[arg(long, hide = true)]
         no_index: bool,
+
+        /// Internal flag for metadata when MCP bootstrapped an index before search
+        #[arg(long, hide = true)]
+        bootstrap_index: bool,
     },
 
     /// Read a file with smart full/outline output
@@ -568,6 +572,10 @@ pub enum Commands {
         /// Use a high-memory index writer (1GiB budget)
         #[arg(short = 'H', long)]
         high_memory: bool,
+
+        /// Include files ignored by .gitignore/.ignore (opt-out of default ignore-respecting index)
+        #[arg(long)]
+        include_ignored: bool,
 
         /// Paths/patterns to exclude (can be specified multiple times)
         #[arg(long = "exclude", short = 'e')]

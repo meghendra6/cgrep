@@ -37,6 +37,8 @@ fn assert_core_phrases(content: &str) {
     assert!(content.contains(FLOW_SENTENCE));
     assert!(content.contains("cgrep agent locate"));
     assert!(content.contains("cgrep agent expand"));
+    assert!(content.contains("cgrep_agent_locate"));
+    assert!(content.contains("cgrep_agent_expand"));
 }
 
 #[test]
@@ -55,14 +57,14 @@ fn installed_agent_instructions_are_compact_and_consistent() {
     let codex = fs::read_to_string(&codex_path).expect("read codex skill");
     assert_core_phrases(&codex);
     assert_no_deprecated_mode_aliases(&codex);
-    assert_compacted(&codex, 2354);
+    assert_compacted(&codex, 2700);
 
     let claude_path = home.join(".claude").join("CLAUDE.md");
     let claude = fs::read_to_string(&claude_path).expect("read claude skill");
     assert!(claude.contains("## cgrep Local Code Search"));
     assert_core_phrases(&claude);
     assert_no_deprecated_mode_aliases(&claude);
-    assert_compacted(&claude, 1601);
+    assert_compacted(&claude, 1900);
 
     let copilot_path = dir
         .path()
@@ -73,14 +75,14 @@ fn installed_agent_instructions_are_compact_and_consistent() {
     assert!(copilot.contains("# cgrep Local Code Search Instructions"));
     assert_core_phrases(&copilot);
     assert_no_deprecated_mode_aliases(&copilot);
-    assert_compacted(&copilot, 3044);
+    assert_compacted(&copilot, 3400);
 
     let cursor_path = dir.path().join(".cursor").join("rules").join("cgrep.mdc");
     let cursor = fs::read_to_string(&cursor_path).expect("read cursor rule");
     assert!(cursor.contains("cgrep mcp install cursor"));
     assert_core_phrases(&cursor);
     assert_no_deprecated_mode_aliases(&cursor);
-    assert_compacted(&cursor, 1113);
+    assert_compacted(&cursor, 1400);
 
     let opencode_path = home
         .join(".config")
@@ -95,5 +97,5 @@ fn installed_agent_instructions_are_compact_and_consistent() {
     let skill = opencode[start_idx..end_idx].trim();
     assert_core_phrases(skill);
     assert_no_deprecated_mode_aliases(skill);
-    assert_compacted(skill, 1741);
+    assert_compacted(skill, 2100);
 }

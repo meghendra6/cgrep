@@ -69,6 +69,8 @@ printf '%s\n' \
 ## Exposed MCP Tools
 
 - `cgrep_search`
+- `cgrep_agent_locate`
+- `cgrep_agent_expand`
 - `cgrep_read`
 - `cgrep_map`
 - `cgrep_symbols`
@@ -81,6 +83,8 @@ printf '%s\n' \
 ## Tool Argument Notes
 
 - MCP tools accept optional `cwd` to pin relative path resolution.
+- `cgrep_search` defaults to balanced output budget and enables `path_alias`/`dedupe_context`/`suppress_boilerplate` unless explicitly disabled.
+- `cgrep_search` defaults to `auto_index=true`; when no index exists it attempts one bootstrap index build, then falls back to scan on bootstrap failure.
 - `cgrep_search` treats dash-prefixed queries (e.g. `-n`, `--help`) as literal search text.
 - `cgrep_search` rejects empty/whitespace queries consistently (including `regex=true`).
 - `cgrep_search` result `path` values stay reusable:

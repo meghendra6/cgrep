@@ -342,6 +342,7 @@ pub fn run(
     let builder = IndexBuilder::with_excludes_and_symbols(
         &root,
         excludes.clone(),
+        config.index().respect_git_ignore(),
         config.embeddings.symbol_preview_lines(),
         config.embeddings.symbol_max_chars(),
         config.embeddings.max_symbols_per_file(),

@@ -6,14 +6,18 @@ pub mod install;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
 const PROTOCOL_VERSION: &str = "2024-11-05";
 const DEFAULT_MCP_TOOL_TIMEOUT_MS: u64 = 45_000;
+const AUTO_INDEX_FAILURE_TTL_MS: u64 = 60_000;
+static AUTO_INDEX_FAILURES: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
 
 // Keep harness guidance close to the server so every MCP host gets the same behavior.
 const HARNESS_INSTRUCTIONS: &str = "\
@@ -23,9 +27,10 @@ Use cgrep tools instead of host built-in search/read tools for repository naviga
 \n\
 Recommended workflow:\n\
 1) cgrep_map for structure\n\
-2) cgrep_search for candidate locations\n\
-3) cgrep_read for exact context\n\
-4) cgrep_definition/cgrep_references/cgrep_callers for symbol relationships\n\
+2) cgrep_agent_locate for low-token candidate IDs\n\
+3) cgrep_agent_expand for exact windows on selected IDs\n\
+4) cgrep_search/cgrep_read only when locate/expand is insufficient\n\
+5) cgrep_definition/cgrep_references/cgrep_callers for symbol relationships\n\
 \n\
 Harness rules:\n\
 - Prefer structured tool calls with explicit arguments.\n\
@@ -178,6 +183,8 @@ fn handle_tool_call(req: &JsonRpcRequest) -> JsonRpcResponse {
 fn dispatch_tool(tool: &str, args: &Value) -> Result<String, String> {
     match tool {
         "cgrep_search" => tool_search(args),
+        "cgrep_agent_locate" => tool_agent_locate(args),
+        "cgrep_agent_expand" => tool_agent_expand(args),
         "cgrep_read" => tool_read(args),
         "cgrep_map" => tool_map(args),
         "cgrep_symbols" => tool_symbols(args),
@@ -193,7 +200,20 @@ fn dispatch_tool(tool: &str, args: &Value) -> Result<String, String> {
 fn tool_search(args: &Value) -> Result<String, String> {
     let query = required_str(args, "query")?;
     let cwd = opt_cwd(args);
-    require_bounded_relative_scope("cgrep_search", cwd, opt_str(args, "path"), true)?;
+    let path = opt_str(args, "path");
+    require_bounded_relative_scope("cgrep_search", cwd, path, true)?;
+    let auto_index = opt_bool_value(args, "auto_index").unwrap_or(true);
+    let mut bootstrap_index = false;
+    let mut force_scan_from_bootstrap = false;
+    if auto_index {
+        match ensure_index_for_search(cwd, path) {
+            Ok(BootstrapOutcome::AlreadyIndexed) => {}
+            Ok(BootstrapOutcome::Bootstrapped) => bootstrap_index = true,
+            Ok(BootstrapOutcome::FellBackToScan) => force_scan_from_bootstrap = true,
+            Err(err) => return Err(err),
+        }
+    }
+
     let mut cmd = vec![
         "--format".to_string(),
         "json2".to_string(),
@@ -201,25 +221,109 @@ fn tool_search(args: &Value) -> Result<String, String> {
         "search".to_string(),
     ];
 
-    push_opt_flag_value(&mut cmd, "-p", opt_str(args, "path"));
+    push_opt_flag_value(&mut cmd, "-p", path);
     push_opt_flag_value_u64(&mut cmd, "-m", opt_u64(args, "limit"));
     push_opt_flag_value_u64(&mut cmd, "-C", opt_u64(args, "context"));
     push_opt_flag_value(&mut cmd, "-t", opt_str(args, "file_type"));
     push_opt_flag_value(&mut cmd, "--glob", opt_str(args, "glob"));
     push_opt_flag_value(&mut cmd, "--exclude", opt_str(args, "exclude"));
+    push_opt_flag_value(
+        &mut cmd,
+        "-B",
+        Some(opt_str(args, "budget").unwrap_or("balanced")),
+    );
+    push_opt_flag_value_u64(
+        &mut cmd,
+        "--max-total-chars",
+        opt_u64(args, "max_total_chars"),
+    );
+    push_opt_flag_value_u64(
+        &mut cmd,
+        "--max-chars-per-snippet",
+        opt_u64(args, "max_chars_per_snippet"),
+    );
+    push_opt_flag_value_u64(
+        &mut cmd,
+        "--max-context-chars",
+        opt_u64(args, "max_context_chars"),
+    );
     push_opt_flag_value(&mut cmd, "--mode", opt_str(args, "mode"));
     push_changed(&mut cmd, args.get("changed"));
+    push_bool_flag(
+        &mut cmd,
+        "--dedupe-context",
+        opt_bool_value(args, "dedupe_context").unwrap_or(true),
+    );
+    push_bool_flag(
+        &mut cmd,
+        "--path-alias",
+        opt_bool_value(args, "path_alias").unwrap_or(true),
+    );
+    push_bool_flag(
+        &mut cmd,
+        "--suppress-boilerplate",
+        opt_bool_value(args, "suppress_boilerplate").unwrap_or(true),
+    );
     push_bool_flag(&mut cmd, "--regex", opt_bool(args, "regex"));
     push_bool_flag(
         &mut cmd,
         "--case-sensitive",
         opt_bool(args, "case_sensitive"),
     );
-    push_bool_flag(&mut cmd, "--no-index", opt_bool(args, "no_index"));
+    push_bool_flag(
+        &mut cmd,
+        "--no-index",
+        opt_bool(args, "no_index") || force_scan_from_bootstrap,
+    );
     push_bool_flag(&mut cmd, "--fuzzy", opt_bool(args, "fuzzy"));
+    push_bool_flag(&mut cmd, "--bootstrap-index", bootstrap_index);
     cmd.push("--".to_string());
     cmd.push(query.to_string());
 
+    run_cgrep(&cmd, cwd)
+}
+
+fn tool_agent_locate(args: &Value) -> Result<String, String> {
+    let query = required_str(args, "query")?;
+    let cwd = opt_cwd(args);
+    require_bounded_relative_scope("cgrep_agent_locate", cwd, opt_str(args, "path"), true)?;
+    let mut cmd = vec![
+        "--format".to_string(),
+        "json2".to_string(),
+        "--compact".to_string(),
+        "agent".to_string(),
+        "locate".to_string(),
+        query.to_string(),
+    ];
+    push_opt_flag_value(&mut cmd, "-p", opt_str(args, "path"));
+    push_changed(&mut cmd, args.get("changed"));
+    push_opt_flag_value_u64(&mut cmd, "--limit", opt_u64(args, "limit"));
+    push_opt_flag_value(&mut cmd, "--mode", opt_str(args, "mode"));
+    push_opt_flag_value(
+        &mut cmd,
+        "-B",
+        Some(opt_str(args, "budget").unwrap_or("balanced")),
+    );
+    run_cgrep(&cmd, cwd)
+}
+
+fn tool_agent_expand(args: &Value) -> Result<String, String> {
+    let ids = required_array_str(args, "ids")?;
+    let cwd = opt_cwd(args);
+    require_bounded_relative_scope("cgrep_agent_expand", cwd, opt_str(args, "path"), true)?;
+    let mut cmd = vec![
+        "--format".to_string(),
+        "json2".to_string(),
+        "--compact".to_string(),
+        "agent".to_string(),
+        "expand".to_string(),
+    ];
+    for id in ids {
+        cmd.push("--id".to_string());
+        cmd.push(id);
+    }
+    push_opt_flag_value(&mut cmd, "-p", opt_str(args, "path"));
+    push_opt_flag_value_u64(&mut cmd, "-C", opt_u64(args, "context"));
     run_cgrep(&cmd, cwd)
 }
 
@@ -341,6 +445,11 @@ fn tool_index(args: &Value) -> Result<String, String> {
     push_opt_flag_value(&mut cmd, "-p", opt_str(args, "path"));
     push_bool_flag(&mut cmd, "--force", opt_bool(args, "force"));
     push_bool_flag(&mut cmd, "--high-memory", opt_bool(args, "high_memory"));
+    push_bool_flag(
+        &mut cmd,
+        "--include-ignored",
+        opt_bool(args, "include_ignored"),
+    );
     push_opt_flag_value(&mut cmd, "--embeddings", opt_str(args, "embeddings"));
 
     if let Some(excludes) = opt_array_str(args, "exclude_paths") {
@@ -359,6 +468,25 @@ fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
         .ok_or_else(|| format!("missing required parameter: {}", key))
 }
 
+fn required_array_str(args: &Value, key: &str) -> Result<Vec<String>, String> {
+    let values = args
+        .get(key)
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("missing required parameter: {}", key))?;
+    let out = values
+        .iter()
+        .filter_map(Value::as_str)
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    if out.is_empty() {
+        return Err(format!(
+            "parameter `{}` must contain at least one string",
+            key
+        ));
+    }
+    Ok(out)
+}
+
 fn opt_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key).and_then(Value::as_str)
 }
@@ -369,6 +497,10 @@ fn opt_u64(args: &Value, key: &str) -> Option<u64> {
 
 fn opt_bool(args: &Value, key: &str) -> bool {
     args.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn opt_bool_value(args: &Value, key: &str) -> Option<bool> {
+    args.get(key).and_then(Value::as_bool)
 }
 
 fn opt_array_str<'a>(args: &'a Value, key: &str) -> Option<Vec<&'a str>> {
@@ -408,6 +540,93 @@ fn require_bounded_relative_scope(
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BootstrapOutcome {
+    AlreadyIndexed,
+    Bootstrapped,
+    FellBackToScan,
+}
+
+fn ensure_index_for_search(
+    cwd: Option<&str>,
+    path: Option<&str>,
+) -> Result<BootstrapOutcome, String> {
+    let search_root = resolve_search_root(cwd, path)?;
+    if cgrep::utils::find_index_root(&search_root).is_some() {
+        clear_bootstrap_failure(&search_root);
+        return Ok(BootstrapOutcome::AlreadyIndexed);
+    }
+    if recently_failed_bootstrap(&search_root) {
+        return Ok(BootstrapOutcome::FellBackToScan);
+    }
+
+    let cmd = vec![
+        "index".to_string(),
+        "-p".to_string(),
+        search_root.display().to_string(),
+        "--embeddings".to_string(),
+        "off".to_string(),
+    ];
+    match run_cgrep(&cmd, cwd) {
+        Ok(_) => {
+            clear_bootstrap_failure(&search_root);
+            Ok(BootstrapOutcome::Bootstrapped)
+        }
+        Err(_) => {
+            record_bootstrap_failure(&search_root);
+            Ok(BootstrapOutcome::FellBackToScan)
+        }
+    }
+}
+
+fn resolve_search_root(cwd: Option<&str>, path: Option<&str>) -> Result<PathBuf, String> {
+    let base = match cwd {
+        Some(raw) => PathBuf::from(raw),
+        None => std::env::current_dir().map_err(|err| format!("failed to resolve cwd: {err}"))?,
+    };
+    let requested = path.map(PathBuf::from).unwrap_or_else(|| base.clone());
+    let mut absolute = if requested.is_absolute() {
+        requested
+    } else {
+        base.join(requested)
+    };
+    if let Ok(canonical) = absolute.canonicalize() {
+        absolute = canonical;
+    }
+    Ok(absolute)
+}
+
+fn failure_cache() -> &'static Mutex<HashMap<String, Instant>> {
+    AUTO_INDEX_FAILURES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn recently_failed_bootstrap(search_root: &Path) -> bool {
+    let key = search_root.display().to_string();
+    let ttl = Duration::from_millis(AUTO_INDEX_FAILURE_TTL_MS);
+    let now = Instant::now();
+    let mut cache = failure_cache()
+        .lock()
+        .expect("bootstrap failure cache lock");
+    cache.retain(|_, at| now.duration_since(*at) <= ttl);
+    cache.contains_key(&key)
+}
+
+fn record_bootstrap_failure(search_root: &Path) {
+    let key = search_root.display().to_string();
+    let mut cache = failure_cache()
+        .lock()
+        .expect("bootstrap failure cache lock");
+    cache.insert(key, Instant::now());
+}
+
+fn clear_bootstrap_failure(search_root: &Path) {
+    let key = search_root.display().to_string();
+    let mut cache = failure_cache()
+        .lock()
+        .expect("bootstrap failure cache lock");
+    cache.remove(&key);
 }
 
 fn push_opt_flag_value(cmd: &mut Vec<String>, flag: &str, value: Option<&str>) {
@@ -533,12 +752,54 @@ fn tool_definitions() -> Vec<Value> {
                     "file_type": { "type": "string" },
                     "glob": { "type": "string" },
                     "exclude": { "type": "string" },
+                    "budget": { "type": "string", "enum": ["tight", "balanced", "full", "off"] },
+                    "max_total_chars": { "type": "number" },
+                    "max_chars_per_snippet": { "type": "number" },
+                    "max_context_chars": { "type": "number" },
+                    "dedupe_context": { "type": "boolean" },
+                    "path_alias": { "type": "boolean" },
+                    "suppress_boilerplate": { "type": "boolean" },
+                    "auto_index": { "type": "boolean" },
                     "changed": { "oneOf": [{ "type": "boolean" }, { "type": "string" }] },
                     "mode": { "type": "string", "enum": ["keyword", "semantic", "hybrid"] },
                     "regex": { "type": "boolean" },
                     "case_sensitive": { "type": "boolean" },
                     "no_index": { "type": "boolean" },
                     "fuzzy": { "type": "boolean" }
+                }
+            }
+        }),
+        json!({
+            "name": "cgrep_agent_locate",
+            "description": "Stage 1 low-token retrieval: locate candidate IDs.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": { "type": "string" },
+                    "path": { "type": "string" },
+                    "cwd": { "type": "string" },
+                    "changed": { "oneOf": [{ "type": "boolean" }, { "type": "string" }] },
+                    "limit": { "type": "number" },
+                    "mode": { "type": "string", "enum": ["keyword", "semantic", "hybrid"] },
+                    "budget": { "type": "string", "enum": ["tight", "balanced", "full", "off"] }
+                }
+            }
+        }),
+        json!({
+            "name": "cgrep_agent_expand",
+            "description": "Stage 2 retrieval: expand selected locate IDs with context.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["ids"],
+                "properties": {
+                    "ids": {
+                        "type": "array",
+                        "items": { "type": "string" }
+                    },
+                    "path": { "type": "string" },
+                    "cwd": { "type": "string" },
+                    "context": { "type": "number" }
                 }
             }
         }),
@@ -649,6 +910,7 @@ fn tool_definitions() -> Vec<Value> {
                     "cwd": { "type": "string" },
                     "force": { "type": "boolean" },
                     "high_memory": { "type": "boolean" },
+                    "include_ignored": { "type": "boolean" },
                     "embeddings": { "type": "string", "enum": ["off", "auto", "precompute"] },
                     "exclude_paths": {
                         "type": "array",

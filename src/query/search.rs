@@ -167,6 +167,11 @@ struct SearchJson2Meta<'a> {
     dedupe_context: bool,
     path_alias: bool,
     suppress_boilerplate: bool,
+    confidence: f32,
+    fallback_chain: Vec<String>,
+    bootstrap_index: bool,
+    payload_chars: usize,
+    payload_tokens_estimate: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     changed_rev: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -289,6 +294,8 @@ pub fn run(
     path_alias: bool,
     suppress_boilerplate: bool,
     persist_agent_hints: bool,
+    explicit_mode: bool,
+    bootstrap_index: bool,
 ) -> Result<()> {
     let start_time = Instant::now();
     let use_color = use_colors() && format == OutputFormat::Text;
@@ -412,6 +419,66 @@ pub fn run(
             effective_cache_ttl,
         )?,
     };
+    let mut confidence = estimate_confidence(&outcome.results, effective_search_mode);
+    let mut fallback_chain = vec![format!(
+        "{}:{}",
+        effective_search_mode,
+        match outcome.mode {
+            IndexMode::Index => "index",
+            IndexMode::Scan => "scan",
+        }
+    )];
+
+    if should_attempt_keyword_fallback(
+        effective_search_mode,
+        explicit_mode,
+        requested_mode,
+        no_ignore,
+        fuzzy,
+        compiled_regex.is_some(),
+        confidence,
+        &outcome.results,
+    ) {
+        match hybrid_search(
+            query,
+            &index_root,
+            &search_root,
+            &workspace_root,
+            &config,
+            effective_max_results,
+            context,
+            file_type,
+            glob_pattern,
+            exclude_pattern,
+            compiled_glob.as_ref(),
+            compiled_exclude.as_ref(),
+            &config_exclude_patterns,
+            changed_filter.as_ref(),
+            HybridSearchMode::Hybrid,
+            recursive,
+            use_cache,
+            effective_cache_ttl,
+        ) {
+            Ok(hybrid_outcome) => {
+                let hybrid_confidence =
+                    estimate_confidence(&hybrid_outcome.results, HybridSearchMode::Hybrid);
+                let should_replace = hybrid_outcome.results.len() > outcome.results.len()
+                    || hybrid_confidence > confidence + 0.08;
+                fallback_chain.push("hybrid:attempted".to_string());
+                if should_replace {
+                    outcome = hybrid_outcome;
+                    effective_search_mode = HybridSearchMode::Hybrid;
+                    confidence = hybrid_confidence;
+                    fallback_chain.push("hybrid:selected".to_string());
+                } else {
+                    fallback_chain.push("hybrid:discarded".to_string());
+                }
+            }
+            Err(_) => {
+                fallback_chain.push("hybrid:unavailable".to_string());
+            }
+        }
+    }
 
     if using_parent && outcome.mode == IndexMode::Index {
         eprintln!("Using index from: {}", index_root.display());
@@ -468,7 +535,7 @@ pub fn run(
                     .filter_map(|result| {
                         result.line.map(|line| crate::query::agent::AgentHintInput {
                             id: result.result_id.clone(),
-                            path: result.path.clone(),
+                            path: normalize_hint_path(&result.path, &search_root, &workspace_root),
                             line,
                             snippet: result.snippet.clone(),
                         })
@@ -490,6 +557,8 @@ pub fn run(
                     SearchJson2Result::from_result(result, !compact, alias)
                 })
                 .collect();
+            let payload_chars = estimate_json2_payload_chars(&json2_results);
+            let payload_tokens_estimate = estimate_tokens_from_chars(payload_chars);
 
             let payload = SearchJson2Payload {
                 meta: SearchJson2Meta {
@@ -513,6 +582,11 @@ pub fn run(
                     dedupe_context: budget.dedupe_context,
                     path_alias,
                     suppress_boilerplate: budget.suppress_boilerplate,
+                    confidence,
+                    fallback_chain: fallback_chain.clone(),
+                    bootstrap_index,
+                    payload_chars,
+                    payload_tokens_estimate,
                     changed_rev: changed_filter.as_ref().map(|f| f.rev()),
                     path_aliases: path_aliases_meta,
                 },
@@ -1198,6 +1272,7 @@ fn collect_index_candidates(
     let ranking_identifier = single_identifier_query(query);
 
     let mut candidates: Vec<IndexCandidate> = Vec::new();
+    let mut per_path_counts: HashMap<String, usize> = HashMap::new();
 
     for (score, doc_address) in &top_docs {
         if candidates.len() >= max_candidates {
@@ -1214,6 +1289,10 @@ fn collect_index_candidates(
         let Some(scope_path) = scope_relative_path(&full_path, search_root) else {
             continue;
         };
+        let current_path_count = per_path_counts.get(&scope_path).copied().unwrap_or(0);
+        if current_path_count >= MAX_INITIAL_RESULTS_PER_PATH {
+            continue;
+        }
         let display_path = workspace_display_path(&full_path, workspace_root);
         if !recursive && Path::new(&scope_path).components().count() > 1 {
             continue;
@@ -1299,6 +1378,10 @@ fn collect_index_candidates(
                     if candidates.len() >= max_candidates {
                         break;
                     }
+                    let used = per_path_counts.get(&scope_path).copied().unwrap_or(0);
+                    if used >= MAX_INITIAL_RESULTS_PER_PATH {
+                        break;
+                    }
 
                     candidates.push(IndexCandidate {
                         stored_path: path_value.to_string(),
@@ -1311,6 +1394,7 @@ fn collect_index_candidates(
                         symbol_start: None,
                         symbol_end: None,
                     });
+                    *per_path_counts.entry(scope_path.clone()).or_insert(0) += 1;
                 }
                 continue;
             }
@@ -1337,6 +1421,7 @@ fn collect_index_candidates(
             },
             symbol_end,
         });
+        *per_path_counts.entry(scope_path).or_insert(0) += 1;
     }
 
     Ok(candidates)
@@ -1493,6 +1578,71 @@ fn parse_index_mode(mode: &str) -> IndexMode {
     }
 }
 
+const KEYWORD_FALLBACK_CONFIDENCE_THRESHOLD: f32 = 0.45;
+const MAX_INITIAL_RESULTS_PER_PATH: usize = 2;
+const NOISY_PATH_SEGMENTS: &[&str] = &["target/", "dist/", "build/", "node_modules/", ".venv/"];
+
+fn should_attempt_keyword_fallback(
+    mode: HybridSearchMode,
+    explicit_mode: bool,
+    requested_mode: IndexMode,
+    no_ignore: bool,
+    fuzzy: bool,
+    has_regex: bool,
+    confidence: f32,
+    results: &[SearchResult],
+) -> bool {
+    mode == HybridSearchMode::Keyword
+        && !explicit_mode
+        && requested_mode == IndexMode::Index
+        && !no_ignore
+        && !fuzzy
+        && !has_regex
+        && (results.is_empty() || confidence < KEYWORD_FALLBACK_CONFIDENCE_THRESHOLD)
+}
+
+fn estimate_confidence(results: &[SearchResult], mode: HybridSearchMode) -> f32 {
+    if results.is_empty() {
+        return 0.0;
+    }
+    let top_score = results.first().map(|r| r.score).unwrap_or(0.0);
+    let count_factor = (results.len().min(5) as f32) / 5.0;
+    let mode_bonus = match mode {
+        HybridSearchMode::Keyword => 0.0,
+        HybridSearchMode::Semantic => 0.05,
+        HybridSearchMode::Hybrid => 0.08,
+    };
+    let confidence = 0.15 + (0.50 * count_factor) + (0.35 * score_to_unit(top_score)) + mode_bonus;
+    confidence.clamp(0.0, 1.0)
+}
+
+fn score_to_unit(score: f32) -> f32 {
+    if !score.is_finite() || score <= 0.0 {
+        return 0.0;
+    }
+    (score / (score + 1.0)).clamp(0.0, 1.0)
+}
+
+fn estimate_json2_payload_chars(results: &[SearchJson2Result]) -> usize {
+    results
+        .iter()
+        .map(|result| {
+            let mut chars = result.id.len() + result.path.len() + result.snippet.len();
+            if let Some(before) = &result.context_before {
+                chars += before.iter().map(|line| line.len()).sum::<usize>();
+            }
+            if let Some(after) = &result.context_after {
+                chars += after.iter().map(|line| line.len()).sum::<usize>();
+            }
+            chars
+        })
+        .sum()
+}
+
+fn estimate_tokens_from_chars(chars: usize) -> usize {
+    chars.saturating_add(3) / 4
+}
+
 fn query_tokens_for_ranking(query: &str) -> Vec<String> {
     query
         .split(|c: char| !c.is_alphanumeric() && c != '_' && c != ':')
@@ -1568,7 +1718,8 @@ fn literal_contains(text: &str, query: &str, case_sensitive: bool) -> bool {
     if case_sensitive {
         return text.contains(query);
     }
-    text.to_ascii_lowercase().contains(&query.to_ascii_lowercase())
+    text.to_ascii_lowercase()
+        .contains(&query.to_ascii_lowercase())
 }
 
 fn single_identifier_query(query: &str) -> Option<String> {
@@ -1594,9 +1745,6 @@ fn single_identifier_query(query: &str) -> Option<String> {
 }
 
 fn path_ranking_bonus(display_path: &str, query_tokens: &[String]) -> f32 {
-    if query_tokens.is_empty() {
-        return 0.0;
-    }
     let path = display_path.to_ascii_lowercase();
     let mut bonus: f32 = 0.0;
     for token in query_tokens {
@@ -1604,7 +1752,13 @@ fn path_ranking_bonus(display_path: &str, query_tokens: &[String]) -> f32 {
             bonus += 0.03;
         }
     }
-    bonus.min(0.15)
+    let mut penalty = 0.0f32;
+    for segment in NOISY_PATH_SEGMENTS {
+        if path.contains(segment) {
+            penalty += 0.08;
+        }
+    }
+    (bonus.min(0.15) - penalty.min(0.25)).clamp(-0.25, 0.15)
 }
 
 fn symbol_ranking_bonus(
@@ -2521,6 +2675,34 @@ fn resolve_full_path(path_value: &str, index_root: &Path) -> PathBuf {
     }
 }
 
+fn normalize_hint_path(result_path: &str, search_root: &Path, workspace_root: &Path) -> String {
+    let candidate = Path::new(result_path);
+    if !candidate.is_absolute() {
+        if let Ok(search_relative) = search_root.strip_prefix(workspace_root) {
+            if !search_relative.as_os_str().is_empty() {
+                if let Ok(stripped) = candidate.strip_prefix(search_relative) {
+                    let rendered = stripped.display().to_string();
+                    if !rendered.is_empty() {
+                        return rendered;
+                    }
+                }
+            }
+        }
+    }
+
+    let full_path = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        let workspace_candidate = workspace_root.join(candidate);
+        if workspace_candidate.exists() {
+            workspace_candidate
+        } else {
+            search_root.join(candidate)
+        }
+    };
+    scope_relative_path(&full_path, search_root).unwrap_or_else(|| result_path.to_string())
+}
+
 fn scope_relative_path(full_path: &Path, search_root: &Path) -> Option<String> {
     let rel = full_path.strip_prefix(search_root).ok()?;
     let rendered = rel.display().to_string();
@@ -2626,6 +2808,14 @@ mod tests {
         let root = Path::new("/tmp/work/src/lib.rs");
         let rel = scope_relative_path(root, root).expect("scope path");
         assert_eq!(rel, "lib.rs");
+    }
+
+    #[test]
+    fn normalize_hint_path_uses_search_root_relative_paths() {
+        let search_root = Path::new("/tmp/work/src");
+        let workspace_root = Path::new("/tmp/work");
+        let normalized = normalize_hint_path("src/lib.rs", search_root, workspace_root);
+        assert_eq!(normalized, "lib.rs");
     }
 
     #[test]
@@ -2870,6 +3060,14 @@ mod tests {
     }
 
     #[test]
+    fn ranking_path_bonus_penalizes_noise_directories() {
+        let tokens = query_tokens_for_ranking("needle");
+        let noisy = path_ranking_bonus("target/debug/noise.rs", &tokens);
+        let clean = path_ranking_bonus("src/core/noise.rs", &tokens);
+        assert!(noisy < clean);
+    }
+
+    #[test]
     fn ranking_symbol_bonus_prefers_exact_symbol_match() {
         let exact = symbol_ranking_bonus("symbol", "target_fn", Some("target_fn"));
         let partial = symbol_ranking_bonus("symbol", "target_fn_impl", Some("target_fn"));
@@ -2877,6 +3075,31 @@ mod tests {
 
         assert!(exact > partial);
         assert!(partial >= none);
+    }
+
+    #[test]
+    fn keyword_fallback_policy_respects_explicit_mode() {
+        let results = vec![sample_result("src/lib.rs", 1, "needle")];
+        assert!(!should_attempt_keyword_fallback(
+            HybridSearchMode::Keyword,
+            true,
+            IndexMode::Index,
+            false,
+            false,
+            false,
+            0.1,
+            &results,
+        ));
+        assert!(should_attempt_keyword_fallback(
+            HybridSearchMode::Keyword,
+            false,
+            IndexMode::Index,
+            false,
+            false,
+            false,
+            0.1,
+            &results,
+        ));
     }
 
     fn sample_result(path: &str, line: usize, snippet: &str) -> SearchResult {
