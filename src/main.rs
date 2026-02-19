@@ -469,12 +469,14 @@ fn main() -> Result<()> {
             embeddings_force,
             high_memory,
             include_ignored,
+            include_paths,
             exclude_paths,
         } => {
             indexer::index::run(
                 path.as_deref(),
                 force,
                 exclude_paths,
+                include_paths,
                 high_memory,
                 include_ignored,
                 &embeddings,

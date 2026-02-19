@@ -9,6 +9,12 @@ cgrep index --force
 # 인덱싱에서 경로 제외
 cgrep index -e vendor/ -e dist/
 
+# ignore 규칙은 유지하고 특정 ignore 경로만 포함
+cgrep index -e graph_mode -e eager_mode/torch-rbln/third_party/pytorch --include-path .venv --high-memory
+
+# ignore 경로 전체 포함(기본 동작 비활성화)
+cgrep index --include-ignored
+
 # 임베딩 모드
 cgrep index --embeddings auto
 cgrep index --embeddings precompute
@@ -51,11 +57,13 @@ cgrep watch --no-adaptive
 
 - 인덱스는 `.cgrep/` 아래에 저장
 - 하위 디렉터리에서 검색해도 가장 가까운 상위 인덱스를 재사용
-- 인덱싱은 `.gitignore`를 무시, scan 모드는 `.gitignore`를 존중
+- 인덱싱은 기본적으로 `.gitignore`/`.ignore`를 존중 (`--include-ignored`로 전체 포함 가능)
+- `--include-path <path>`로 ignore 경로 중 일부만 선택적으로 인덱싱 가능
 - watch는 기본적으로 적응형 backoff 사용 (`--no-adaptive`로 비활성화)
 - watch 기본값은 백그라운드 운용 기준으로 조정 (`--min-interval 180`, 약 3분)
 - watch는 인덱싱 가능한 확장자만 반응하고 temp/swap 파일은 건너뜀
-- watch는 초기/증분 인덱싱 모두에서 `[index].exclude_paths`를 존중
+- watch/daemon은 `.cgrep/metadata.json`의 최근 인덱스 프로필을 재사용
+- 재사용 프로필은 최근 `cgrep index` 실행 옵션을 그대로 보존
 - watch 재인덱싱은 변경 경로만 증분 처리(갱신/삭제)
 
 ## Watch 기본값

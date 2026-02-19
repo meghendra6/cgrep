@@ -31,6 +31,36 @@ const METADATA_FILE: &str = ".cgrep/metadata.json";
 pub(crate) const DEFAULT_WRITER_BUDGET_BYTES: usize = 50_000_000;
 const HIGH_MEMORY_WRITER_BUDGET_BYTES: usize = 1024 * 1024 * 1024;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub(crate) struct StoredIndexOptions {
+    pub exclude_paths: Vec<String>,
+    pub include_paths: Vec<String>,
+    pub respect_git_ignore: bool,
+    pub high_memory: bool,
+}
+
+impl Default for StoredIndexOptions {
+    fn default() -> Self {
+        Self {
+            exclude_paths: Vec::new(),
+            include_paths: Vec::new(),
+            respect_git_ignore: true,
+            high_memory: false,
+        }
+    }
+}
+
+impl StoredIndexOptions {
+    pub(crate) fn writer_budget_bytes(&self) -> usize {
+        if self.high_memory {
+            HIGH_MEMORY_WRITER_BUDGET_BYTES
+        } else {
+            DEFAULT_WRITER_BUDGET_BYTES
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EmbeddingsMode {
     Off,
@@ -560,6 +590,8 @@ struct IndexMetadata {
     /// Map of file path to metadata
     #[serde(default, deserialize_with = "deserialize_files")]
     files: HashMap<String, FileMetadata>,
+    #[serde(default)]
+    index_options: Option<StoredIndexOptions>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -604,6 +636,27 @@ where
             (path, meta)
         })
         .collect())
+}
+
+fn load_index_metadata(root: &Path) -> Option<IndexMetadata> {
+    let metadata_path = root.join(METADATA_FILE);
+    let content = std::fs::read_to_string(metadata_path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+pub(crate) fn resolve_index_options_for_watch(root: &Path, config: &Config) -> StoredIndexOptions {
+    if let Some(metadata) = load_index_metadata(root) {
+        if let Some(options) = metadata.index_options {
+            return options;
+        }
+    }
+
+    StoredIndexOptions {
+        exclude_paths: config.index().exclude_paths().to_vec(),
+        include_paths: Vec::new(),
+        respect_git_ignore: config.index().respect_git_ignore(),
+        high_memory: false,
+    }
 }
 
 #[cfg(test)]
@@ -881,7 +934,9 @@ pub struct IndexBuilder {
     schema: Schema,
     fields: IndexFields,
     exclude_patterns: Vec<String>,
+    include_paths: Vec<String>,
     respect_git_ignore: bool,
+    high_memory: bool,
     symbol_preview_lines: usize,
     symbol_max_chars: usize,
     max_symbols_per_file: usize,
@@ -889,6 +944,15 @@ pub struct IndexBuilder {
 }
 
 impl IndexBuilder {
+    fn stored_index_options(&self) -> StoredIndexOptions {
+        StoredIndexOptions {
+            exclude_paths: self.exclude_patterns.clone(),
+            include_paths: self.include_paths.clone(),
+            respect_git_ignore: self.respect_git_ignore,
+            high_memory: self.high_memory,
+        }
+    }
+
     #[allow(dead_code)]
     pub fn new(root: impl AsRef<Path>) -> Result<Self> {
         Self::with_excludes(root, Vec::new())
@@ -902,10 +966,14 @@ impl IndexBuilder {
         let max_symbols_per_file = 500;
         let allowed_symbol_kinds = None;
         let respect_git_ignore = true;
+        let include_paths = Vec::new();
+        let high_memory = false;
         Self::with_excludes_and_symbols(
             root,
             excludes,
+            include_paths,
             respect_git_ignore,
+            high_memory,
             preview_lines,
             symbol_max_chars,
             max_symbols_per_file,
@@ -917,7 +985,9 @@ impl IndexBuilder {
     pub fn with_excludes_and_symbols(
         root: impl AsRef<Path>,
         excludes: Vec<String>,
+        include_paths: Vec<String>,
         respect_git_ignore: bool,
+        high_memory: bool,
         symbol_preview_lines: usize,
         symbol_max_chars: usize,
         max_symbols_per_file: usize,
@@ -954,7 +1024,9 @@ impl IndexBuilder {
             schema,
             fields,
             exclude_patterns: excludes,
+            include_paths,
             respect_git_ignore,
+            high_memory,
             symbol_preview_lines,
             symbol_max_chars,
             max_symbols_per_file,
@@ -1019,6 +1091,7 @@ impl IndexBuilder {
             .context("Failed to create index writer")?;
 
         let scanner = FileScanner::with_excludes(&self.root, self.exclude_patterns.clone())
+            .with_includes(self.include_paths.clone())
             .with_gitignore(self.respect_git_ignore);
         let files = scanner.list_files()?;
         let current_paths: HashSet<String> = files
@@ -1046,6 +1119,7 @@ impl IndexBuilder {
 
         let mut new_metadata = IndexMetadata {
             files: HashMap::with_capacity(total_files),
+            index_options: Some(self.stored_index_options()),
         };
         let mut indexed_count = 0usize;
         let mut skipped_count = 0usize;
@@ -1373,6 +1447,7 @@ impl IndexBuilder {
         let content = std::fs::read_to_string(&metadata_path).unwrap_or_default();
         let old_metadata: IndexMetadata = serde_json::from_str(&content).unwrap_or_default();
         let mut new_metadata = old_metadata;
+        new_metadata.index_options = Some(self.stored_index_options());
 
         let index = Index::open_in_dir(&index_path).context("Failed to open existing index")?;
         let schema = index.schema();
@@ -1629,6 +1704,7 @@ pub fn run(
     path: Option<&str>,
     force: bool,
     excludes: Vec<String>,
+    include_paths: Vec<String>,
     high_memory: bool,
     include_ignored: bool,
     embeddings_mode: &str,
@@ -1646,10 +1722,18 @@ pub fn run(
     all_excludes.extend(config.index().exclude_paths().iter().cloned());
 
     let respect_git_ignore = config.index().respect_git_ignore() && !include_ignored;
+    let index_options = StoredIndexOptions {
+        exclude_paths: all_excludes,
+        include_paths,
+        respect_git_ignore,
+        high_memory,
+    };
     let builder = IndexBuilder::with_excludes_and_symbols(
         &root,
-        all_excludes,
-        respect_git_ignore,
+        index_options.exclude_paths.clone(),
+        index_options.include_paths.clone(),
+        index_options.respect_git_ignore,
+        index_options.high_memory,
         config.embeddings.symbol_preview_lines(),
         config.embeddings.symbol_max_chars(),
         config.embeddings.max_symbols_per_file(),
@@ -1658,12 +1742,10 @@ pub fn run(
             .symbol_kinds()
             .map(|kinds| kinds.into_iter().collect()),
     )?;
-    let writer_budget_bytes = if high_memory {
+    if index_options.high_memory {
         eprintln!("Using high-memory indexing: writer budget = 1GiB");
-        HIGH_MEMORY_WRITER_BUDGET_BYTES
-    } else {
-        DEFAULT_WRITER_BUDGET_BYTES
-    };
+    }
+    let writer_budget_bytes = index_options.writer_budget_bytes();
     let count = builder.build(force, writer_budget_bytes)?;
 
     println!("Index complete: {} files", count);
@@ -2064,5 +2146,71 @@ mod tests {
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].start_line, 1);
         assert_eq!(chunks[1].start_line, 3);
+    }
+
+    #[test]
+    fn build_persists_index_options_for_watch_reuse() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        std::fs::write(root.join("lib.rs"), "fn keep() {}").expect("write file");
+
+        let builder = IndexBuilder::with_excludes_and_symbols(
+            root,
+            vec!["target/".to_string()],
+            vec![".venv".to_string()],
+            true,
+            true,
+            DEFAULT_SYMBOL_PREVIEW_LINES,
+            DEFAULT_SYMBOL_MAX_CHARS,
+            500,
+            None,
+        )
+        .expect("builder");
+
+        builder
+            .build(false, HIGH_MEMORY_WRITER_BUDGET_BYTES)
+            .expect("build");
+        let metadata = load_metadata(root);
+        let opts = metadata.index_options.expect("stored index options");
+        assert_eq!(opts.exclude_paths, vec!["target/"]);
+        assert_eq!(opts.include_paths, vec![".venv"]);
+        assert!(opts.respect_git_ignore);
+        assert!(opts.high_memory);
+    }
+
+    #[test]
+    fn resolve_watch_options_prefers_metadata_over_config() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let metadata_path = root.join(METADATA_FILE);
+        std::fs::create_dir_all(
+            metadata_path
+                .parent()
+                .expect("metadata parent should exist"),
+        )
+        .expect("create metadata dir");
+
+        let stored = StoredIndexOptions {
+            exclude_paths: vec!["from-metadata/".to_string()],
+            include_paths: vec![".venv".to_string()],
+            respect_git_ignore: false,
+            high_memory: true,
+        };
+        let metadata = IndexMetadata {
+            files: HashMap::new(),
+            index_options: Some(stored.clone()),
+        };
+        std::fs::write(
+            &metadata_path,
+            serde_json::to_string_pretty(&metadata).expect("serialize metadata"),
+        )
+        .expect("write metadata");
+
+        let mut config = Config::default();
+        config.index.exclude_paths = vec!["from-config/".to_string()];
+        config.index.respect_git_ignore = Some(true);
+
+        let resolved = resolve_index_options_for_watch(root, &config);
+        assert_eq!(resolved, stored);
     }
 }

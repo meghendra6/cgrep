@@ -458,6 +458,12 @@ fn tool_index(args: &Value) -> Result<String, String> {
             cmd.push(pattern.to_string());
         }
     }
+    if let Some(includes) = opt_array_str(args, "include_paths") {
+        for path in includes {
+            cmd.push("--include-path".to_string());
+            cmd.push(path.to_string());
+        }
+    }
 
     run_cgrep(&cmd, cwd)
 }
@@ -913,6 +919,10 @@ fn tool_definitions() -> Vec<Value> {
                     "include_ignored": { "type": "boolean" },
                     "embeddings": { "type": "string", "enum": ["off", "auto", "precompute"] },
                     "exclude_paths": {
+                        "type": "array",
+                        "items": { "type": "string" }
+                    },
+                    "include_paths": {
                         "type": "array",
                         "items": { "type": "string" }
                     }
