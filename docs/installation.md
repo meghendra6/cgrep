@@ -12,6 +12,8 @@ curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/insta
 
 Use the quick-install command above.
 
+Linux note: release binaries target glibc 2.35+ (built on Ubuntu 22.04).
+
 Pin a version:
 
 ```bash

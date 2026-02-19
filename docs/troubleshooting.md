@@ -13,6 +13,7 @@
 | `Error: Path cannot be empty` from `read` | missing path argument | pass a valid file path to `cgrep read <path>` |
 | `error: unexpected argument '<path>' found` when query starts with `-` | `--` separator was placed before options/path | put flags/path first, then `--` (e.g., `cgrep search -p src -- --help`) |
 | `invalid value 'codex' for '<HOST>'` from `mcp install` | `codex` is not an MCP host value for this command | use `cgrep agent install codex` for Codex, or choose a host from `cgrep mcp install --help` |
+| `GLIBC_2.39 not found` on Linux after release install | host glibc is older than the downloaded Linux asset | upgrade to the latest release (Linux builds are now pinned to Ubuntu 22.04 / glibc 2.35 baseline) or install from source (`cargo install --path .`) |
 
 ## Fast Recovery Sequence
 
