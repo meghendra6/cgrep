@@ -58,7 +58,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          CARGO_VERSION=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
+          CARGO_VERSION="$(
+            awk -F '"' '
+              /^\[package\]/ { in_package=1; next }
+              /^\[/ { if (in_package) exit }
+              in_package && $1 ~ /^version = / { print $2; exit }
+            ' Cargo.toml
+          )"
+          if [[ -z "${CARGO_VERSION}" ]]; then
+            echo "Failed to read package.version from Cargo.toml"
+            exit 1
+          fi
           EXPECTED_TAG="v${CARGO_VERSION}"
           if [[ "${TAG_NAME}" != "${EXPECTED_TAG}" ]]; then
             echo "Tag (${TAG_NAME}) does not match Cargo.toml version (${EXPECTED_TAG})"
