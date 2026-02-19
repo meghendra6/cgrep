@@ -12,6 +12,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::mpsc::{channel, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
+use crate::indexer::index::SymbolIndexOptions;
 use crate::indexer::scanner::is_indexable_extension;
 use crate::indexer::IndexBuilder;
 use cgrep::config::Config;
@@ -343,20 +344,8 @@ pub fn run(
     let config = Config::load_for_dir(&root);
     let index_options = crate::indexer::index::resolve_index_options_for_watch(&root, &config);
     let excludes = index_options.exclude_paths.clone();
-    let builder = IndexBuilder::with_excludes_and_symbols(
-        &root,
-        excludes.clone(),
-        index_options.include_paths.clone(),
-        index_options.respect_git_ignore,
-        index_options.high_memory,
-        config.embeddings.symbol_preview_lines(),
-        config.embeddings.symbol_max_chars(),
-        config.embeddings.max_symbols_per_file(),
-        config
-            .embeddings
-            .symbol_kinds()
-            .map(|kinds| kinds.into_iter().collect()),
-    )?;
+    let symbol_options = SymbolIndexOptions::from_config(&config);
+    let builder = IndexBuilder::with_options(&root, index_options.clone(), symbol_options)?;
     let writer_budget_bytes = index_options.writer_budget_bytes();
     if index_options.high_memory {
         eprintln!("Using high-memory indexing in watch mode: writer budget = 1GiB");

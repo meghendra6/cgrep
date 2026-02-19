@@ -61,6 +61,39 @@ impl StoredIndexOptions {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct SymbolIndexOptions {
+    pub symbol_preview_lines: usize,
+    pub symbol_max_chars: usize,
+    pub max_symbols_per_file: usize,
+    pub allowed_symbol_kinds: Option<HashSet<String>>,
+}
+
+impl Default for SymbolIndexOptions {
+    fn default() -> Self {
+        Self {
+            symbol_preview_lines: DEFAULT_SYMBOL_PREVIEW_LINES,
+            symbol_max_chars: DEFAULT_SYMBOL_MAX_CHARS,
+            max_symbols_per_file: 500,
+            allowed_symbol_kinds: None,
+        }
+    }
+}
+
+impl SymbolIndexOptions {
+    pub(crate) fn from_config(config: &Config) -> Self {
+        Self {
+            symbol_preview_lines: config.embeddings.symbol_preview_lines(),
+            symbol_max_chars: config.embeddings.symbol_max_chars(),
+            max_symbols_per_file: config.embeddings.max_symbols_per_file(),
+            allowed_symbol_kinds: config
+                .embeddings
+                .symbol_kinds()
+                .map(|kinds| kinds.into_iter().collect()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EmbeddingsMode {
     Off,
@@ -961,38 +994,31 @@ impl IndexBuilder {
     /// Create index builder with exclude patterns
     #[allow(dead_code)]
     pub fn with_excludes(root: impl AsRef<Path>, excludes: Vec<String>) -> Result<Self> {
-        let preview_lines = DEFAULT_SYMBOL_PREVIEW_LINES;
-        let symbol_max_chars = DEFAULT_SYMBOL_MAX_CHARS;
-        let max_symbols_per_file = 500;
-        let allowed_symbol_kinds = None;
-        let respect_git_ignore = true;
-        let include_paths = Vec::new();
-        let high_memory = false;
-        Self::with_excludes_and_symbols(
-            root,
-            excludes,
+        let index_options = StoredIndexOptions {
+            exclude_paths: excludes,
+            ..StoredIndexOptions::default()
+        };
+        Self::with_options(root, index_options, SymbolIndexOptions::default())
+    }
+
+    /// Create index builder with index + symbol options
+    pub fn with_options(
+        root: impl AsRef<Path>,
+        index_options: StoredIndexOptions,
+        symbol_options: SymbolIndexOptions,
+    ) -> Result<Self> {
+        let StoredIndexOptions {
+            exclude_paths,
             include_paths,
             respect_git_ignore,
             high_memory,
-            preview_lines,
+        } = index_options;
+        let SymbolIndexOptions {
+            symbol_preview_lines,
             symbol_max_chars,
             max_symbols_per_file,
             allowed_symbol_kinds,
-        )
-    }
-
-    /// Create index builder with symbol config overrides
-    pub fn with_excludes_and_symbols(
-        root: impl AsRef<Path>,
-        excludes: Vec<String>,
-        include_paths: Vec<String>,
-        respect_git_ignore: bool,
-        high_memory: bool,
-        symbol_preview_lines: usize,
-        symbol_max_chars: usize,
-        max_symbols_per_file: usize,
-        allowed_symbol_kinds: Option<HashSet<String>>,
-    ) -> Result<Self> {
+        } = symbol_options;
         let mut schema_builder = Schema::builder();
 
         let path = schema_builder.add_text_field("path", TEXT | STORED);
@@ -1023,7 +1049,7 @@ impl IndexBuilder {
             root: root.as_ref().to_path_buf(),
             schema,
             fields,
-            exclude_patterns: excludes,
+            exclude_patterns: exclude_paths,
             include_paths,
             respect_git_ignore,
             high_memory,
@@ -1700,16 +1726,27 @@ impl IndexBuilder {
 }
 
 /// Run the index command
-pub fn run(
-    path: Option<&str>,
-    force: bool,
-    excludes: Vec<String>,
-    include_paths: Vec<String>,
-    high_memory: bool,
-    include_ignored: bool,
-    embeddings_mode: &str,
-    embeddings_force: bool,
-) -> Result<()> {
+pub struct RunOptions {
+    pub force: bool,
+    pub excludes: Vec<String>,
+    pub include_paths: Vec<String>,
+    pub high_memory: bool,
+    pub include_ignored: bool,
+    pub embeddings_mode: String,
+    pub embeddings_force: bool,
+}
+
+pub fn run(path: Option<&str>, options: RunOptions) -> Result<()> {
+    let RunOptions {
+        force,
+        excludes,
+        include_paths,
+        high_memory,
+        include_ignored,
+        embeddings_mode,
+        embeddings_force,
+    } = options;
+
     let root = path
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::current_dir().ok())
@@ -1728,20 +1765,8 @@ pub fn run(
         respect_git_ignore,
         high_memory,
     };
-    let builder = IndexBuilder::with_excludes_and_symbols(
-        &root,
-        index_options.exclude_paths.clone(),
-        index_options.include_paths.clone(),
-        index_options.respect_git_ignore,
-        index_options.high_memory,
-        config.embeddings.symbol_preview_lines(),
-        config.embeddings.symbol_max_chars(),
-        config.embeddings.max_symbols_per_file(),
-        config
-            .embeddings
-            .symbol_kinds()
-            .map(|kinds| kinds.into_iter().collect()),
-    )?;
+    let symbol_options = SymbolIndexOptions::from_config(&config);
+    let builder = IndexBuilder::with_options(&root, index_options.clone(), symbol_options)?;
     if index_options.high_memory {
         eprintln!("Using high-memory indexing: writer budget = 1GiB");
     }
@@ -1750,7 +1775,7 @@ pub fn run(
 
     println!("Index complete: {} files", count);
 
-    let mode = EmbeddingsMode::parse(embeddings_mode)?;
+    let mode = EmbeddingsMode::parse(&embeddings_mode)?;
     if embeddings_force && mode == EmbeddingsMode::Off {
         eprintln!("Warning: --embeddings-force has no effect when --embeddings=off");
         return Ok(());
@@ -2154,16 +2179,15 @@ mod tests {
         let root = dir.path();
         std::fs::write(root.join("lib.rs"), "fn keep() {}").expect("write file");
 
-        let builder = IndexBuilder::with_excludes_and_symbols(
+        let builder = IndexBuilder::with_options(
             root,
-            vec!["target/".to_string()],
-            vec![".venv".to_string()],
-            true,
-            true,
-            DEFAULT_SYMBOL_PREVIEW_LINES,
-            DEFAULT_SYMBOL_MAX_CHARS,
-            500,
-            None,
+            StoredIndexOptions {
+                exclude_paths: vec!["target/".to_string()],
+                include_paths: vec![".venv".to_string()],
+                respect_git_ignore: true,
+                high_memory: true,
+            },
+            SymbolIndexOptions::default(),
         )
         .expect("builder");
 
