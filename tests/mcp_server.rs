@@ -137,6 +137,30 @@ fn mcp_initialize_and_list_tools() {
         );
     }
 
+    let cgrep_search = tools_array
+        .iter()
+        .find(|t| t["name"].as_str() == Some("cgrep_search"))
+        .expect("cgrep_search schema");
+    assert!(cgrep_search["inputSchema"]["properties"]["profile"].is_object());
+    assert!(cgrep_search["inputSchema"]["properties"]["no_recursive"].is_object());
+    assert!(cgrep_search["inputSchema"]["properties"]["no_ignore"].is_object());
+    assert!(cgrep_search["inputSchema"]["properties"]["quiet"].is_object());
+
+    let cgrep_read = tools_array
+        .iter()
+        .find(|t| t["name"].as_str() == Some("cgrep_read"))
+        .expect("cgrep_read schema");
+    assert!(cgrep_read["inputSchema"]["properties"]["paths"].is_object());
+    assert!(cgrep_read["inputSchema"]["properties"]["section_start"].is_object());
+    assert!(cgrep_read["inputSchema"]["properties"]["section_end"].is_object());
+
+    let cgrep_definition = tools_array
+        .iter()
+        .find(|t| t["name"].as_str() == Some("cgrep_definition"))
+        .expect("cgrep_definition schema");
+    assert!(cgrep_definition["inputSchema"]["properties"]["path"].is_object());
+    assert!(cgrep_definition["inputSchema"]["properties"]["limit"].is_object());
+
     mcp.stop();
 }
 
@@ -895,6 +919,80 @@ fn mcp_read_rejects_empty_path() {
         .as_str()
         .unwrap_or_default()
         .contains("Path cannot be empty"));
+
+    mcp.stop();
+}
+
+#[test]
+fn mcp_read_accepts_colon_section_and_paths_array() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join("src/a.rs"), "line1\nline2\nline3\nline4\n");
+    write_file(&dir.path().join("src/b.rs"), "row1\nrow2\nrow3\nrow4\n");
+
+    let mut mcp = McpProc::spawn(dir.path());
+    let _ = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    }));
+
+    let colon = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_read",
+            "arguments": {
+                "path": "src/a.rs",
+                "section": "2:3"
+            }
+        }
+    }));
+    assert_ne!(colon["result"]["isError"], true);
+    let colon_text = colon["result"]["content"][0]["text"]
+        .as_str()
+        .expect("colon read text");
+    let colon_json: Value = serde_json::from_str(colon_text).expect("colon read json");
+    let colon_content = colon_json["content"].as_str().expect("colon content");
+    assert!(colon_content.contains("line2"));
+    assert!(colon_content.contains("line3"));
+    assert!(!colon_content.contains("line1"));
+
+    let batch = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_read",
+            "arguments": {
+                "paths": ["src/a.rs", "src/b.rs"],
+                "section_start": 2,
+                "section_end": 2
+            }
+        }
+    }));
+    assert_ne!(batch["result"]["isError"], true);
+    let batch_text = batch["result"]["content"][0]["text"]
+        .as_str()
+        .expect("batch read text");
+    let batch_json: Value = serde_json::from_str(batch_text).expect("batch read json");
+    assert_eq!(batch_json["meta"]["batched"], true);
+    assert_eq!(batch_json["meta"]["count"], 2);
+    let results = batch_json["results"].as_array().expect("batch results");
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0]["path"], "src/a.rs");
+    assert_eq!(results[1]["path"], "src/b.rs");
+    assert_eq!(results[0]["read"]["line_count"], 1);
+    assert_eq!(results[1]["read"]["line_count"], 1);
+    assert_eq!(
+        results[0]["read"]["content"].as_str().unwrap_or_default(),
+        "line2"
+    );
+    assert_eq!(
+        results[1]["read"]["content"].as_str().unwrap_or_default(),
+        "row2"
+    );
 
     mcp.stop();
 }

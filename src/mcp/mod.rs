@@ -6,7 +6,7 @@ pub mod install;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -36,6 +36,13 @@ Harness rules:\n\
 - Prefer structured tool calls with explicit arguments.\n\
 - Keep calls deterministic: tools return JSON (compact) from cgrep CLI.\n\
 - Narrow scope/path early to reduce retries and token churn.\n\
+- For `cgrep_read` sections, use `start-end` line ranges (`start:end` is accepted and normalized).\n\
+- Use `cgrep_read.path` for one file or `cgrep_read.paths` for batched reads.\n\
+- Use tool-specific filters before widening scope:\n\
+  cgrep_search(path/glob/exclude/changed/mode/budget/limit/context),\n\
+  cgrep_symbols(symbol_type/lang/file_type/glob/exclude/changed),\n\
+  cgrep_definition(path/limit), cgrep_references(path/limit/changed/mode),\n\
+  cgrep_index(exclude_paths/include_paths/include_ignored/high_memory).\n\
 - For edits, use your host's edit tool after locating exact targets with cgrep.\n\
 \n\
 This server is read/search oriented; it does not mutate files.";
@@ -247,6 +254,7 @@ fn tool_search(args: &Value) -> Result<String, String> {
         "--max-context-chars",
         opt_u64(args, "max_context_chars"),
     );
+    push_opt_flag_value(&mut cmd, "-P", opt_str(args, "profile"));
     push_opt_flag_value(&mut cmd, "--mode", opt_str(args, "mode"));
     push_changed(&mut cmd, args.get("changed"));
     push_bool_flag(
@@ -275,7 +283,10 @@ fn tool_search(args: &Value) -> Result<String, String> {
         "--no-index",
         opt_bool(args, "no_index") || force_scan_from_bootstrap,
     );
+    push_bool_flag(&mut cmd, "--no-recursive", opt_bool(args, "no_recursive"));
+    push_bool_flag(&mut cmd, "--no-ignore", opt_bool(args, "no_ignore"));
     push_bool_flag(&mut cmd, "--fuzzy", opt_bool(args, "fuzzy"));
+    push_bool_flag(&mut cmd, "-q", opt_bool(args, "quiet"));
     push_bool_flag(&mut cmd, "--bootstrap-index", bootstrap_index);
     cmd.push("--".to_string());
     cmd.push(query.to_string());
@@ -328,9 +339,48 @@ fn tool_agent_expand(args: &Value) -> Result<String, String> {
 }
 
 fn tool_read(args: &Value) -> Result<String, String> {
-    let path = required_str(args, "path")?;
     let cwd = opt_cwd(args);
-    require_bounded_relative_scope("cgrep_read", cwd, Some(path), false)?;
+    let paths = read_paths(args)?;
+    let section = resolve_read_section(args)?;
+    let full = opt_bool(args, "full");
+
+    for path in &paths {
+        require_bounded_relative_scope("cgrep_read", cwd, Some(path.as_str()), false)?;
+    }
+
+    if paths.len() == 1 {
+        return run_read_for_path(paths[0].as_str(), section.as_deref(), full, cwd);
+    }
+
+    let mut results: Vec<Value> = Vec::with_capacity(paths.len());
+    for path in paths {
+        let output = run_read_for_path(path.as_str(), section.as_deref(), full, cwd)?;
+        let parsed =
+            serde_json::from_str::<Value>(&output).unwrap_or_else(|_| json!({ "raw": output }));
+        results.push(json!({
+            "path": path,
+            "read": parsed
+        }));
+    }
+
+    serde_json::to_string(&json!({
+        "meta": {
+            "schema_version": "1",
+            "tool": "cgrep_read",
+            "batched": true,
+            "count": results.len()
+        },
+        "results": results
+    }))
+    .map_err(|err| format!("failed to encode batched read response: {err}"))
+}
+
+fn run_read_for_path(
+    path: &str,
+    section: Option<&str>,
+    full: bool,
+    cwd: Option<&str>,
+) -> Result<String, String> {
     let mut cmd = vec![
         "--format".to_string(),
         "json".to_string(),
@@ -338,8 +388,8 @@ fn tool_read(args: &Value) -> Result<String, String> {
         "read".to_string(),
         path.to_string(),
     ];
-    push_opt_flag_value(&mut cmd, "--section", opt_str(args, "section"));
-    push_bool_flag(&mut cmd, "--full", opt_bool(args, "full"));
+    push_opt_flag_value(&mut cmd, "--section", section);
+    push_bool_flag(&mut cmd, "--full", full);
     run_cgrep(&cmd, cwd)
 }
 
@@ -374,20 +424,24 @@ fn tool_symbols(args: &Value) -> Result<String, String> {
     push_opt_flag_value(&mut cmd, "--glob", opt_str(args, "glob"));
     push_opt_flag_value(&mut cmd, "--exclude", opt_str(args, "exclude"));
     push_changed(&mut cmd, args.get("changed"));
+    push_bool_flag(&mut cmd, "-q", opt_bool(args, "quiet"));
     run_cgrep(&cmd, cwd)
 }
 
 fn tool_definition(args: &Value) -> Result<String, String> {
     let name = required_str(args, "name")?;
     let cwd = opt_cwd(args);
-    require_bounded_relative_scope("cgrep_definition", cwd, None, true)?;
-    let cmd = vec![
+    let path = opt_str(args, "path");
+    require_bounded_relative_scope("cgrep_definition", cwd, path, true)?;
+    let mut cmd = vec![
         "--format".to_string(),
         "json".to_string(),
         "--compact".to_string(),
         "definition".to_string(),
         name.to_string(),
     ];
+    push_opt_flag_value(&mut cmd, "-p", path);
+    push_opt_flag_value_u64(&mut cmd, "--limit", opt_u64(args, "limit"));
     run_cgrep(&cmd, cwd)
 }
 
@@ -491,6 +545,68 @@ fn required_array_str(args: &Value, key: &str) -> Result<Vec<String>, String> {
         ));
     }
     Ok(out)
+}
+
+fn read_paths(args: &Value) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+
+    if let Some(path) = args.get("path").and_then(Value::as_str) {
+        if path.trim().is_empty() {
+            return Err("Path cannot be empty".to_string());
+        }
+        out.push(path.to_string());
+    }
+
+    if let Some(paths) = opt_array_str(args, "paths") {
+        for path in paths {
+            let trimmed = path.trim();
+            if !trimmed.is_empty() {
+                out.push(trimmed.to_string());
+            }
+        }
+    }
+
+    if out.is_empty() {
+        return Err("missing required parameter: path (or non-empty paths[])".to_string());
+    }
+
+    let mut seen = HashSet::new();
+    out.retain(|path| seen.insert(path.clone()));
+    Ok(out)
+}
+
+fn resolve_read_section(args: &Value) -> Result<Option<String>, String> {
+    let section_start = opt_u64(args, "section_start");
+    let section_end = opt_u64(args, "section_end");
+
+    if section_start.is_some() != section_end.is_some() {
+        return Err("`section_start` and `section_end` must be provided together".to_string());
+    }
+
+    if let (Some(start), Some(end)) = (section_start, section_end) {
+        return Ok(Some(format!("{start}-{end}")));
+    }
+
+    let section = opt_str(args, "section")
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    Ok(section.map(normalize_section_range))
+}
+
+fn normalize_section_range(value: &str) -> String {
+    let trimmed = value.trim();
+    if let Some((start, end)) = trimmed.split_once(':') {
+        let start = start.trim();
+        let end = end.trim();
+        if !start.is_empty()
+            && !end.is_empty()
+            && start.chars().all(|c| c.is_ascii_digit())
+            && end.chars().all(|c| c.is_ascii_digit())
+        {
+            return format!("{start}-{end}");
+        }
+    }
+    trimmed.to_string()
 }
 
 fn opt_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
@@ -750,9 +866,9 @@ fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "required": ["query"],
                 "properties": {
-                    "query": { "type": "string" },
-                    "path": { "type": "string" },
-                    "cwd": { "type": "string" },
+                    "query": { "type": "string", "description": "Literal query text to search for." },
+                    "path": { "type": "string", "description": "Optional scope root for this search." },
+                    "cwd": { "type": "string", "description": "Working directory used to resolve relative paths." },
                     "limit": { "type": "number" },
                     "context": { "type": "number" },
                     "file_type": { "type": "string" },
@@ -768,9 +884,13 @@ fn tool_definitions() -> Vec<Value> {
                     "auto_index": { "type": "boolean" },
                     "changed": { "oneOf": [{ "type": "boolean" }, { "type": "string" }] },
                     "mode": { "type": "string", "enum": ["keyword", "semantic", "hybrid"] },
+                    "profile": { "type": "string" },
                     "regex": { "type": "boolean" },
                     "case_sensitive": { "type": "boolean" },
                     "no_index": { "type": "boolean" },
+                    "no_recursive": { "type": "boolean" },
+                    "no_ignore": { "type": "boolean" },
+                    "quiet": { "type": "boolean" },
                     "fuzzy": { "type": "boolean" }
                 }
             }
@@ -814,11 +934,17 @@ fn tool_definitions() -> Vec<Value> {
             "description": "Read a file with smart full/outline behavior.",
             "inputSchema": {
                 "type": "object",
-                "required": ["path"],
+                "oneOf": [
+                    { "required": ["path"] },
+                    { "required": ["paths"] }
+                ],
                 "properties": {
-                    "path": { "type": "string" },
-                    "cwd": { "type": "string" },
-                    "section": { "type": "string" },
+                    "path": { "type": "string", "description": "Single file path to read." },
+                    "paths": { "type": "array", "items": { "type": "string" }, "description": "Optional batched file paths; each path is read independently." },
+                    "cwd": { "type": "string", "description": "Working directory used to resolve relative paths." },
+                    "section": { "type": "string", "description": "Line range (`start-end`) or heading text. Numeric `start:end` is also accepted." },
+                    "section_start": { "type": "number", "description": "Optional start line number for range reads (use with section_end)." },
+                    "section_end": { "type": "number", "description": "Optional end line number for range reads (use with section_start)." },
                     "full": { "type": "boolean" }
                 }
             }
@@ -849,7 +975,8 @@ fn tool_definitions() -> Vec<Value> {
                     "file_type": { "type": "string" },
                     "glob": { "type": "string" },
                     "exclude": { "type": "string" },
-                    "changed": { "oneOf": [{ "type": "boolean" }, { "type": "string" }] }
+                    "changed": { "oneOf": [{ "type": "boolean" }, { "type": "string" }] },
+                    "quiet": { "type": "boolean" }
                 }
             }
         }),
@@ -861,7 +988,9 @@ fn tool_definitions() -> Vec<Value> {
                 "required": ["name"],
                 "properties": {
                     "name": { "type": "string" },
-                    "cwd": { "type": "string" }
+                    "cwd": { "type": "string" },
+                    "path": { "type": "string" },
+                    "limit": { "type": "number" }
                 }
             }
         }),

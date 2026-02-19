@@ -87,9 +87,14 @@ printf '%s\n' \
 - `cgrep_search` defaults to `auto_index=true`; when no index exists it attempts one bootstrap index build, then falls back to scan on bootstrap failure.
 - `cgrep_search` treats dash-prefixed queries (e.g. `-n`, `--help`) as literal search text.
 - `cgrep_search` rejects empty/whitespace queries consistently (including `regex=true`).
+- `cgrep_search` also exposes advanced flags such as `profile`, `no_recursive`, `no_ignore`, and `quiet`.
 - `cgrep_search` result `path` values stay reusable:
   workspace-internal scopes return workspace-relative paths, external scopes return absolute paths.
 - `cgrep_read` rejects empty path arguments (`Error: Path cannot be empty`).
+- `cgrep_read` accepts either `path` (single file) or `paths` (batch reads).
+- `cgrep_read` section ranges support `start-end`; numeric `start:end` is accepted and normalized.
+- `cgrep_read` also supports numeric `section_start` + `section_end` arguments.
+- `cgrep_definition` supports optional `path` and `limit` filters.
 - If MCP server cwd is `/`, relative scopes require `cwd` (or an absolute `path`) to avoid scanning system root by mistake.
 
 ## Config File Targets
