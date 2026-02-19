@@ -52,13 +52,38 @@ done
 
 resolve_latest_tag() {
   if command -v gh >/dev/null 2>&1; then
-    gh release view --repo "${REPO}" --json tagName --jq .tagName
-    return
+    local tag
+    if tag="$(gh release view --repo "${REPO}" --json tagName --jq .tagName 2>/dev/null)" && [[ -n "${tag}" ]]; then
+      echo "${tag}"
+      return
+    fi
   fi
 
   curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
     | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' \
     | head -n 1
+}
+
+version_lt() {
+  local lhs="$1"
+  local rhs="$2"
+  [[ "$(printf '%s\n%s\n' "${lhs}" "${rhs}" | sort -V | head -n 1)" != "${rhs}" ]]
+}
+
+detect_glibc_version() {
+  if command -v getconf >/dev/null 2>&1; then
+    local v
+    v="$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')"
+    if [[ -n "${v}" ]]; then
+      echo "${v}"
+      return
+    fi
+  fi
+
+  if command -v ldd >/dev/null 2>&1; then
+    ldd --version 2>/dev/null \
+      | sed -n '1s/.* \([0-9][0-9.]*\)$/\1/p'
+  fi
 }
 
 host_os="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -130,6 +155,16 @@ bin_src="$(find "${tmp_dir}" -type f -name cgrep | head -n 1)"
 if [[ -z "${bin_src}" ]]; then
   echo "Could not find cgrep binary in extracted archive." >&2
   exit 1
+fi
+
+if [[ "${host_os}" == "linux" ]] && command -v strings >/dev/null 2>&1; then
+  host_glibc="$(detect_glibc_version || true)"
+  required_glibc="$(strings "${bin_src}" | sed -n 's/^GLIBC_//p' | sort -V | tail -n 1)"
+  if [[ -n "${host_glibc}" && -n "${required_glibc}" ]] && version_lt "${host_glibc}" "${required_glibc}"; then
+    echo "Incompatible Linux release binary: requires glibc >= ${required_glibc}, found ${host_glibc}." >&2
+    echo "Try a newer release artifact or install from source: cargo install --path ." >&2
+    exit 1
+  fi
 fi
 
 mkdir -p "${BIN_DIR}"

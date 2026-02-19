@@ -25,7 +25,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # Keep Linux release artifacts compatible with systems on glibc 2.35.
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
           - os: macos-latest
             target: aarch64-apple-darwin
@@ -76,6 +77,24 @@ jobs:
 
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Verify Linux glibc baseline
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="target/${{ matrix.target }}/release/cgrep"
+          MAX_GLIBC="2.35"
+          REQUIRED_GLIBC="$(strings "${BIN}" | sed -n 's/^GLIBC_//p' | sort -V | tail -n 1)"
+          if [[ -z "${REQUIRED_GLIBC}" ]]; then
+            echo "Could not determine required GLIBC version for ${BIN}"
+            exit 1
+          fi
+          if [[ "$(printf '%s\n%s\n' "${REQUIRED_GLIBC}" "${MAX_GLIBC}" | sort -V | head -n 1)" != "${REQUIRED_GLIBC}" ]]; then
+            echo "Linux binary requires GLIBC_${REQUIRED_GLIBC}, expected <= GLIBC_${MAX_GLIBC}"
+            exit 1
+          fi
+          echo "Verified GLIBC requirement: GLIBC_${REQUIRED_GLIBC}"
 
       - name: Sign macOS binary (ad-hoc)
         if: runner.os == 'macOS'

@@ -12,6 +12,8 @@ curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/insta
 
 위의 빠른 설치 명령을 그대로 사용하면 됩니다.
 
+Linux 참고: 릴리즈 바이너리는 glibc 2.35+ 기준(Ubuntu 22.04 빌드)입니다.
+
 특정 버전 고정:
 
 ```bash
