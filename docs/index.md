@@ -2,7 +2,7 @@
 
 Local-first code search and navigation for users and AI agents.
 
-Current release: **v1.5.0**
+Current release: **v1.5.1**
 
 ## Start By Goal
 

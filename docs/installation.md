@@ -73,7 +73,7 @@ xattr -d com.apple.quarantine ~/.local/bin/cgrep
 ## Manual Release Asset Verification
 
 ```bash
-TAG=v1.5.0
+TAG=v1.5.1
 ASSET="cgrep-${TAG}-aarch64-apple-darwin.tar.gz"
 curl -LO "https://github.com/meghendra6/cgrep/releases/download/${TAG}/${ASSET}"
 curl -LO "https://github.com/meghendra6/cgrep/releases/download/${TAG}/${ASSET}.sha256"

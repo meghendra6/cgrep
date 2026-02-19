@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-02-19
+
+### Changed
+- Bumped package version to `v1.5.1` and synchronized current-release markers across `Cargo.toml`, `README.md`, and docs hubs (EN/KO).
+- Updated installation verification snippets to use `TAG=v1.5.1` in both English and Korean docs.
+- Updated installer usage example to reference `v1.5.1`.
+
 ## [1.5.0] - 2026-02-18
 
 ### Changed

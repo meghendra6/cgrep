@@ -3,7 +3,7 @@
 #
 # Usage:
 #   scripts/install_release.sh
-#   scripts/install_release.sh --version v1.5.0 --bin-dir ~/.local/bin
+#   scripts/install_release.sh --version v1.5.1 --bin-dir ~/.local/bin
 
 set -euo pipefail
 
