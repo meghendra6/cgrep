@@ -31,6 +31,69 @@ const METADATA_FILE: &str = ".cgrep/metadata.json";
 pub(crate) const DEFAULT_WRITER_BUDGET_BYTES: usize = 50_000_000;
 const HIGH_MEMORY_WRITER_BUDGET_BYTES: usize = 1024 * 1024 * 1024;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub(crate) struct StoredIndexOptions {
+    pub exclude_paths: Vec<String>,
+    pub include_paths: Vec<String>,
+    pub respect_git_ignore: bool,
+    pub high_memory: bool,
+}
+
+impl Default for StoredIndexOptions {
+    fn default() -> Self {
+        Self {
+            exclude_paths: Vec::new(),
+            include_paths: Vec::new(),
+            respect_git_ignore: true,
+            high_memory: false,
+        }
+    }
+}
+
+impl StoredIndexOptions {
+    pub(crate) fn writer_budget_bytes(&self) -> usize {
+        if self.high_memory {
+            HIGH_MEMORY_WRITER_BUDGET_BYTES
+        } else {
+            DEFAULT_WRITER_BUDGET_BYTES
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SymbolIndexOptions {
+    pub symbol_preview_lines: usize,
+    pub symbol_max_chars: usize,
+    pub max_symbols_per_file: usize,
+    pub allowed_symbol_kinds: Option<HashSet<String>>,
+}
+
+impl Default for SymbolIndexOptions {
+    fn default() -> Self {
+        Self {
+            symbol_preview_lines: DEFAULT_SYMBOL_PREVIEW_LINES,
+            symbol_max_chars: DEFAULT_SYMBOL_MAX_CHARS,
+            max_symbols_per_file: 500,
+            allowed_symbol_kinds: None,
+        }
+    }
+}
+
+impl SymbolIndexOptions {
+    pub(crate) fn from_config(config: &Config) -> Self {
+        Self {
+            symbol_preview_lines: config.embeddings.symbol_preview_lines(),
+            symbol_max_chars: config.embeddings.symbol_max_chars(),
+            max_symbols_per_file: config.embeddings.max_symbols_per_file(),
+            allowed_symbol_kinds: config
+                .embeddings
+                .symbol_kinds()
+                .map(|kinds| kinds.into_iter().collect()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EmbeddingsMode {
     Off,
@@ -560,6 +623,8 @@ struct IndexMetadata {
     /// Map of file path to metadata
     #[serde(default, deserialize_with = "deserialize_files")]
     files: HashMap<String, FileMetadata>,
+    #[serde(default)]
+    index_options: Option<StoredIndexOptions>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -604,6 +669,27 @@ where
             (path, meta)
         })
         .collect())
+}
+
+fn load_index_metadata(root: &Path) -> Option<IndexMetadata> {
+    let metadata_path = root.join(METADATA_FILE);
+    let content = std::fs::read_to_string(metadata_path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+pub(crate) fn resolve_index_options_for_watch(root: &Path, config: &Config) -> StoredIndexOptions {
+    if let Some(metadata) = load_index_metadata(root) {
+        if let Some(options) = metadata.index_options {
+            return options;
+        }
+    }
+
+    StoredIndexOptions {
+        exclude_paths: config.index().exclude_paths().to_vec(),
+        include_paths: Vec::new(),
+        respect_git_ignore: config.index().respect_git_ignore(),
+        high_memory: false,
+    }
 }
 
 #[cfg(test)]
@@ -881,7 +967,9 @@ pub struct IndexBuilder {
     schema: Schema,
     fields: IndexFields,
     exclude_patterns: Vec<String>,
+    include_paths: Vec<String>,
     respect_git_ignore: bool,
+    high_memory: bool,
     symbol_preview_lines: usize,
     symbol_max_chars: usize,
     max_symbols_per_file: usize,
@@ -889,6 +977,15 @@ pub struct IndexBuilder {
 }
 
 impl IndexBuilder {
+    fn stored_index_options(&self) -> StoredIndexOptions {
+        StoredIndexOptions {
+            exclude_paths: self.exclude_patterns.clone(),
+            include_paths: self.include_paths.clone(),
+            respect_git_ignore: self.respect_git_ignore,
+            high_memory: self.high_memory,
+        }
+    }
+
     #[allow(dead_code)]
     pub fn new(root: impl AsRef<Path>) -> Result<Self> {
         Self::with_excludes(root, Vec::new())
@@ -897,32 +994,31 @@ impl IndexBuilder {
     /// Create index builder with exclude patterns
     #[allow(dead_code)]
     pub fn with_excludes(root: impl AsRef<Path>, excludes: Vec<String>) -> Result<Self> {
-        let preview_lines = DEFAULT_SYMBOL_PREVIEW_LINES;
-        let symbol_max_chars = DEFAULT_SYMBOL_MAX_CHARS;
-        let max_symbols_per_file = 500;
-        let allowed_symbol_kinds = None;
-        let respect_git_ignore = true;
-        Self::with_excludes_and_symbols(
-            root,
-            excludes,
+        let index_options = StoredIndexOptions {
+            exclude_paths: excludes,
+            ..StoredIndexOptions::default()
+        };
+        Self::with_options(root, index_options, SymbolIndexOptions::default())
+    }
+
+    /// Create index builder with index + symbol options
+    pub fn with_options(
+        root: impl AsRef<Path>,
+        index_options: StoredIndexOptions,
+        symbol_options: SymbolIndexOptions,
+    ) -> Result<Self> {
+        let StoredIndexOptions {
+            exclude_paths,
+            include_paths,
             respect_git_ignore,
-            preview_lines,
+            high_memory,
+        } = index_options;
+        let SymbolIndexOptions {
+            symbol_preview_lines,
             symbol_max_chars,
             max_symbols_per_file,
             allowed_symbol_kinds,
-        )
-    }
-
-    /// Create index builder with symbol config overrides
-    pub fn with_excludes_and_symbols(
-        root: impl AsRef<Path>,
-        excludes: Vec<String>,
-        respect_git_ignore: bool,
-        symbol_preview_lines: usize,
-        symbol_max_chars: usize,
-        max_symbols_per_file: usize,
-        allowed_symbol_kinds: Option<HashSet<String>>,
-    ) -> Result<Self> {
+        } = symbol_options;
         let mut schema_builder = Schema::builder();
 
         let path = schema_builder.add_text_field("path", TEXT | STORED);
@@ -953,8 +1049,10 @@ impl IndexBuilder {
             root: root.as_ref().to_path_buf(),
             schema,
             fields,
-            exclude_patterns: excludes,
+            exclude_patterns: exclude_paths,
+            include_paths,
             respect_git_ignore,
+            high_memory,
             symbol_preview_lines,
             symbol_max_chars,
             max_symbols_per_file,
@@ -1019,6 +1117,7 @@ impl IndexBuilder {
             .context("Failed to create index writer")?;
 
         let scanner = FileScanner::with_excludes(&self.root, self.exclude_patterns.clone())
+            .with_includes(self.include_paths.clone())
             .with_gitignore(self.respect_git_ignore);
         let files = scanner.list_files()?;
         let current_paths: HashSet<String> = files
@@ -1046,6 +1145,7 @@ impl IndexBuilder {
 
         let mut new_metadata = IndexMetadata {
             files: HashMap::with_capacity(total_files),
+            index_options: Some(self.stored_index_options()),
         };
         let mut indexed_count = 0usize;
         let mut skipped_count = 0usize;
@@ -1373,6 +1473,7 @@ impl IndexBuilder {
         let content = std::fs::read_to_string(&metadata_path).unwrap_or_default();
         let old_metadata: IndexMetadata = serde_json::from_str(&content).unwrap_or_default();
         let mut new_metadata = old_metadata;
+        new_metadata.index_options = Some(self.stored_index_options());
 
         let index = Index::open_in_dir(&index_path).context("Failed to open existing index")?;
         let schema = index.schema();
@@ -1625,15 +1726,27 @@ impl IndexBuilder {
 }
 
 /// Run the index command
-pub fn run(
-    path: Option<&str>,
-    force: bool,
-    excludes: Vec<String>,
-    high_memory: bool,
-    include_ignored: bool,
-    embeddings_mode: &str,
-    embeddings_force: bool,
-) -> Result<()> {
+pub struct RunOptions {
+    pub force: bool,
+    pub excludes: Vec<String>,
+    pub include_paths: Vec<String>,
+    pub high_memory: bool,
+    pub include_ignored: bool,
+    pub embeddings_mode: String,
+    pub embeddings_force: bool,
+}
+
+pub fn run(path: Option<&str>, options: RunOptions) -> Result<()> {
+    let RunOptions {
+        force,
+        excludes,
+        include_paths,
+        high_memory,
+        include_ignored,
+        embeddings_mode,
+        embeddings_force,
+    } = options;
+
     let root = path
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::current_dir().ok())
@@ -1646,29 +1759,23 @@ pub fn run(
     all_excludes.extend(config.index().exclude_paths().iter().cloned());
 
     let respect_git_ignore = config.index().respect_git_ignore() && !include_ignored;
-    let builder = IndexBuilder::with_excludes_and_symbols(
-        &root,
-        all_excludes,
+    let index_options = StoredIndexOptions {
+        exclude_paths: all_excludes,
+        include_paths,
         respect_git_ignore,
-        config.embeddings.symbol_preview_lines(),
-        config.embeddings.symbol_max_chars(),
-        config.embeddings.max_symbols_per_file(),
-        config
-            .embeddings
-            .symbol_kinds()
-            .map(|kinds| kinds.into_iter().collect()),
-    )?;
-    let writer_budget_bytes = if high_memory {
-        eprintln!("Using high-memory indexing: writer budget = 1GiB");
-        HIGH_MEMORY_WRITER_BUDGET_BYTES
-    } else {
-        DEFAULT_WRITER_BUDGET_BYTES
+        high_memory,
     };
+    let symbol_options = SymbolIndexOptions::from_config(&config);
+    let builder = IndexBuilder::with_options(&root, index_options.clone(), symbol_options)?;
+    if index_options.high_memory {
+        eprintln!("Using high-memory indexing: writer budget = 1GiB");
+    }
+    let writer_budget_bytes = index_options.writer_budget_bytes();
     let count = builder.build(force, writer_budget_bytes)?;
 
     println!("Index complete: {} files", count);
 
-    let mode = EmbeddingsMode::parse(embeddings_mode)?;
+    let mode = EmbeddingsMode::parse(&embeddings_mode)?;
     if embeddings_force && mode == EmbeddingsMode::Off {
         eprintln!("Warning: --embeddings-force has no effect when --embeddings=off");
         return Ok(());
@@ -2064,5 +2171,70 @@ mod tests {
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].start_line, 1);
         assert_eq!(chunks[1].start_line, 3);
+    }
+
+    #[test]
+    fn build_persists_index_options_for_watch_reuse() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        std::fs::write(root.join("lib.rs"), "fn keep() {}").expect("write file");
+
+        let builder = IndexBuilder::with_options(
+            root,
+            StoredIndexOptions {
+                exclude_paths: vec!["target/".to_string()],
+                include_paths: vec![".venv".to_string()],
+                respect_git_ignore: true,
+                high_memory: true,
+            },
+            SymbolIndexOptions::default(),
+        )
+        .expect("builder");
+
+        builder
+            .build(false, HIGH_MEMORY_WRITER_BUDGET_BYTES)
+            .expect("build");
+        let metadata = load_metadata(root);
+        let opts = metadata.index_options.expect("stored index options");
+        assert_eq!(opts.exclude_paths, vec!["target/"]);
+        assert_eq!(opts.include_paths, vec![".venv"]);
+        assert!(opts.respect_git_ignore);
+        assert!(opts.high_memory);
+    }
+
+    #[test]
+    fn resolve_watch_options_prefers_metadata_over_config() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let metadata_path = root.join(METADATA_FILE);
+        std::fs::create_dir_all(
+            metadata_path
+                .parent()
+                .expect("metadata parent should exist"),
+        )
+        .expect("create metadata dir");
+
+        let stored = StoredIndexOptions {
+            exclude_paths: vec!["from-metadata/".to_string()],
+            include_paths: vec![".venv".to_string()],
+            respect_git_ignore: false,
+            high_memory: true,
+        };
+        let metadata = IndexMetadata {
+            files: HashMap::new(),
+            index_options: Some(stored.clone()),
+        };
+        std::fs::write(
+            &metadata_path,
+            serde_json::to_string_pretty(&metadata).expect("serialize metadata"),
+        )
+        .expect("write metadata");
+
+        let mut config = Config::default();
+        config.index.exclude_paths = vec!["from-config/".to_string()];
+        config.index.respect_git_ignore = Some(true);
+
+        let resolved = resolve_index_options_for_watch(root, &config);
+        assert_eq!(resolved, stored);
     }
 }

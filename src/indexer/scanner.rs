@@ -4,6 +4,7 @@
 
 use anyhow::Result;
 use ignore::WalkBuilder;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
@@ -24,6 +25,7 @@ pub struct ScannedFile {
 pub struct FileScanner {
     root: PathBuf,
     exclude_patterns: Vec<String>,
+    include_paths: Vec<String>,
     respect_git_ignore: bool,
     recursive: bool,
 }
@@ -33,6 +35,7 @@ impl FileScanner {
         Self {
             root: root.as_ref().to_path_buf(),
             exclude_patterns: Vec::new(),
+            include_paths: Vec::new(),
             respect_git_ignore: true,
             recursive: true,
         }
@@ -48,6 +51,12 @@ impl FileScanner {
     /// Enable or disable respect for ignore files (.ignore/.gitignore)
     pub fn with_gitignore(mut self, enabled: bool) -> Self {
         self.respect_git_ignore = enabled;
+        self
+    }
+
+    /// Explicit paths to include even when ignore files would normally skip them.
+    pub fn with_includes(mut self, includes: Vec<String>) -> Self {
+        self.include_paths = includes;
         self
     }
 
@@ -81,6 +90,97 @@ impl FileScanner {
         builder
     }
 
+    fn is_reserved_dir_name(name: &str) -> bool {
+        matches!(name, ".cgrep" | ".git" | ".hg" | ".svn")
+    }
+
+    fn path_matches_excludes(path: &Path, exclude_patterns: &[String]) -> bool {
+        if exclude_patterns.is_empty() {
+            return false;
+        }
+        let path_str = path.to_string_lossy();
+        exclude_patterns
+            .iter()
+            .any(|pattern| !pattern.is_empty() && path_str.contains(pattern.as_str()))
+    }
+
+    fn matches_excludes(&self, path: &Path) -> bool {
+        Self::path_matches_excludes(path, &self.exclude_patterns)
+    }
+
+    fn collect_explicit_include_files(&self) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        for raw in &self.include_paths {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            let include_path = if Path::new(trimmed).is_absolute() {
+                PathBuf::from(trimmed)
+            } else {
+                self.root.join(trimmed)
+            };
+
+            if !include_path.exists() {
+                continue;
+            }
+
+            if include_path.is_file() {
+                if self.matches_excludes(&include_path) {
+                    continue;
+                }
+                if let Some(ext) = include_path.extension().and_then(|e| e.to_str()) {
+                    if is_indexable_extension(ext) {
+                        files.push(include_path);
+                    }
+                }
+                continue;
+            }
+
+            let mut builder = WalkBuilder::new(&include_path);
+            builder
+                .hidden(false)
+                .ignore(false)
+                .git_ignore(false)
+                .git_exclude(false)
+                .git_global(false);
+            let walker = builder
+                .filter_entry(|entry| {
+                    entry
+                        .file_name()
+                        .to_str()
+                        .map(|name| !Self::is_reserved_dir_name(name))
+                        .unwrap_or(true)
+                })
+                .build();
+
+            for entry in walker {
+                let Ok(entry) = entry else {
+                    continue;
+                };
+                let path = entry.path();
+                if !path.is_file() || self.matches_excludes(path) {
+                    continue;
+                }
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if is_indexable_extension(ext) {
+                        files.push(path.to_path_buf());
+                    }
+                }
+            }
+        }
+        files
+    }
+
+    fn dedupe_paths(files: Vec<PathBuf>) -> Vec<PathBuf> {
+        let mut seen = HashSet::new();
+        files
+            .into_iter()
+            .filter(|path| seen.insert(path.to_string_lossy().to_string()))
+            .collect()
+    }
+
     /// Scan all files in the directory
     pub fn scan(&self) -> Result<Vec<ScannedFile>> {
         let (tx, rx) = mpsc::channel();
@@ -91,15 +191,12 @@ impl FileScanner {
                 entry
                     .file_name()
                     .to_str()
-                    .map(|name| {
-                        name != ".cgrep" && name != ".git" && name != ".hg" && name != ".svn"
-                    })
+                    .map(|name| !Self::is_reserved_dir_name(name))
                     .unwrap_or(true)
             })
             .build_parallel();
 
         let exclude_patterns = self.exclude_patterns.clone();
-
         walker.run(|| {
             let tx = tx.clone();
             let exclude_patterns = exclude_patterns.clone();
@@ -108,14 +205,8 @@ impl FileScanner {
                 if let Ok(entry) = entry {
                     let path = entry.path();
 
-                    // Check if path should be excluded
-                    if !exclude_patterns.is_empty() {
-                        let path_str = path.to_string_lossy();
-                        for pattern in &exclude_patterns {
-                            if path_str.contains(pattern.as_str()) {
-                                return ignore::WalkState::Continue;
-                            }
-                        }
+                    if Self::path_matches_excludes(path, &exclude_patterns) {
+                        return ignore::WalkState::Continue;
                     }
 
                     if path.is_file() {
@@ -138,7 +229,26 @@ impl FileScanner {
         });
 
         drop(tx);
-        Ok(rx.into_iter().collect())
+        let mut files: Vec<ScannedFile> = rx.into_iter().collect();
+        let explicit_files = self.collect_explicit_include_files();
+        if !explicit_files.is_empty() {
+            for path in explicit_files {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        let language = detect_language(ext);
+                        files.push(ScannedFile {
+                            path,
+                            content,
+                            language,
+                        });
+                    }
+                }
+            }
+        }
+
+        let mut seen = HashSet::new();
+        files.retain(|file| seen.insert(file.path.to_string_lossy().to_string()));
+        Ok(files)
     }
 
     /// Get list of file paths only (faster)
@@ -151,15 +261,12 @@ impl FileScanner {
                 entry
                     .file_name()
                     .to_str()
-                    .map(|name| {
-                        name != ".cgrep" && name != ".git" && name != ".hg" && name != ".svn"
-                    })
+                    .map(|name| !Self::is_reserved_dir_name(name))
                     .unwrap_or(true)
             })
             .build_parallel();
 
         let exclude_patterns = self.exclude_patterns.clone();
-
         walker.run(|| {
             let tx = tx.clone();
             let exclude_patterns = exclude_patterns.clone();
@@ -168,14 +275,8 @@ impl FileScanner {
                 if let Ok(entry) = entry {
                     let path = entry.path();
 
-                    // Check if path should be excluded
-                    if !exclude_patterns.is_empty() {
-                        let path_str = path.to_string_lossy();
-                        for pattern in &exclude_patterns {
-                            if path_str.contains(pattern.as_str()) {
-                                return ignore::WalkState::Continue;
-                            }
-                        }
+                    if Self::path_matches_excludes(path, &exclude_patterns) {
+                        return ignore::WalkState::Continue;
                     }
 
                     if path.is_file() {
@@ -191,7 +292,9 @@ impl FileScanner {
         });
 
         drop(tx);
-        Ok(rx.into_iter().collect())
+        let mut files: Vec<PathBuf> = rx.into_iter().collect();
+        files.extend(self.collect_explicit_include_files());
+        Ok(Self::dedupe_paths(files))
     }
 }
 

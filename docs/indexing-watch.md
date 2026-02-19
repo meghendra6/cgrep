@@ -9,6 +9,12 @@ cgrep index --force
 # Exclude paths while indexing
 cgrep index -e vendor/ -e dist/
 
+# Include a specific ignored path while keeping ignore rules on
+cgrep index -e graph_mode -e eager_mode/torch-rbln/third_party/pytorch --include-path .venv --high-memory
+
+# Include all ignored paths (opt-out)
+cgrep index --include-ignored
+
 # Embeddings mode
 cgrep index --embeddings auto
 cgrep index --embeddings precompute
@@ -51,11 +57,13 @@ cgrep watch --no-adaptive
 
 - Index lives under `.cgrep/`
 - Search from subdirectories reuses nearest parent index
-- Indexing ignores `.gitignore`; scan mode respects `.gitignore`
+- Indexing respects `.gitignore`/`.ignore` by default (`--include-ignored` to opt out)
+- `--include-path <path>` lets you index selected ignored paths without indexing everything ignored
 - Watch mode uses adaptive backoff by default (`--no-adaptive` to disable)
 - Watch defaults are tuned for background operation (`--min-interval 180`, about 3 minutes)
 - Watch reacts only to indexable source extensions and skips temp/swap files
-- Watch respects `[index].exclude_paths` for initial and incremental indexing
+- Watch/daemon reuse the most recent index profile from `.cgrep/metadata.json`
+- Reused profile preserves the latest `cgrep index` options as-is
 - Watch reindex is changed-path incremental (update/remove touched files only)
 
 ## Watch defaults

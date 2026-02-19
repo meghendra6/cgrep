@@ -12,6 +12,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::mpsc::{channel, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
+use crate::indexer::index::SymbolIndexOptions;
 use crate::indexer::scanner::is_indexable_extension;
 use crate::indexer::IndexBuilder;
 use cgrep::config::Config;
@@ -42,6 +43,7 @@ pub struct Watcher {
     root: PathBuf,
     builder: IndexBuilder,
     exclude_patterns: Vec<String>,
+    writer_budget_bytes: usize,
     debounce_duration: Duration,
     min_reindex_interval: Duration,
     max_batch_delay: Duration,
@@ -54,6 +56,7 @@ impl Watcher {
         root: impl AsRef<Path>,
         builder: IndexBuilder,
         exclude_patterns: Vec<String>,
+        writer_budget_bytes: usize,
         debounce_secs: u64,
         min_interval_secs: u64,
         max_batch_delay_secs: u64,
@@ -63,6 +66,7 @@ impl Watcher {
             root: root.as_ref().to_path_buf(),
             builder,
             exclude_patterns,
+            writer_budget_bytes,
             debounce_duration: Duration::from_secs(debounce_secs.max(1)),
             min_reindex_interval: Duration::from_secs(min_interval_secs.max(1)),
             max_batch_delay: Duration::from_secs(max_batch_delay_secs.max(1)),
@@ -200,7 +204,7 @@ impl Watcher {
                     let start = Instant::now();
                     if let Err(e) = self.builder.update_paths_with_io_threads(
                         &changed_paths,
-                        crate::indexer::index::DEFAULT_WRITER_BUDGET_BYTES,
+                        self.writer_budget_bytes,
                         Some(WATCH_IO_THREADS),
                     ) {
                         eprintln!("{} Reindex failed: {}", "✗".red(), e);
@@ -338,31 +342,23 @@ pub fn run(
     let root = root.canonicalize().unwrap_or(root);
 
     let config = Config::load_for_dir(&root);
-    let excludes = config.index().exclude_paths().to_vec();
-    let builder = IndexBuilder::with_excludes_and_symbols(
-        &root,
-        excludes.clone(),
-        config.index().respect_git_ignore(),
-        config.embeddings.symbol_preview_lines(),
-        config.embeddings.symbol_max_chars(),
-        config.embeddings.max_symbols_per_file(),
-        config
-            .embeddings
-            .symbol_kinds()
-            .map(|kinds| kinds.into_iter().collect()),
-    )?;
+    let index_options = crate::indexer::index::resolve_index_options_for_watch(&root, &config);
+    let excludes = index_options.exclude_paths.clone();
+    let symbol_options = SymbolIndexOptions::from_config(&config);
+    let builder = IndexBuilder::with_options(&root, index_options.clone(), symbol_options)?;
+    let writer_budget_bytes = index_options.writer_budget_bytes();
+    if index_options.high_memory {
+        eprintln!("Using high-memory indexing in watch mode: writer budget = 1GiB");
+    }
 
     // Build initial index
-    builder.build_with_io_threads(
-        false,
-        crate::indexer::index::DEFAULT_WRITER_BUDGET_BYTES,
-        Some(WATCH_IO_THREADS),
-    )?;
+    builder.build_with_io_threads(false, writer_budget_bytes, Some(WATCH_IO_THREADS))?;
 
     let watcher = Watcher::with_options(
         &root,
         builder,
         excludes,
+        writer_budget_bytes,
         debounce_secs.unwrap_or(DEFAULT_DEBOUNCE_SECS),
         min_interval_secs.unwrap_or(MIN_REINDEX_INTERVAL_SECS),
         max_batch_delay_secs.unwrap_or(DEFAULT_MAX_BATCH_DELAY_SECS),

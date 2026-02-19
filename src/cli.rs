@@ -577,6 +577,10 @@ pub enum Commands {
         #[arg(long)]
         include_ignored: bool,
 
+        /// Include a path even if it is ignored by .gitignore/.ignore (repeatable)
+        #[arg(long = "include-path")]
+        include_paths: Vec<String>,
+
         /// Paths/patterns to exclude (can be specified multiple times)
         #[arg(long = "exclude", short = 'e')]
         exclude_paths: Vec<String>,

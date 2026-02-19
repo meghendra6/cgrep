@@ -103,3 +103,38 @@ fn index_include_ignored_opt_out_includes_gitignored_files() {
             .unwrap_or(false)
     }));
 }
+
+#[test]
+fn index_include_path_includes_specific_ignored_path_only() {
+    let dir = TempDir::new().expect("tempdir");
+    init_git_repo(dir.path());
+    write_file(&dir.path().join(".gitignore"), "target/\n.venv/\n");
+    write_file(
+        &dir.path().join("target/noise.rs"),
+        "pub fn ignored_target_marker() {}\n",
+    );
+    write_file(
+        &dir.path().join(".venv/lib/special.py"),
+        "def included_venv_marker():\n    return 1\n",
+    );
+
+    let mut index_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    index_cmd
+        .current_dir(dir.path())
+        .args(["index", "--include-path", ".venv", "--embeddings", "off"])
+        .assert()
+        .success();
+
+    let venv_json = run_search(dir.path(), "included_venv_marker");
+    let venv_results = venv_json.as_array().expect("results");
+    assert!(venv_results.iter().any(|r| {
+        r["path"]
+            .as_str()
+            .map(|p| p.contains(".venv/lib/special.py"))
+            .unwrap_or(false)
+    }));
+
+    let target_json = run_search(dir.path(), "ignored_target_marker");
+    let target_results = target_json.as_array().expect("results");
+    assert!(target_results.is_empty());
+}
