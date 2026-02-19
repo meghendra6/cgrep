@@ -84,14 +84,9 @@ printf '%s\n' \
 - MCP 도구는 optional `cwd`를 받아 상대경로 해석 기준을 고정할 수 있습니다.
 - `cgrep_search`는 `-n`, `--help`처럼 `-`로 시작하는 쿼리를 리터럴 검색어로 처리합니다.
 - `cgrep_search`는 빈/공백 쿼리를 일관되게 거부합니다 (`regex=true` 포함).
-- `cgrep_search`는 `profile`, `no_recursive`, `no_ignore`, `quiet` 같은 고급 옵션도 지원합니다.
 - `cgrep_search` 결과 `path`는 재사용 가능하도록 유지됩니다:
   워크스페이스 내부 스코프는 상대경로, 외부 스코프는 절대경로를 반환합니다.
 - `cgrep_read`는 빈 `path` 인자를 거부합니다 (`Error: Path cannot be empty`).
-- `cgrep_read`는 `path`(단일 파일) 또는 `paths`(배치 읽기)를 지원합니다.
-- `cgrep_read`의 구간 형식은 `start-end`이며, 숫자 `start:end` 입력도 자동 정규화됩니다.
-- `cgrep_read`는 `section_start` + `section_end` 숫자 인자도 지원합니다.
-- `cgrep_definition`은 `path`, `limit` 필터를 선택적으로 지원합니다.
 - MCP 서버 cwd가 `/`일 때 상대경로 스코프를 쓰면 `cwd`(또는 절대 `path`)가 필요합니다. 실수로 시스템 루트를 스캔하는 것을 막기 위함입니다.
 
 ## 설정 파일 대상
