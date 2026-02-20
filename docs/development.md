@@ -11,7 +11,12 @@ cargo clippy --all-targets --all-features -- -D warnings
 ## Performance Gate
 
 ```bash
-python3 scripts/perf_gate.py
+python3 scripts/index_perf_gate.py \
+  --baseline-bin /path/to/baseline/cgrep \
+  --candidate-bin /path/to/candidate/cgrep \
+  --runs 3 \
+  --warmup 1 \
+  --files 1200
 ```
 
 Run this after search/indexing-related changes.
@@ -21,7 +26,7 @@ Run this after search/indexing-related changes.
 - Build passes (`cargo build`)
 - Tests pass (`cargo test`)
 - Clippy clean (`-D warnings`)
-- Performance gate passes (`scripts/perf_gate.py`)
+- Performance gate passes (`scripts/index_perf_gate.py`)
 - Docs updated for CLI/behavior changes
 
 ## Benchmark: Agent Token Efficiency (PyTorch)

@@ -15,6 +15,7 @@
 | `cgrep index` (`ix`, `i`) | Build/rebuild index |
 | `cgrep watch` (`wt`, `w`) | Reindex on file changes |
 | `cgrep daemon <start|status|stop>` (`bg`) | Manage background watch daemon |
+| `cgrep status` (`st`) | Show basic/full readiness + background index state |
 | `cgrep mcp <serve|install|uninstall>` | MCP server + host config integration |
 | `cgrep agent <...>` (`a`) | Agent locate/expand + integration install |
 | `cgrep completions <shell>` | Generate shell completions |
@@ -97,6 +98,19 @@ cgrep index --manifest-only --print-diff
 
 # Disable manifest path and use legacy incremental flow
 cgrep index --no-manifest
+
+# Build full index in background and return immediately
+cgrep index --background
+```
+
+## Status guide
+
+```bash
+# Human-readable status
+cgrep status
+
+# Structured status for agents/automation
+cgrep --format json2 --compact status
 ```
 
 ## Search guide
