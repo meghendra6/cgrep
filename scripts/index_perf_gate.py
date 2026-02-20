@@ -9,6 +9,20 @@ import tempfile
 import time
 from pathlib import Path
 
+SEARCH_REGRESSION_LIMIT_PCT = 5.0
+INDEX_REGRESSION_LIMIT_PCT = 10.0
+
+LIMITS = {
+    "cold_index_ms": INDEX_REGRESSION_LIMIT_PCT,
+    "incremental_1_ms": INDEX_REGRESSION_LIMIT_PCT,
+    "incremental_10_ms": INDEX_REGRESSION_LIMIT_PCT,
+    "incremental_100_ms": INDEX_REGRESSION_LIMIT_PCT,
+    "branch_switch_ms": INDEX_REGRESSION_LIMIT_PCT,
+    "keyword_search_ms": SEARCH_REGRESSION_LIMIT_PCT,
+    "identifier_search_ms": SEARCH_REGRESSION_LIMIT_PCT,
+    "scoped_search_ms": SEARCH_REGRESSION_LIMIT_PCT,
+}
+
 
 def run(cmd: list[str], cwd: Path) -> None:
     subprocess.run(
@@ -27,91 +41,214 @@ def timed_ms(cmd: list[str], cwd: Path) -> float:
     return (time.perf_counter() - t0) * 1000.0
 
 
+def timed_avg_ms(cmd: list[str], cwd: Path, repeats: int) -> float:
+    t0 = time.perf_counter()
+    for _ in range(max(1, repeats)):
+        run(cmd, cwd)
+    elapsed_ms = (time.perf_counter() - t0) * 1000.0
+    return elapsed_ms / max(1, repeats)
+
+
 def generate_repo(root: Path, file_count: int) -> None:
     src = root / "src"
-    src.mkdir(parents=True, exist_ok=True)
+    core = src / "core"
+    scoped = src / "scoped"
+    core.mkdir(parents=True, exist_ok=True)
+    scoped.mkdir(parents=True, exist_ok=True)
+
     for i in range(file_count):
+        dst = scoped if i % 5 == 0 else core
+        identifier = f"WorkerSymbol{i:04d}"
+        keyword = "needle_keyword"
+        scoped_marker = "scoped_marker" if dst is scoped else "non_scoped_marker"
         code = f"""
-pub fn worker_{i}(value: i32) -> i32 {{
-    let needle = value + {i};
-    needle
+pub struct {identifier};
+
+pub fn keyword_{i}(value: i32) -> i32 {{
+    let marker = value + {i};
+    // {keyword}
+    marker
 }}
 
-pub fn invoke_{i}() -> i32 {{
-    worker_{i}(41)
+pub fn ident_{i}(input: i32) -> i32 {{
+    let typed: {identifier} = {identifier};
+    let _ = typed;
+    // {scoped_marker}
+    keyword_{i}(input)
 }}
 """
-        (src / f"mod_{i}.rs").write_text(code.strip() + "\n", encoding="utf-8")
+        (dst / f"mod_{i:04d}.rs").write_text(code.strip() + "\n", encoding="utf-8")
 
 
-def mutate_files(root: Path, changed: int) -> None:
-    src = root / "src"
-    files = sorted(src.glob("mod_*.rs"))
+def all_source_files(root: Path) -> list[Path]:
+    return sorted((root / "src").rglob("mod_*.rs"))
+
+
+def mutate_files(root: Path, changed: int, marker: str) -> None:
+    files = all_source_files(root)
     for idx, path in enumerate(files[:changed]):
         text = path.read_text(encoding="utf-8")
-        text += f"\npub fn changed_{idx}() -> i32 {{ {idx} + 1 }}\n"
+        text += f"\npub fn {marker}_{idx}() -> usize {{ {idx} + 1 }}\n"
         path.write_text(text, encoding="utf-8")
 
 
-def median_metric(runs: int, worker) -> float:
+def switch_to_branch_b(root: Path) -> tuple[dict[Path, str], list[Path]]:
+    files = all_source_files(root)
+    target = files[: min(120, len(files))]
+    originals = {path: path.read_text(encoding="utf-8") for path in target}
+
+    for idx, path in enumerate(target[:80]):
+        text = path.read_text(encoding="utf-8")
+        text += f"\npub fn branch_b_update_{idx}() -> usize {{ {idx} + 11 }}\n"
+        path.write_text(text, encoding="utf-8")
+
+    for path in target[80:100]:
+        if path.exists():
+            path.unlink()
+
+    created: list[Path] = []
+    for idx in range(20):
+        path = root / "src" / "core" / f"branch_new_{idx:04d}.rs"
+        code = f"""
+pub fn branch_new_{idx}() -> usize {{
+    let marker = {idx} + 1;
+    marker
+}}
+"""
+        path.write_text(code.strip() + "\n", encoding="utf-8")
+        created.append(path)
+
+    return originals, created
+
+
+def restore_branch_a(originals: dict[Path, str], created: list[Path]) -> None:
+    for path in created:
+        if path.exists():
+            path.unlink()
+    for path, content in originals.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+
+def median_metric(runs: int, warmup: int, worker) -> float:
+    for _ in range(max(0, warmup)):
+        worker()
+
     values: list[float] = []
     for _ in range(runs):
         values.append(worker())
     return statistics.median(values)
 
 
-def measure_cold_index(binary: Path, runs: int, file_count: int) -> float:
+def measure_cold_index(binary: Path, runs: int, warmup: int, file_count: int) -> float:
     def worker() -> float:
         with tempfile.TemporaryDirectory(prefix="cgrep-perf-cold-") as tmp:
             work = Path(tmp)
             generate_repo(work, file_count)
             return timed_ms([str(binary), "index", "--embeddings", "off"], work)
 
-    return median_metric(runs, worker)
+    return median_metric(runs, warmup, worker)
 
 
-def measure_keyword_search(binary: Path, runs: int, file_count: int) -> float:
-    def worker() -> float:
-        with tempfile.TemporaryDirectory(prefix="cgrep-perf-search-") as tmp:
-            work = Path(tmp)
-            generate_repo(work, file_count)
-            run([str(binary), "index", "--embeddings", "off"], work)
-            return timed_ms(
-                [
-                    str(binary),
-                    "--format",
-                    "json2",
-                    "--compact",
-                    "search",
-                    "needle",
-                    "--limit",
-                    "500",
-                ],
-                work,
-            )
-
-    return median_metric(runs, worker)
-
-
-def measure_incremental(binary: Path, runs: int, file_count: int, changed: int) -> float:
+def measure_incremental(
+    binary: Path,
+    runs: int,
+    warmup: int,
+    file_count: int,
+    changed: int,
+) -> float:
     def worker() -> float:
         with tempfile.TemporaryDirectory(prefix=f"cgrep-perf-inc-{changed}-") as tmp:
             work = Path(tmp)
             generate_repo(work, file_count)
             run([str(binary), "index", "--embeddings", "off"], work)
-            mutate_files(work, changed)
+            mutate_files(work, changed, marker=f"inc_{changed}")
             return timed_ms([str(binary), "index", "--embeddings", "off"], work)
 
-    return median_metric(runs, worker)
+    return median_metric(runs, warmup, worker)
 
 
-def measure(binary: Path, runs: int, file_count: int) -> dict[str, float]:
+def measure_branch_switch(binary: Path, runs: int, warmup: int, file_count: int) -> float:
+    def worker() -> float:
+        with tempfile.TemporaryDirectory(prefix="cgrep-perf-branch-switch-") as tmp:
+            work = Path(tmp)
+            generate_repo(work, file_count)
+            run([str(binary), "index", "--embeddings", "off"], work)
+
+            originals, created = switch_to_branch_b(work)
+            to_branch_b = timed_ms([str(binary), "index", "--embeddings", "off"], work)
+
+            restore_branch_a(originals, created)
+            to_branch_a = timed_ms([str(binary), "index", "--embeddings", "off"], work)
+            return statistics.median([to_branch_b, to_branch_a])
+
+    return median_metric(runs, warmup, worker)
+
+
+def measure_search(
+    binary: Path,
+    runs: int,
+    warmup: int,
+    file_count: int,
+    query: str,
+    scope: str | None = None,
+    repeats: int = 3,
+) -> float:
+    def worker() -> float:
+        with tempfile.TemporaryDirectory(prefix="cgrep-perf-search-") as tmp:
+            work = Path(tmp)
+            generate_repo(work, file_count)
+            run([str(binary), "index", "--embeddings", "off"], work)
+
+            cmd = [
+                str(binary),
+                "--format",
+                "json2",
+                "--compact",
+                "search",
+                query,
+                "--limit",
+                "500",
+            ]
+            if scope:
+                cmd.extend(["-p", scope])
+            return timed_avg_ms(cmd, work, repeats)
+
+    return median_metric(runs, warmup, worker)
+
+
+def measure(binary: Path, runs: int, warmup: int, file_count: int) -> dict[str, float]:
     return {
-        "cold_index_ms": round(measure_cold_index(binary, runs, file_count), 2),
-        "keyword_search_ms": round(measure_keyword_search(binary, runs, file_count), 2),
-        "incremental_1_ms": round(measure_incremental(binary, runs, file_count, 1), 2),
-        "incremental_10_ms": round(measure_incremental(binary, runs, file_count, 10), 2),
-        "incremental_100_ms": round(measure_incremental(binary, runs, file_count, 100), 2),
+        "cold_index_ms": round(measure_cold_index(binary, runs, warmup, file_count), 2),
+        "incremental_1_ms": round(
+            measure_incremental(binary, runs, warmup, file_count, 1), 2
+        ),
+        "incremental_10_ms": round(
+            measure_incremental(binary, runs, warmup, file_count, 10), 2
+        ),
+        "incremental_100_ms": round(
+            measure_incremental(binary, runs, warmup, file_count, 100), 2
+        ),
+        "branch_switch_ms": round(
+            measure_branch_switch(binary, runs, warmup, file_count), 2
+        ),
+        "keyword_search_ms": round(
+            measure_search(binary, runs, warmup, file_count, "needle_keyword"), 2
+        ),
+        "identifier_search_ms": round(
+            measure_search(binary, runs, warmup, file_count, "WorkerSymbol0500"), 2
+        ),
+        "scoped_search_ms": round(
+            measure_search(
+                binary,
+                runs,
+                warmup,
+                file_count,
+                "scoped_marker",
+                scope="src/scoped",
+            ),
+            2,
+        ),
     }
 
 
@@ -122,12 +259,17 @@ def regression_pct(before: float, after: float) -> float:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="M1 index performance gate")
+    parser = argparse.ArgumentParser(description="M2 index/search performance comparator")
     parser.add_argument("--baseline-bin", required=True, help="Path to baseline cgrep binary")
     parser.add_argument("--candidate-bin", required=True, help="Path to candidate cgrep binary")
-    parser.add_argument("--runs", type=int, default=3, help="Measurement runs per metric")
-    parser.add_argument("--files", type=int, default=2000, help="Synthetic source files per run")
-    parser.add_argument("--json-out", default="", help="Optional path to write JSON report")
+    parser.add_argument("--runs", type=int, default=5, help="Measured repetitions")
+    parser.add_argument(
+        "--warmup", type=int, default=1, help="Warmup repetitions before measured runs"
+    )
+    parser.add_argument(
+        "--files", type=int, default=2000, help="Synthetic source files per benchmark run"
+    )
+    parser.add_argument("--json-out", default="", help="Optional JSON report output path")
     args = parser.parse_args()
 
     baseline_bin = Path(args.baseline_bin).resolve()
@@ -139,23 +281,35 @@ def main() -> int:
         print(f"candidate binary not found: {candidate_bin}")
         return 2
 
-    baseline = measure(baseline_bin, args.runs, args.files)
-    candidate = measure(candidate_bin, args.runs, args.files)
-
+    baseline = measure(baseline_bin, args.runs, args.warmup, args.files)
+    candidate = measure(candidate_bin, args.runs, args.warmup, args.files)
     regressions = {
         key: round(regression_pct(baseline[key], candidate[key]), 2) for key in baseline.keys()
     }
 
+    failed = [
+        key
+        for key, regression in regressions.items()
+        if regression > LIMITS.get(key, INDEX_REGRESSION_LIMIT_PCT)
+    ]
+
     payload = {
-        "runs": args.runs,
-        "files": args.files,
+        "measurement": {
+            "runs": args.runs,
+            "warmup": args.warmup,
+            "files": args.files,
+            "rule": "median(measured_runs) after warmup",
+        },
+        "noise_handling": {
+            "warmup_enabled": args.warmup > 0,
+            "median_rule": "use median across measured repetitions",
+            "reproducible_fixture": True,
+        },
         "baseline": baseline,
         "candidate": candidate,
         "regression_pct": regressions,
-        "limits": {
-            "keyword_search_ms": 5.0,
-            "cold_index_ms": 10.0,
-        },
+        "limits_pct": LIMITS,
+        "failed_metrics": failed,
     }
 
     print(json.dumps(payload, indent=2))
@@ -165,14 +319,8 @@ def main() -> int:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
-    failed = []
-    if regressions["keyword_search_ms"] > 5.0:
-        failed.append("keyword_search_ms")
-    if regressions["cold_index_ms"] > 10.0:
-        failed.append("cold_index_ms")
-
     if failed:
-        print(f"\nPerf gate failed: {', '.join(failed)}")
+        print(f"\nPerf comparator failed: {', '.join(failed)}")
         return 1
     return 0
 

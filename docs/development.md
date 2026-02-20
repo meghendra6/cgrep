@@ -11,10 +11,21 @@ cargo clippy --all-targets --all-features -- -D warnings
 ## Performance Gate
 
 ```bash
-python3 scripts/perf_gate.py
+python3 scripts/index_perf_gate.py \
+  --baseline-bin /path/to/baseline/cgrep \
+  --candidate-bin /path/to/candidate/cgrep \
+  --runs 5 \
+  --warmup 1 \
+  --files 2000
 ```
 
-Run this after search/indexing-related changes.
+Noise handling and comparator rule:
+- 1 warmup run per metric, then median of measured runs
+- deterministic synthetic fixture generation per run
+- comparator thresholds:
+  - search latency: >5% regression fails
+  - cold index build: >10% regression fails
+  - incremental/branch-switch index updates: >10% regression fails
 
 ## Release-Ready Checklist
 

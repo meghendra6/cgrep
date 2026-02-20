@@ -5,6 +5,7 @@
 pub mod daemon;
 pub mod index;
 pub mod manifest;
+pub mod observability;
 pub mod scanner;
 pub mod watch;
 

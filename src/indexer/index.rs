@@ -13,13 +13,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 use tantivy::{
     schema::{Field, Schema, Term, STORED, STRING, TEXT},
     Index, IndexWriter, TantivyDocument,
 };
 
 use crate::indexer::manifest::{self, ManifestDiffSummary};
+use crate::indexer::observability;
 use crate::indexer::scanner::{detect_language, FileScanner};
 use crate::parser::symbols::{Symbol, SymbolExtractor, SymbolKind};
 use cgrep::config::{Config, EmbeddingProviderType};
@@ -628,6 +629,8 @@ struct IndexMetadata {
     index_options: Option<StoredIndexOptions>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     manifest_diff: Option<ManifestDiffSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_run_stats: Option<observability::LastRunStats>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -684,6 +687,53 @@ fn save_index_metadata(root: &Path, metadata: &IndexMetadata) -> Result<()> {
     let metadata_path = root.join(METADATA_FILE);
     let metadata_json = serde_json::to_string_pretty(metadata)?;
     manifest::atomic_write_bytes(&metadata_path, metadata_json.as_bytes())
+}
+
+struct PersistIndexRunStatsInput {
+    mode: String,
+    force: bool,
+    started_at_ms: u64,
+    timings_ms: observability::RunTimingsMs,
+    diff: observability::DiffCounts,
+    indexed_files: usize,
+    skipped_files: usize,
+    deleted_files: usize,
+    error_files: usize,
+}
+
+fn build_index_run_stats(input: PersistIndexRunStatsInput) -> observability::LastRunStats {
+    let PersistIndexRunStatsInput {
+        mode,
+        force,
+        started_at_ms,
+        timings_ms,
+        diff,
+        indexed_files,
+        skipped_files,
+        deleted_files,
+        error_files,
+    } = input;
+    let finished_at_ms = observability::now_epoch_millis();
+    observability::LastRunStats {
+        mode,
+        force,
+        started_at_ms,
+        finished_at_ms,
+        total_ms: finished_at_ms.saturating_sub(started_at_ms),
+        timings_ms,
+        diff,
+        cache_reuse: observability::CacheReuseStats::default(),
+        indexed_files,
+        skipped_files,
+        deleted_files,
+        error_files,
+    }
+}
+
+fn diff_counts_from_manifest(summary: Option<&ManifestDiffSummary>) -> observability::DiffCounts {
+    summary
+        .map(observability::DiffCounts::from_manifest)
+        .unwrap_or_default()
 }
 
 pub(crate) fn resolve_index_options_for_watch(root: &Path, config: &Config) -> StoredIndexOptions {
@@ -1192,6 +1242,7 @@ impl IndexBuilder {
             manifest_only,
             print_diff,
         } = manifest_options;
+        let run_started_at_ms = observability::now_epoch_millis();
 
         let index_path = self.root.join(INDEX_DIR);
         let metadata_path = self.root.join(METADATA_FILE);
@@ -1207,7 +1258,9 @@ impl IndexBuilder {
         let scanner = FileScanner::with_excludes(&self.root, self.exclude_patterns.clone())
             .with_includes(self.include_paths.clone())
             .with_gitignore(self.respect_git_ignore);
+        let scan_started = Instant::now();
         let files = scanner.list_files()?;
+        let scan_ms = Some(observability::duration_to_millis(scan_started.elapsed()));
         let current_paths: HashSet<String> = files
             .iter()
             .map(|path| path.to_string_lossy().to_string())
@@ -1222,13 +1275,16 @@ impl IndexBuilder {
         let mut next_manifest: Option<manifest::Manifest> = None;
         let mut deleted_paths: Vec<String> = Vec::new();
         let mut files_to_process: Vec<PathBuf> = files.clone();
+        let mut hash_ms: Option<u64> = None;
 
         if use_manifest {
             let old_manifest = manifest::load_manifest(&self.root);
             let has_prior_snapshot = old_manifest.is_some() || !old_metadata.files.is_empty();
             if manifest_only || force || print_diff || has_prior_snapshot {
+                let hash_started = Instant::now();
                 let diff =
                     manifest::compute_manifest_diff(&self.root, &files, old_manifest.as_ref())?;
+                hash_ms = Some(observability::duration_to_millis(hash_started.elapsed()));
                 manifest_diff = diff.summary;
                 manifest_precomputed = true;
                 if !force {
@@ -1248,6 +1304,33 @@ impl IndexBuilder {
                     let mut metadata = old_metadata;
                     metadata.index_options = Some(self.stored_index_options());
                     metadata.manifest_diff = Some(manifest_diff);
+                    let timings_ms = observability::RunTimingsMs {
+                        scan_ms,
+                        hash_ms,
+                        parse_ms: None,
+                        index_ms: None,
+                        commit_ms: None,
+                    };
+                    metadata.last_run_stats =
+                        Some(build_index_run_stats(PersistIndexRunStatsInput {
+                            mode: "manifest-only".to_string(),
+                            force,
+                            started_at_ms: run_started_at_ms,
+                            timings_ms,
+                            diff: diff_counts_from_manifest(metadata.manifest_diff.as_ref()),
+                            indexed_files: 0,
+                            skipped_files: metadata
+                                .manifest_diff
+                                .as_ref()
+                                .map(|summary| summary.unchanged)
+                                .unwrap_or(0),
+                            deleted_files: metadata
+                                .manifest_diff
+                                .as_ref()
+                                .map(|summary| summary.deleted.len())
+                                .unwrap_or(0),
+                            error_files: 0,
+                        }));
                     save_index_metadata(&self.root, &metadata)?;
                     println!(
                         "{} Manifest updated ({} scanned, {} unchanged, {} added, {} modified, {} deleted)",
@@ -1322,6 +1405,7 @@ impl IndexBuilder {
             },
             index_options: Some(self.stored_index_options()),
             manifest_diff: None,
+            last_run_stats: None,
         };
         let mut indexed_count = 0usize;
         let mut skipped_count = if use_manifest && !force {
@@ -1332,6 +1416,7 @@ impl IndexBuilder {
         let mut deleted_count = 0usize;
         let mut error_count = 0usize;
         let mut indexing_error: Option<anyhow::Error> = None;
+        let mut index_elapsed_ns_total: u128 = 0;
 
         let pb = ProgressBar::new(total_files as u64);
         pb.set_style(
@@ -1389,7 +1474,9 @@ impl IndexBuilder {
             for raw in &deleted_paths {
                 let abs = to_absolute_path(&self.root, raw);
                 let abs_str = abs.to_string_lossy().to_string();
+                let delete_started = Instant::now();
                 writer.delete_term(Term::from_field_text(path_exact_field, &abs_str));
+                index_elapsed_ns_total += delete_started.elapsed().as_nanos();
                 new_metadata.files.remove(&abs_str);
             }
             deleted_count = deleted_paths.len();
@@ -1406,6 +1493,7 @@ impl IndexBuilder {
             .num_threads(io_threads)
             .build()
             .context("Failed to create indexing thread pool")?;
+        let processing_started = Instant::now();
 
         pool.scope(|s| {
             let tx_producer = tx.clone();
@@ -1596,13 +1684,16 @@ impl IndexBuilder {
                         delete_docs,
                     } => {
                         if delete_docs {
+                            let index_started = Instant::now();
                             writer.delete_term(Term::from_field_text(path_exact_field, &path));
+                            index_elapsed_ns_total += index_started.elapsed().as_nanos();
                         }
                         skipped_count += 1;
                         new_metadata.files.insert(path, meta);
                     }
                     ProcessedFile::Indexed { path, meta, docs } => {
                         if indexing_error.is_none() {
+                            let index_started = Instant::now();
                             writer.delete_term(Term::from_field_text(path_exact_field, &path));
                             for doc in docs {
                                 if let Err(err) = writer.add_document(doc) {
@@ -1610,6 +1701,7 @@ impl IndexBuilder {
                                     break;
                                 }
                             }
+                            index_elapsed_ns_total += index_started.elapsed().as_nanos();
                         }
                         indexed_count += 1;
                         new_metadata.files.insert(path, meta);
@@ -1626,12 +1718,21 @@ impl IndexBuilder {
         });
 
         pb.finish_and_clear();
+        let processing_ns_total = processing_started.elapsed().as_nanos();
 
         if let Some(err) = indexing_error {
             return Err(err);
         }
 
+        let commit_started = Instant::now();
         writer.commit()?;
+        let commit_ms = Some(observability::duration_to_millis(commit_started.elapsed()));
+
+        let parse_ms = Some(
+            (processing_ns_total.saturating_sub(index_elapsed_ns_total) / 1_000_000)
+                .min(u128::from(u64::MAX)) as u64,
+        );
+        let index_ms = Some((index_elapsed_ns_total / 1_000_000).min(u128::from(u64::MAX)) as u64);
 
         if use_manifest && !manifest_precomputed {
             manifest_diff.added = files
@@ -1667,6 +1768,26 @@ impl IndexBuilder {
         }
 
         new_metadata.manifest_diff = Some(manifest_diff);
+
+        let timings_ms = observability::RunTimingsMs {
+            scan_ms,
+            hash_ms,
+            parse_ms,
+            index_ms,
+            commit_ms,
+        };
+        let mode = if force { "full" } else { "incremental" };
+        new_metadata.last_run_stats = Some(build_index_run_stats(PersistIndexRunStatsInput {
+            mode: mode.to_string(),
+            force,
+            started_at_ms: run_started_at_ms,
+            timings_ms,
+            diff: diff_counts_from_manifest(new_metadata.manifest_diff.as_ref()),
+            indexed_files: indexed_count,
+            skipped_files: skipped_count,
+            deleted_files: deleted_count,
+            error_files: error_count,
+        }));
         save_index_metadata(&self.root, &new_metadata)?;
 
         let indexed = indexed_count;
@@ -1705,6 +1826,7 @@ impl IndexBuilder {
         if changed_paths.is_empty() {
             return Ok(0);
         }
+        let run_started_at_ms = observability::now_epoch_millis();
 
         let index_path = self.root.join(INDEX_DIR);
         let metadata_path = self.root.join(METADATA_FILE);
@@ -1750,6 +1872,8 @@ impl IndexBuilder {
         let mut skipped_count = 0usize;
         let mut deleted_count = 0usize;
         let mut error_count = 0usize;
+        let mut index_elapsed_ns_total: u128 = 0;
+        let processing_started = Instant::now();
 
         for raw_path in changed_paths {
             let path = if raw_path.is_absolute() {
@@ -1767,7 +1891,9 @@ impl IndexBuilder {
             }
 
             if !path.exists() || !path.is_file() {
+                let index_started = Instant::now();
                 writer.delete_term(Term::from_field_text(path_exact_field, &path_str));
+                index_elapsed_ns_total += index_started.elapsed().as_nanos();
                 if new_metadata.files.remove(&path_str).is_some() {
                     deleted_count += 1;
                 }
@@ -1775,7 +1901,9 @@ impl IndexBuilder {
             }
 
             if path_matches_exclude_patterns(&path, &self.exclude_patterns) {
+                let index_started = Instant::now();
                 writer.delete_term(Term::from_field_text(path_exact_field, &path_str));
+                index_elapsed_ns_total += index_started.elapsed().as_nanos();
                 if new_metadata.files.remove(&path_str).is_some() {
                     deleted_count += 1;
                 }
@@ -1783,14 +1911,18 @@ impl IndexBuilder {
             }
 
             let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+                let index_started = Instant::now();
                 writer.delete_term(Term::from_field_text(path_exact_field, &path_str));
+                index_elapsed_ns_total += index_started.elapsed().as_nanos();
                 if new_metadata.files.remove(&path_str).is_some() {
                     deleted_count += 1;
                 }
                 continue;
             };
             if !crate::indexer::scanner::is_indexable_extension(ext) {
+                let index_started = Instant::now();
                 writer.delete_term(Term::from_field_text(path_exact_field, &path_str));
+                index_elapsed_ns_total += index_started.elapsed().as_nanos();
                 if new_metadata.files.remove(&path_str).is_some() {
                     deleted_count += 1;
                 }
@@ -1837,7 +1969,9 @@ impl IndexBuilder {
             let (chunks, hash) = match outcome {
                 ReadOutcome::Text { chunks, hash } => (chunks, hash),
                 ReadOutcome::Binary { hash } => {
+                    let index_started = Instant::now();
                     writer.delete_term(Term::from_field_text(path_exact_field, &path_str));
+                    index_elapsed_ns_total += index_started.elapsed().as_nanos();
                     skipped_count += 1;
                     new_metadata.files.insert(
                         path_str,
@@ -1890,11 +2024,13 @@ impl IndexBuilder {
                 is_binary: false,
             };
 
+            let index_started = Instant::now();
             writer.delete_term(Term::from_field_text(path_exact_field, &path_str));
 
             if chunks.is_empty() {
                 skipped_count += 1;
                 new_metadata.files.insert(path_str, meta);
+                index_elapsed_ns_total += index_started.elapsed().as_nanos();
                 continue;
             }
 
@@ -1935,16 +2071,46 @@ impl IndexBuilder {
                 writer.add_document(doc)?;
             }
 
+            index_elapsed_ns_total += index_started.elapsed().as_nanos();
             indexed_count += 1;
             new_metadata.files.insert(path_str, meta);
         }
+        let processing_ns_total = processing_started.elapsed().as_nanos();
 
+        let commit_started = Instant::now();
         writer.commit()?;
+        let commit_ms = Some(observability::duration_to_millis(commit_started.elapsed()));
 
+        let hash_started = Instant::now();
         let manifest_delta =
             manifest::apply_manifest_delta(&self.root, changed_paths, old_manifest.as_ref())?;
+        let hash_ms = Some(observability::duration_to_millis(hash_started.elapsed()));
         manifest::write_manifest(&self.root, &manifest_delta.next)?;
         new_metadata.manifest_diff = Some(manifest_delta.summary);
+
+        let parse_ms = Some(
+            (processing_ns_total.saturating_sub(index_elapsed_ns_total) / 1_000_000)
+                .min(u128::from(u64::MAX)) as u64,
+        );
+        let index_ms = Some((index_elapsed_ns_total / 1_000_000).min(u128::from(u64::MAX)) as u64);
+        let timings_ms = observability::RunTimingsMs {
+            scan_ms: None,
+            hash_ms,
+            parse_ms,
+            index_ms,
+            commit_ms,
+        };
+        new_metadata.last_run_stats = Some(build_index_run_stats(PersistIndexRunStatsInput {
+            mode: "incremental-paths".to_string(),
+            force: false,
+            started_at_ms: run_started_at_ms,
+            timings_ms,
+            diff: diff_counts_from_manifest(new_metadata.manifest_diff.as_ref()),
+            indexed_files: indexed_count,
+            skipped_files: skipped_count,
+            deleted_files: deleted_count,
+            error_files: error_count,
+        }));
         save_index_metadata(&self.root, &new_metadata)?;
 
         if error_count > 0 {
@@ -2571,6 +2737,7 @@ mod tests {
             files: HashMap::new(),
             index_options: Some(stored.clone()),
             manifest_diff: None,
+            last_run_stats: None,
         };
         std::fs::write(
             &metadata_path,

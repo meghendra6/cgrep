@@ -13,6 +13,9 @@
 | `cgrep references <name>` (`refs`, `r`) | References lookup |
 | `cgrep dependents <file>` (`deps`, `dep`) | Reverse dependency lookup |
 | `cgrep index` (`ix`, `i`) | Build/rebuild index |
+| `cgrep status` | Index/manifest/daemon readiness summary |
+| `cgrep stats` | Last index-run timings + diff counters |
+| `cgrep doctor` | Read-only diagnostics for local `.cgrep/` state |
 | `cgrep watch` (`wt`, `w`) | Reindex on file changes |
 | `cgrep daemon <start|status|stop>` (`bg`) | Manage background watch daemon |
 | `cgrep mcp <serve|install|uninstall>` | MCP server + host config integration |
@@ -97,6 +100,19 @@ cgrep index --manifest-only --print-diff
 
 # Disable manifest path and use legacy incremental flow
 cgrep index --no-manifest
+```
+
+## Observability commands
+
+```bash
+# Show readiness (index/schema/docs/manifest/daemon)
+cgrep status
+
+# Show last persisted index timings (scan/hash/parse/index/commit)
+cgrep stats
+
+# Diagnose missing/corrupt/incomplete .cgrep artifacts (read-only)
+cgrep doctor
 ```
 
 ## Search guide
