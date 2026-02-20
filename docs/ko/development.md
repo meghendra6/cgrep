@@ -19,6 +19,15 @@ python3 scripts/index_perf_gate.py \
   --files 1200
 ```
 
+```bash
+python3 scripts/agent_plan_perf_gate.py \
+  --baseline-bin /path/to/baseline/cgrep \
+  --candidate-bin /path/to/candidate/cgrep \
+  --runs 5 \
+  --warmup 2 \
+  --files 800
+```
+
 검색/인덱싱 관련 변경 뒤에는 반드시 실행하세요.
 
 성능 게이트는 다음 지표의 지연시간 `p50`/`p95`를 추적합니다.
@@ -27,6 +36,9 @@ python3 scripts/index_perf_gate.py \
 - `--reuse auto` 기준 fresh worktree 인덱싱 지연
 - `--reuse strict` 이후 첫 keyword 검색 지연
 - `--reuse auto` 이후 첫 keyword 검색 지연
+- identifier-like 단순 쿼리 기준 agent plan 지연
+- phrase-like 복합 쿼리 기준 agent plan 지연
+- expand-heavy 쿼리 기준 agent plan end-to-end 지연
 
 측정 방법:
 - `--warmup`: 지표별 워밍업 실행(리포트 미포함)
@@ -39,7 +51,7 @@ python3 scripts/index_perf_gate.py \
 - 빌드 통과 (`cargo build`)
 - 테스트 통과 (`cargo test`)
 - Clippy 경고 0개 (`-D warnings`)
-- 성능 게이트 통과 (`scripts/index_perf_gate.py`)
+- 성능 게이트 통과 (`scripts/index_perf_gate.py`, `scripts/agent_plan_perf_gate.py`)
 - CLI/동작 변경 시 문서 동기화 완료
 
 ## 벤치마크: 에이전트 토큰 효율 (PyTorch)

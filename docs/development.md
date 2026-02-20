@@ -19,6 +19,15 @@ python3 scripts/index_perf_gate.py \
   --files 1200
 ```
 
+```bash
+python3 scripts/agent_plan_perf_gate.py \
+  --baseline-bin /path/to/baseline/cgrep \
+  --candidate-bin /path/to/candidate/cgrep \
+  --runs 5 \
+  --warmup 2 \
+  --files 800
+```
+
 Run this after search/indexing-related changes.
 Performance gate tracks latency `p50`/`p95` for:
 - fresh worktree index latency with `--reuse off`
@@ -26,6 +35,9 @@ Performance gate tracks latency `p50`/`p95` for:
 - fresh worktree index latency with `--reuse auto`
 - first keyword search latency after `--reuse strict`
 - first keyword search latency after `--reuse auto`
+- agent plan latency for simple identifier-like query
+- agent plan latency for complex phrase-like query
+- agent plan end-to-end latency on expand-heavy query
 
 Methodology:
 - `--warmup` executes non-reported warmup runs per metric.
@@ -38,7 +50,7 @@ Methodology:
 - Build passes (`cargo build`)
 - Tests pass (`cargo test`)
 - Clippy clean (`-D warnings`)
-- Performance gate passes (`scripts/index_perf_gate.py`)
+- Performance gates pass (`scripts/index_perf_gate.py`, `scripts/agent_plan_perf_gate.py`)
 - Docs updated for CLI/behavior changes
 
 ## Benchmark: Agent Token Efficiency (PyTorch)

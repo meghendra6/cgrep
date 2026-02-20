@@ -21,6 +21,27 @@ ID=$(cgrep agent locate "token validation" --compact | jq -r '.results[0].id')
 cgrep agent expand --id "$ID" -C 8 --compact
 ```
 
+## Deterministic planning (`agent plan`)
+
+`agent plan` orchestrates bounded `map -> agent locate -> agent expand` and emits deterministic `json2`.
+
+```bash
+cgrep --format json2 --compact agent plan "trace authentication middleware flow"
+cgrep --format json2 --compact agent plan "validate_token" --max-steps 6 --max-candidates 5
+```
+
+Planner options:
+- `--max-steps <n>`: cap emitted steps (default `6`)
+- `--max-candidates <n>`: cap final candidates (default `5`)
+- `--budget <tight|balanced|full|off>`: reused for locate stage
+- `--path`, `--changed`, `--mode`: forwarded to locate strategy
+
+`json2` payload fields:
+- `meta`: query/profile/budget/strategy and repository fingerprint/version info
+- `steps[]`: stable step IDs, command, args, reason, expected output type, status
+- `candidates[]`: stable IDs + short follow-up summaries
+- `error` (optional): deterministic machine-parseable option validation failures
+
 Short alias form:
 
 ```bash
