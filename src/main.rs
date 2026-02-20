@@ -398,6 +398,9 @@ fn main() -> Result<()> {
                 indexer::daemon::status(path.as_deref())?;
             }
         },
+        Commands::Status { path } => {
+            indexer::status::run(path.as_deref(), global_format, compact)?;
+        }
         Commands::Mcp { command } => match command {
             McpCommands::Serve => {
                 mcp::run()?;
@@ -469,6 +472,8 @@ fn main() -> Result<()> {
             embeddings_force,
             high_memory,
             include_ignored,
+            background,
+            background_worker,
             no_manifest,
             manifest_only,
             print_diff,
@@ -483,6 +488,8 @@ fn main() -> Result<()> {
                     include_paths,
                     high_memory,
                     include_ignored,
+                    background,
+                    background_worker,
                     use_manifest: !no_manifest,
                     manifest_only,
                     print_diff,

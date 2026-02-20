@@ -11,7 +11,9 @@ use rayon::ThreadPoolBuilder;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::SystemTime;
 use tantivy::{
@@ -21,6 +23,7 @@ use tantivy::{
 
 use crate::indexer::manifest::{self, ManifestDiffSummary};
 use crate::indexer::scanner::{detect_language, FileScanner};
+use crate::indexer::status::{self, BuildStatus};
 use crate::parser::symbols::{Symbol, SymbolExtractor, SymbolKind};
 use cgrep::config::{Config, EmbeddingProviderType};
 use cgrep::embedding::{
@@ -1978,6 +1981,8 @@ pub struct RunOptions {
     pub include_paths: Vec<String>,
     pub high_memory: bool,
     pub include_ignored: bool,
+    pub background: bool,
+    pub background_worker: bool,
     pub use_manifest: bool,
     pub manifest_only: bool,
     pub print_diff: bool,
@@ -1985,40 +1990,118 @@ pub struct RunOptions {
     pub embeddings_force: bool,
 }
 
-pub fn run(path: Option<&str>, options: RunOptions) -> Result<()> {
-    let RunOptions {
-        force,
-        excludes,
-        include_paths,
-        high_memory,
-        include_ignored,
-        use_manifest,
-        manifest_only,
-        print_diff,
-        embeddings_mode,
-        embeddings_force,
-    } = options;
-
+fn resolve_root(path: Option<&str>) -> Result<PathBuf> {
     let root = path
-        .map(std::path::PathBuf::from)
+        .map(PathBuf::from)
         .or_else(|| std::env::current_dir().ok())
         .ok_or_else(|| anyhow::anyhow!("Cannot determine current directory"))?;
+    Ok(root)
+}
 
-    let config = Config::load_for_dir(&root);
-
-    // Merge CLI excludes with config excludes (CLI takes precedence by being added first)
-    let mut all_excludes = excludes;
+fn resolve_effective_options(
+    root: &Path,
+    options: &RunOptions,
+) -> (Config, StoredIndexOptions, SymbolIndexOptions) {
+    let config = Config::load_for_dir(root);
+    let mut all_excludes = options.excludes.clone();
     all_excludes.extend(config.index().exclude_paths().iter().cloned());
-
-    let respect_git_ignore = config.index().respect_git_ignore() && !include_ignored;
+    let respect_git_ignore = config.index().respect_git_ignore() && !options.include_ignored;
     let index_options = StoredIndexOptions {
         exclude_paths: all_excludes,
-        include_paths,
+        include_paths: options.include_paths.clone(),
         respect_git_ignore,
-        high_memory,
+        high_memory: options.high_memory,
     };
     let symbol_options = SymbolIndexOptions::from_config(&config);
-    let builder = IndexBuilder::with_options(&root, index_options.clone(), symbol_options)?;
+    (config, index_options, symbol_options)
+}
+
+fn build_background_worker_args(root: &Path, options: &RunOptions) -> Vec<String> {
+    let mut args = vec![
+        "index".to_string(),
+        "--path".to_string(),
+        root.display().to_string(),
+        "--background-worker".to_string(),
+    ];
+
+    if options.force {
+        args.push("--force".to_string());
+    }
+    if options.high_memory {
+        args.push("--high-memory".to_string());
+    }
+    if options.include_ignored {
+        args.push("--include-ignored".to_string());
+    }
+    if !options.use_manifest {
+        args.push("--no-manifest".to_string());
+    }
+    if options.manifest_only {
+        args.push("--manifest-only".to_string());
+    }
+    if options.print_diff {
+        args.push("--print-diff".to_string());
+    }
+    if options.embeddings_force {
+        args.push("--embeddings-force".to_string());
+    }
+
+    args.push("--embeddings".to_string());
+    args.push(options.embeddings_mode.clone());
+
+    for include in &options.include_paths {
+        args.push("--include-path".to_string());
+        args.push(include.clone());
+    }
+    for exclude in &options.excludes {
+        args.push("--exclude".to_string());
+        args.push(exclude.clone());
+    }
+
+    args
+}
+
+fn spawn_background_worker(root: &Path, options: &RunOptions) -> Result<u32> {
+    std::fs::create_dir_all(root.join(".cgrep"))?;
+    let log_path = status::background_log_path(root);
+    let stdout = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .with_context(|| format!("failed to open background index log {}", log_path.display()))?;
+    let stderr = stdout
+        .try_clone()
+        .context("failed to clone background index log file handle")?;
+    let exe = std::env::current_exe().context("failed to resolve current executable")?;
+    let args = build_background_worker_args(root, options);
+    let child = Command::new(exe)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr))
+        .spawn()
+        .context("failed to spawn background index worker")?;
+    Ok(child.id())
+}
+
+fn run_foreground(
+    root: &Path,
+    options: &RunOptions,
+    mut background_status: Option<&mut BuildStatus>,
+) -> Result<()> {
+    let force = options.force;
+    let use_manifest = options.use_manifest;
+    let manifest_only = options.manifest_only;
+    let print_diff = options.print_diff;
+    let embeddings_mode = options.embeddings_mode.as_str();
+    let embeddings_force = options.embeddings_force;
+    let (config, index_options, symbol_options) = resolve_effective_options(root, options);
+
+    if let Some(status_state) = background_status.as_mut() {
+        status::mark_build_phase(root, status_state, "indexing", 0, 0, "indexing files")?;
+    }
+
+    let builder = IndexBuilder::with_options(root, index_options.clone(), symbol_options)?;
     if index_options.high_memory {
         eprintln!("Using high-memory indexing: writer budget = 1GiB");
     }
@@ -2038,7 +2121,19 @@ pub fn run(path: Option<&str>, options: RunOptions) -> Result<()> {
         println!("Index complete: {} files", count);
     }
 
-    let mode = EmbeddingsMode::parse(&embeddings_mode)?;
+    if let Some(status_state) = background_status.as_mut() {
+        status_state.progress.total = count;
+        status::mark_build_phase(
+            root,
+            status_state,
+            "indexing",
+            count,
+            status_state.progress.failed,
+            format!("index build finished ({count} files updated)"),
+        )?;
+    }
+
+    let mode = EmbeddingsMode::parse(embeddings_mode)?;
     if embeddings_force && mode == EmbeddingsMode::Off {
         eprintln!("Warning: --embeddings-force has no effect when --embeddings=off");
         return Ok(());
@@ -2050,6 +2145,17 @@ pub fn run(path: Option<&str>, options: RunOptions) -> Result<()> {
     }
 
     if mode != EmbeddingsMode::Off && !manifest_only {
+        if let Some(status_state) = background_status.as_mut() {
+            status::mark_build_phase(
+                root,
+                status_state,
+                "embedding",
+                status_state.progress.total,
+                status_state.progress.failed,
+                "building embeddings",
+            )?;
+        }
+
         let metadata_path = root.join(METADATA_FILE);
         let content = std::fs::read_to_string(&metadata_path).with_context(|| {
             format!("Failed to read index metadata: {}", metadata_path.display())
@@ -2057,7 +2163,7 @@ pub fn run(path: Option<&str>, options: RunOptions) -> Result<()> {
         let index_metadata: IndexMetadata =
             serde_json::from_str(&content).context("Failed to parse index metadata")?;
 
-        let stats = index_embeddings(&root, mode, embeddings_force, &config, &index_metadata)?;
+        let stats = index_embeddings(root, mode, embeddings_force, &config, &index_metadata)?;
         if stats.files_embedded > 0 || stats.files_skipped_up_to_date > 0 || stats.files_deleted > 0
         {
             println!(
@@ -2071,6 +2177,76 @@ pub fn run(path: Option<&str>, options: RunOptions) -> Result<()> {
     }
 
     Ok(())
+}
+
+pub fn run(path: Option<&str>, options: RunOptions) -> Result<()> {
+    let root = resolve_root(path)?;
+
+    if options.background && !options.background_worker {
+        let existing = status::read_status_with_recovery(&root)?;
+        if matches!(
+            existing.phase.as_str(),
+            "starting" | "indexing" | "embedding"
+        ) && existing.pid.is_some()
+        {
+            println!(
+                "{} Background indexing already running (pid={})",
+                "✓".green(),
+                existing.pid.unwrap_or(0)
+            );
+            println!("  Status: {}", status::status_file_path(&root).display());
+            println!("  Log: {}", status::background_log_path(&root).display());
+            return Ok(());
+        }
+
+        let mut status_state =
+            status::mark_build_start(&root, "starting", None, 0, "queued background index")?;
+        let pid = spawn_background_worker(&root, &options)?;
+        status_state.pid = Some(pid);
+        status_state.updated_at = status::now_unix_ms();
+        status_state.message = "background index worker started".to_string();
+        status::save_build_status(&root, &status_state)?;
+
+        println!(
+            "{} Background indexing started (pid={})",
+            "✓".green(),
+            pid.to_string().cyan()
+        );
+        println!("  Status: {}", status::status_file_path(&root).display());
+        println!("  Log: {}", status::background_log_path(&root).display());
+        return Ok(());
+    }
+
+    let mut background_state = if options.background_worker {
+        Some(status::mark_build_start(
+            &root,
+            "indexing",
+            Some(std::process::id()),
+            0,
+            "background index worker started",
+        )?)
+    } else {
+        None
+    };
+
+    let result = run_foreground(&root, &options, background_state.as_mut());
+
+    if let Some(status_state) = background_state.as_mut() {
+        match &result {
+            Ok(_) => {
+                status::mark_build_complete(&root, status_state, "background index build complete")?
+            }
+            Err(err) => {
+                let _ = status::mark_build_failed(
+                    &root,
+                    status_state,
+                    format!("background index build failed: {err}"),
+                );
+            }
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]

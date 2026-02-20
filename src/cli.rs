@@ -443,6 +443,14 @@ pub enum Commands {
         command: DaemonCommands,
     },
 
+    /// Print index readiness and background build status
+    #[command(visible_aliases = ["st"])]
+    Status {
+        /// Path to inspect (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+    },
+
     /// MCP server and host config integration
     Mcp {
         #[command(subcommand)]
@@ -576,6 +584,14 @@ pub enum Commands {
         /// Include files ignored by .gitignore/.ignore (opt-out of default ignore-respecting index)
         #[arg(long)]
         include_ignored: bool,
+
+        /// Build index asynchronously in background and return immediately
+        #[arg(long)]
+        background: bool,
+
+        /// Internal: spawned background index worker
+        #[arg(long, hide = true)]
+        background_worker: bool,
 
         /// Disable manifest-based change detection and use legacy incremental behavior
         #[arg(long = "no-manifest")]
@@ -830,6 +846,35 @@ mod tests {
                 assert!(!no_manifest);
             }
             other => panic!("expected index command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn index_background_flag_parses() {
+        let cli = Cli::try_parse_from(["cgrep", "index", "--background"])
+            .expect("parse background index");
+
+        match cli.command {
+            Commands::Index {
+                background,
+                background_worker,
+                ..
+            } => {
+                assert!(background);
+                assert!(!background_worker);
+            }
+            other => panic!("expected index command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn status_alias_parses() {
+        let cli = Cli::try_parse_from(["cgrep", "st", "-p", "src"]).expect("parse status alias");
+        match cli.command {
+            Commands::Status { path } => {
+                assert_eq!(path.as_deref(), Some("src"));
+            }
+            other => panic!("expected status command, got {other:?}"),
         }
     }
 }

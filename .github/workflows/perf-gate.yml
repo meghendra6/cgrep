@@ -25,10 +25,34 @@ jobs:
         run: cargo test -q
 
       - name: Build release binary
-        run: cargo build --release
+        run: |
+          cargo build --release
+          cp target/release/cgrep /tmp/cgrep-candidate-bin
 
-      - name: Run performance regression gate
-        run: python3 scripts/perf_gate.py
+      - name: Build baseline binary (merge-base with main)
+        run: |
+          git fetch --no-tags --depth=1 origin main
+          BASE_SHA="$(git merge-base HEAD origin/main || git rev-parse origin/main)"
+          git worktree add /tmp/cgrep-baseline "$BASE_SHA"
+          cargo build --release --manifest-path /tmp/cgrep-baseline/Cargo.toml
+          cp /tmp/cgrep-baseline/target/release/cgrep /tmp/cgrep-baseline-bin
+
+      - name: Run M3 index/search performance regression gate
+        run: |
+          python3 scripts/index_perf_gate.py \
+            --baseline-bin /tmp/cgrep-baseline-bin \
+            --candidate-bin /tmp/cgrep-candidate-bin \
+            --runs 3 \
+            --warmup 1 \
+            --files 1200 \
+            --json-out /tmp/cgrep-index-perf-report.json
+
+      - name: Print M3 perf report
+        if: always()
+        run: |
+          if [ -f /tmp/cgrep-index-perf-report.json ]; then
+            cat /tmp/cgrep-index-perf-report.json
+          fi
 
       - name: Run token efficiency gate
         run: python3 scripts/token_gate.py

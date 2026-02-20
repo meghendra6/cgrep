@@ -27,12 +27,15 @@ curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/insta
 
 # 2) Build index once per repo (respects .gitignore/.ignore by default)
 cgrep index
+# or non-blocking background build
+cgrep index --background
 
 # 3) Search and navigate
 cgrep s "token validation" src/
 cgrep d handle_auth
 cgrep r UserService
 cgrep read src/auth.rs
+cgrep status
 ```
 
 ### For AI Agents
@@ -103,6 +106,7 @@ cgrep references UserService
 cgrep dependents src/auth.rs
 cgrep read src/auth.rs
 cgrep map --depth 2
+cgrep status
 ```
 
 Shortcut aliases:
