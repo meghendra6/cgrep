@@ -47,11 +47,24 @@ jobs:
             --files 1200 \
             --json-out /tmp/cgrep-index-perf-report.json
 
+      - name: Run agent plan performance regression gate
+        run: |
+          python3 scripts/agent_plan_perf_gate.py \
+            --baseline-bin /tmp/cgrep-baseline-bin \
+            --candidate-bin /tmp/cgrep-candidate-bin \
+            --runs 5 \
+            --warmup 2 \
+            --files 800 \
+            --json-out /tmp/cgrep-agent-plan-perf-report.json
+
       - name: Print perf report
         if: always()
         run: |
           if [ -f /tmp/cgrep-index-perf-report.json ]; then
             cat /tmp/cgrep-index-perf-report.json
+          fi
+          if [ -f /tmp/cgrep-agent-plan-perf-report.json ]; then
+            cat /tmp/cgrep-agent-plan-perf-report.json
           fi
 
       - name: Run token efficiency gate
