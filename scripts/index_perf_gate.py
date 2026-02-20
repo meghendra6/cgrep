@@ -98,11 +98,13 @@ def setup_origin(tmp_root: Path, file_count: int) -> Path:
     git(seed, "init", "--bare", str(origin))
     git(seed, "remote", "add", "origin", str(origin))
     git(seed, "push", "-u", "origin", "main")
+    git(origin, "symbolic-ref", "HEAD", "refs/heads/main")
     return origin
 
 
 def clone_origin(origin: Path, dst: Path) -> None:
     git(dst.parent, "clone", str(origin), str(dst))
+    git(dst, "checkout", "-B", "main", "origin/main")
     git(dst, "config", "user.email", "perf@example.com")
     git(dst, "config", "user.name", "Perf")
 
