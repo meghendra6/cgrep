@@ -18,6 +18,11 @@ cgrep index --include-ignored
 # Embeddings mode
 cgrep index --embeddings auto
 cgrep index --embeddings precompute
+
+# Manifest controls (M1 incremental path)
+cgrep index --print-diff
+cgrep index --manifest-only --print-diff
+cgrep index --no-manifest
 ```
 
 ## Watch and daemon
@@ -56,9 +61,15 @@ cgrep watch --no-adaptive
 ## Behavior notes
 
 - Index lives under `.cgrep/`
+- Manifest lives under `.cgrep/manifest/` (`version`, `v1.json`, optional `root.hash`)
 - Search from subdirectories reuses nearest parent index
 - Indexing respects `.gitignore`/`.ignore` by default (`--include-ignored` to opt out)
 - `--include-path <path>` lets you index selected ignored paths without indexing everything ignored
+- Default indexing uses a two-stage change detector:
+  - stage1 quick filter by file `mtime` + `size`
+  - stage2 BLAKE3 hash only for suspected changes
+- `--manifest-only` updates manifest + diff summary in `.cgrep/metadata.json` without document reindex
+- `--no-manifest` disables manifest usage and falls back to legacy incremental behavior
 - Watch mode uses adaptive backoff by default (`--no-adaptive` to disable)
 - Watch defaults are tuned for background operation (`--min-interval 180`, about 3 minutes)
 - Watch reacts only to indexable source extensions and skips temp/swap files
