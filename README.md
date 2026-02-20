@@ -103,6 +103,9 @@ cgrep references UserService
 cgrep dependents src/auth.rs
 cgrep read src/auth.rs
 cgrep map --depth 2
+cgrep status
+cgrep stats
+cgrep doctor
 ```
 
 Shortcut aliases:
