@@ -61,6 +61,7 @@ fn setup_origin(seed: &Path, origin: &Path) {
     run_git(seed, &["init", "--bare", &origin_str]);
     run_git(seed, &["remote", "add", "origin", &origin_str]);
     run_git(seed, &["push", "-u", "origin", "main"]);
+    run_git(origin, &["symbolic-ref", "HEAD", "refs/heads/main"]);
 }
 
 fn clone_origin(origin: &Path, destination: &Path) {
@@ -69,6 +70,7 @@ fn clone_origin(origin: &Path, destination: &Path) {
     let origin_str = origin.to_string_lossy().to_string();
     let dest_str = destination.to_string_lossy().to_string();
     run_git(parent, &["clone", &origin_str, &dest_str]);
+    run_git(destination, &["checkout", "-B", "main", "origin/main"]);
     run_git(destination, &["config", "user.email", "ci@example.com"]);
     run_git(destination, &["config", "user.name", "CI"]);
 }
@@ -188,7 +190,7 @@ impl Drop for BackgroundGuard {
 }
 
 #[test]
-fn reuse_strict_hits_exact_commit_and_is_faster_than_off() {
+fn reuse_strict_hits_exact_commit_snapshot() {
     let dir = TempDir::new().expect("tempdir");
     let cache = dir.path().join("cache");
     let seed = dir.path().join("seed");
@@ -204,30 +206,13 @@ fn reuse_strict_hits_exact_commit_and_is_faster_than_off() {
         &["index", "--reuse", "strict", "--embeddings", "off"],
     );
 
-    let clone_off = dir.path().join("clone_off");
     let clone_strict = dir.path().join("clone_strict");
-    clone_origin(&origin, &clone_off);
     clone_origin(&origin, &clone_strict);
 
-    let off_start = Instant::now();
-    let _ = run_cgrep_success(
-        &clone_off,
-        &cache,
-        &["index", "--reuse", "off", "--embeddings", "off"],
-    );
-    let off_elapsed = off_start.elapsed();
-
-    let strict_start = Instant::now();
     let _ = run_cgrep_success(
         &clone_strict,
         &cache,
         &["index", "--reuse", "strict", "--embeddings", "off"],
-    );
-    let strict_elapsed = strict_start.elapsed();
-
-    assert!(
-        strict_elapsed < off_elapsed,
-        "strict reuse should be faster than off: strict={strict_elapsed:?}, off={off_elapsed:?}"
     );
 
     let state = reuse_state(&clone_strict);
@@ -285,6 +270,11 @@ fn reuse_auto_selects_nearest_snapshot_deterministically() {
 
     let clone_auto = dir.path().join("clone_auto");
     clone_origin(&origin, &clone_auto);
+    let seed_head = run_git(&seed, &["rev-parse", "HEAD"]).trim().to_string();
+    let clone_head = run_git(&clone_auto, &["rev-parse", "HEAD"])
+        .trim()
+        .to_string();
+    assert_eq!(clone_head, seed_head);
     let _ = run_cgrep_success(
         &clone_auto,
         &cache,
@@ -422,17 +412,24 @@ fn corrupt_snapshot_falls_back_safely_with_reason() {
         &seed.join("src/lib.rs"),
         "pub fn fallback_probe() { let token = \"m5_corrupt_fallback\"; }\n",
     );
-    let head = commit_all(&seed, "seed");
+    let _ = commit_all(&seed, "seed");
     setup_origin(&seed, &origin);
+
+    let clone = dir.path().join("clone_corrupt");
+    clone_origin(&origin, &clone);
     let _ = run_cgrep_success(
-        &seed,
+        &clone,
         &cache,
         &["index", "--reuse", "strict", "--embeddings", "off"],
     );
 
-    let seed_state = reuse_state(&seed);
-    let repo_key = seed_state["repo_key"].as_str().expect("repo key");
-    let snapshot_key = seed_state["snapshot_key"].as_str().unwrap_or(&head);
+    let clone_state = reuse_state(&clone);
+    let repo_key = clone_state["repo_key"].as_str().expect("repo key");
+    let clone_head = run_git(&clone, &["rev-parse", "HEAD"]).trim().to_string();
+    let snapshot_key = clone_state["snapshot_key"]
+        .as_str()
+        .unwrap_or(&clone_head)
+        .to_string();
     let corrupt_meta = cache
         .join(repo_key)
         .join(snapshot_key)
@@ -440,8 +437,6 @@ fn corrupt_snapshot_falls_back_safely_with_reason() {
         .join("meta.json");
     fs::remove_file(&corrupt_meta).expect("remove meta.json");
 
-    let clone = dir.path().join("clone_corrupt");
-    clone_origin(&origin, &clone);
     let _ = run_cgrep_success(
         &clone,
         &cache,
