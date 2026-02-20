@@ -372,6 +372,28 @@ fn main() -> Result<()> {
             cli::AgentCommands::Expand { ids, path, context } => {
                 query::agent::run_expand(&ids, path.as_deref(), context.unwrap_or(8), compact)?;
             }
+            cli::AgentCommands::Plan {
+                query,
+                path,
+                changed,
+                mode,
+                budget,
+                profile,
+                max_steps,
+                max_candidates,
+            } => {
+                let options = query::agent::AgentPlanOptions {
+                    path,
+                    changed,
+                    mode,
+                    budget: budget.unwrap_or(CliBudgetPreset::Balanced),
+                    profile,
+                    max_steps,
+                    max_candidates,
+                    compact,
+                };
+                query::agent::run_plan(&query, &options)?;
+            }
             cli::AgentCommands::Install { provider } => {
                 install_for_provider(provider)?;
             }

@@ -22,6 +22,27 @@ ID=$(cgrep agent locate "token validation" --compact | jq -r '.results[0].id')
 cgrep agent expand --id "$ID" -C 8 --compact
 ```
 
+## 결정적 플래닝 (`agent plan`)
+
+`agent plan`은 범위가 제한된 `map -> agent locate -> agent expand`를 자동 구성하고, 결정적인 `json2`를 출력합니다.
+
+```bash
+cgrep --format json2 --compact agent plan "trace authentication middleware flow"
+cgrep --format json2 --compact agent plan "validate_token" --max-steps 6 --max-candidates 5
+```
+
+주요 옵션:
+- `--max-steps <n>`: 출력 step 수 상한 (기본 `6`)
+- `--max-candidates <n>`: 최종 후보 수 상한 (기본 `5`)
+- `--budget <tight|balanced|full|off>`: locate 단계 예산 프리셋 재사용
+- `--path`, `--changed`, `--mode`: locate 전략에 전달
+
+`json2` 출력 구조:
+- `meta`: query/profile/budget/strategy + 저장소 fingerprint/version 정보
+- `steps[]`: 안정적인 step ID, command, args, reason, expected output type, status
+- `candidates[]`: 후속 탐색용 안정적인 ID + 요약
+- `error`(선택): 옵션 검증 실패 시 machine-parseable 에러
+
 단축 별칭 형태:
 
 ```bash

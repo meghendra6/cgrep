@@ -17,7 +17,7 @@
 | `cgrep daemon <start|status|stop>` (`bg`) | Manage background watch daemon |
 | `cgrep status` (`st`) | Show basic/full readiness + background index state |
 | `cgrep mcp <serve|install|uninstall>` | MCP server + host config integration |
-| `cgrep agent <...>` (`a`) | Agent locate/expand + integration install |
+| `cgrep agent <...>` (`a`) | Agent plan/locate/expand + integration install |
 | `cgrep completions <shell>` | Generate shell completions |
 
 ## grep/rg migration quick path
@@ -63,6 +63,7 @@ cgrep d handle_auth               # definition
 cgrep r UserService               # references
 cgrep c validate_token            # callers
 cgrep dep src/auth.rs             # dependents
+cgrep a p "trace auth middleware flow"
 cgrep a l "token validation" -B tight -u
 ```
 

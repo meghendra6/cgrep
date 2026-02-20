@@ -14,7 +14,7 @@ Code search for humans and AI coding agents.
 | Problem | Typical flow | cgrep flow |
 |---|---|---|
 | Locate real implementation points | repeat grep + manual file opens | `search -> definition/references -> read` |
-| Keep agent loops small | noisy context payloads | `agent locate -> agent expand` |
+| Keep agent loops small | noisy context payloads | `agent plan` or `agent locate -> agent expand` |
 | Maintain stable retrieval in large repos | ad-hoc scripts | index/watch/daemon + MCP server |
 
 ## 60-Second Quick Start
@@ -62,6 +62,9 @@ cgrep mcp install claude-desktop
 # Token-efficient retrieval
 ID=$(cgrep agent locate "where token validation happens" --compact | jq -r '.results[0].id')
 cgrep agent expand --id "$ID" -C 8 --compact
+
+# Deterministic retrieval plan
+cgrep --format json2 --compact agent plan "trace authentication middleware flow"
 ```
 
 Details:
@@ -124,6 +127,7 @@ cgrep c function      # callers
 cgrep dep file        # dependents
 cgrep i               # index
 cgrep a l "query"     # agent locate
+cgrep a p "task"      # agent plan
 ```
 
 ## Benchmarks

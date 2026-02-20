@@ -128,6 +128,41 @@ pub enum AgentCommands {
         context: Option<usize>,
     },
 
+    /// Stage 0: deterministic orchestration plan across map/locate/expand
+    #[command(visible_aliases = ["p", "pl"])]
+    Plan {
+        /// Task or question to plan for
+        query: String,
+
+        /// Path to search in (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Limit planning scope to files changed since revision (default: HEAD)
+        #[arg(short = 'u', long, num_args = 0..=1, default_missing_value = "HEAD")]
+        changed: Option<String>,
+
+        /// Search mode to use for locate stage
+        #[arg(short = 'M', long, value_enum)]
+        mode: Option<CliSearchMode>,
+
+        /// Output budget preset for locate stage (default: balanced)
+        #[arg(short = 'B', long, value_enum)]
+        budget: Option<CliBudgetPreset>,
+
+        /// Planning profile label (default: agent)
+        #[arg(short = 'P', long, default_value = "agent")]
+        profile: String,
+
+        /// Maximum number of emitted steps
+        #[arg(long = "max-steps")]
+        max_steps: Option<usize>,
+
+        /// Maximum number of candidate regions in the final plan output
+        #[arg(long = "max-candidates")]
+        max_candidates: Option<usize>,
+    },
+
     /// Install cgrep instructions for an AI agent provider
     #[command(visible_aliases = ["add"])]
     Install {
