@@ -19,7 +19,7 @@ cgrep index --include-ignored
 cgrep index --embeddings auto
 cgrep index --embeddings precompute
 
-# Manifest controls (M1 incremental path)
+# Manifest controls (incremental path)
 cgrep index --print-diff
 cgrep index --manifest-only --print-diff
 cgrep index --no-manifest

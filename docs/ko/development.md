@@ -21,7 +21,7 @@ python3 scripts/index_perf_gate.py \
 
 검색/인덱싱 관련 변경 뒤에는 반드시 실행하세요.
 
-M4 게이트는 다음 지표의 지연시간 `p50`/`p95`와 cold index 처리량을 추적합니다.
+성능 게이트는 다음 지표의 지연시간 `p50`/`p95`와 cold index 처리량을 추적합니다.
 - legacy keyword latency
 - ranking-enabled keyword latency
 - identifier-like keyword latency
