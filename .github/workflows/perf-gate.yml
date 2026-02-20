@@ -56,7 +56,6 @@ jobs:
             --warmup 2 \
             --files 800 \
             --json-out /tmp/cgrep-agent-plan-perf-report.json
-
       - name: Print perf report
         if: always()
         run: |
