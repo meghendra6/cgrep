@@ -37,7 +37,7 @@ jobs:
           cargo build --release --manifest-path /tmp/cgrep-baseline/Cargo.toml
           cp /tmp/cgrep-baseline/target/release/cgrep /tmp/cgrep-baseline-bin
 
-      - name: Run M4 keyword ranking performance regression gate
+      - name: Run index performance regression gate
         run: |
           python3 scripts/index_perf_gate.py \
             --baseline-bin /tmp/cgrep-baseline-bin \
@@ -47,7 +47,7 @@ jobs:
             --files 1200 \
             --json-out /tmp/cgrep-index-perf-report.json
 
-      - name: Print M4 perf report
+      - name: Print perf report
         if: always()
         run: |
           if [ -f /tmp/cgrep-index-perf-report.json ]; then

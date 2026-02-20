@@ -21,12 +21,12 @@ python3 scripts/index_perf_gate.py \
 
 검색/인덱싱 관련 변경 뒤에는 반드시 실행하세요.
 
-성능 게이트는 다음 지표의 지연시간 `p50`/`p95`와 cold index 처리량을 추적합니다.
-- legacy keyword latency
-- ranking-enabled keyword latency
-- identifier-like keyword latency
-- scoped keyword latency
-- cold index throughput
+성능 게이트는 다음 지표의 지연시간 `p50`/`p95`를 추적합니다.
+- `--reuse off` 기준 fresh worktree 인덱싱 지연
+- `--reuse strict` 기준 fresh worktree 인덱싱 지연
+- `--reuse auto` 기준 fresh worktree 인덱싱 지연
+- `--reuse strict` 이후 첫 keyword 검색 지연
+- `--reuse auto` 이후 첫 keyword 검색 지연
 
 측정 방법:
 - `--warmup`: 지표별 워밍업 실행(리포트 미포함)

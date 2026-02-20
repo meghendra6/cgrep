@@ -20,12 +20,12 @@ python3 scripts/index_perf_gate.py \
 ```
 
 Run this after search/indexing-related changes.
-Performance gate tracks latency `p50`/`p95` plus cold-index throughput for:
-- legacy keyword latency
-- ranking-enabled keyword latency
-- identifier-like keyword latency
-- scoped keyword latency
-- cold index throughput
+Performance gate tracks latency `p50`/`p95` for:
+- fresh worktree index latency with `--reuse off`
+- fresh worktree index latency with `--reuse strict`
+- fresh worktree index latency with `--reuse auto`
+- first keyword search latency after `--reuse strict`
+- first keyword search latency after `--reuse auto`
 
 Methodology:
 - `--warmup` executes non-reported warmup runs per metric.

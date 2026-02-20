@@ -101,6 +101,15 @@ cgrep index --no-manifest
 
 # Build full index in background and return immediately
 cgrep index --background
+
+# Reuse compatible local cache snapshot (exact HEAD)
+cgrep index --reuse strict
+
+# Reuse nearest compatible local snapshot
+cgrep index --reuse auto
+
+# Explicitly disable reuse (default)
+cgrep index --reuse off
 ```
 
 ## Status guide
@@ -112,6 +121,10 @@ cgrep status
 # Structured status for agents/automation
 cgrep --format json2 --compact status
 ```
+
+`status` includes optional `reuse` details when reuse is attempted:
+- `mode`, `decision`, `active`
+- `source`, `snapshot_key`, `repo_key`, `reason` (when available)
 
 ## Search guide
 

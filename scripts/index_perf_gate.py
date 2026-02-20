@@ -4,18 +4,23 @@
 import argparse
 import json
 import math
+import os
 import statistics
 import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 
 
-def run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
+def run(cmd: list[str], cwd: Path, env: Optional[dict[str, str]] = None) -> subprocess.CompletedProcess:
+    effective_env = os.environ.copy()
+    if env:
+        effective_env.update(env)
     return subprocess.run(
         cmd,
         cwd=cwd,
+        env=effective_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -23,55 +28,10 @@ def run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
     )
 
 
-def timed_ms(cmd: list[str], cwd: Path) -> float:
+def timed_ms(cmd: list[str], cwd: Path, env: Optional[dict[str, str]] = None) -> float:
     t0 = time.perf_counter()
-    run(cmd, cwd)
+    run(cmd, cwd, env)
     return (time.perf_counter() - t0) * 1000.0
-
-
-def generate_repo(root: Path, file_count: int) -> None:
-    src = root / "src"
-    scoped = src / "scoped"
-    other = src / "other"
-    scoped.mkdir(parents=True, exist_ok=True)
-    other.mkdir(parents=True, exist_ok=True)
-
-    for i in range(file_count):
-        body = "    let local = value + 1;\n" * 24
-        marker = "first_query_probe" if i % 13 == 0 else "noise_marker"
-        ident = f"worker_{i}"
-        scoped_marker = "scoped_probe" if i % 7 == 0 else "scoped_noise"
-        target_dir = scoped if i % 2 == 0 else other
-        code = f"""
-pub fn {ident}(value: i32) -> i32 {{
-    // {marker}
-    // {scoped_marker}
-{body}
-    value + {i}
-}}
-
-pub fn invoke_{i}() -> i32 {{
-    {ident}(41)
-}}
-"""
-        (target_dir / f"mod_{i}.rs").write_text(code.strip() + "\n", encoding="utf-8")
-
-
-def write_ranking_config(root: Path, enabled: bool) -> None:
-    if not enabled:
-        cfg = "[ranking]\nenabled = false\n"
-    else:
-        cfg = """
-[ranking]
-enabled = true
-path_weight = 1.2
-symbol_weight = 1.8
-language_weight = 1.0
-changed_weight = 1.2
-kind_weight = 2.0
-weak_signal_penalty = 1.4
-""".strip() + "\n"
-    (root / ".cgreprc.toml").write_text(cfg, encoding="utf-8")
 
 
 def collect_metric_samples(runs: int, warmup: int, worker: Callable[[], float]) -> list[float]:
@@ -102,145 +62,161 @@ def summarize_latency_ms(samples: list[float]) -> dict[str, float]:
     }
 
 
-def measure_cold_index(binary: Path, runs: int, warmup: int, file_count: int) -> list[float]:
-    def worker() -> float:
-        with tempfile.TemporaryDirectory(prefix="cgrep-m4-cold-") as tmp:
-            work = Path(tmp)
-            generate_repo(work, file_count)
-            return timed_ms([str(binary), "index", "--embeddings", "off"], work)
-
-    return collect_metric_samples(runs, warmup, worker)
+def git(cwd: Path, *args: str) -> str:
+    out = run(["git", *args], cwd)
+    return out.stdout.strip()
 
 
-def measure_keyword_legacy(binary: Path, runs: int, warmup: int, file_count: int) -> list[float]:
-    def worker() -> float:
-        with tempfile.TemporaryDirectory(prefix="cgrep-m4-legacy-") as tmp:
-            work = Path(tmp)
-            generate_repo(work, file_count)
-            write_ranking_config(work, enabled=False)
-            run([str(binary), "index", "--embeddings", "off"], work)
-            return timed_ms(
-                [
-                    str(binary),
-                    "--format",
-                    "json2",
-                    "--compact",
-                    "search",
-                    "first_query_probe",
-                    "--limit",
-                    "200",
-                ],
-                work,
-            )
-
-    return collect_metric_samples(runs, warmup, worker)
+def write_fixture(repo_root: Path, file_count: int) -> None:
+    src = repo_root / "src"
+    src.mkdir(parents=True, exist_ok=True)
+    for i in range(file_count):
+        marker = "reuse_probe_token" if i % 17 == 0 else "noise"
+        body = "    let value = input + 1;\n" * 20
+        content = (
+            f"pub fn worker_{i}(input: i32) -> i32 {{\n"
+            f"    // {marker}\n"
+            f"{body}"
+            f"    input + {i}\n"
+            f"}}\n"
+        )
+        (src / f"mod_{i}.rs").write_text(content, encoding="utf-8")
 
 
-def measure_keyword_ranking(binary: Path, runs: int, warmup: int, file_count: int) -> list[float]:
-    def worker() -> float:
-        with tempfile.TemporaryDirectory(prefix="cgrep-m4-ranking-") as tmp:
-            work = Path(tmp)
-            generate_repo(work, file_count)
-            write_ranking_config(work, enabled=True)
-            run([str(binary), "index", "--embeddings", "off"], work)
-            return timed_ms(
-                [
-                    str(binary),
-                    "--format",
-                    "json2",
-                    "--compact",
-                    "search",
-                    "first_query_probe",
-                    "--limit",
-                    "200",
-                ],
-                work,
-            )
+def setup_origin(tmp_root: Path, file_count: int) -> Path:
+    seed = tmp_root / "seed"
+    seed.mkdir(parents=True, exist_ok=True)
+    git(seed, "init")
+    git(seed, "config", "user.email", "perf@example.com")
+    git(seed, "config", "user.name", "Perf")
+    write_fixture(seed, file_count)
+    git(seed, "add", ".")
+    git(seed, "commit", "-m", "seed")
+    git(seed, "branch", "-M", "main")
 
-    return collect_metric_samples(runs, warmup, worker)
+    origin = tmp_root / "origin.git"
+    git(seed, "init", "--bare", str(origin))
+    git(seed, "remote", "add", "origin", str(origin))
+    git(seed, "push", "-u", "origin", "main")
+    return origin
 
 
-def measure_identifier_ranking(binary: Path, runs: int, warmup: int, file_count: int) -> list[float]:
-    def worker() -> float:
-        with tempfile.TemporaryDirectory(prefix="cgrep-m4-ident-") as tmp:
-            work = Path(tmp)
-            generate_repo(work, file_count)
-            write_ranking_config(work, enabled=True)
-            run([str(binary), "index", "--embeddings", "off"], work)
-            return timed_ms(
-                [
-                    str(binary),
-                    "--format",
-                    "json2",
-                    "--compact",
-                    "search",
-                    "worker_77",
-                    "--limit",
-                    "200",
-                ],
-                work,
-            )
-
-    return collect_metric_samples(runs, warmup, worker)
+def clone_origin(origin: Path, dst: Path) -> None:
+    git(dst.parent, "clone", str(origin), str(dst))
+    git(dst, "config", "user.email", "perf@example.com")
+    git(dst, "config", "user.name", "Perf")
 
 
-def measure_scoped_ranking(binary: Path, runs: int, warmup: int, file_count: int) -> list[float]:
-    def worker() -> float:
-        with tempfile.TemporaryDirectory(prefix="cgrep-m4-scope-") as tmp:
-            work = Path(tmp)
-            generate_repo(work, file_count)
-            write_ranking_config(work, enabled=True)
-            run([str(binary), "index", "--embeddings", "off"], work)
-            return timed_ms(
-                [
-                    str(binary),
-                    "--format",
-                    "json2",
-                    "--compact",
-                    "search",
-                    "scoped_probe",
-                    "-p",
-                    "src/scoped",
-                    "--limit",
-                    "200",
-                ],
-                work,
-            )
-
-    return collect_metric_samples(runs, warmup, worker)
+def seed_reuse_cache(binary: Path, origin: Path, cache_root: Path) -> None:
+    seed_clone = cache_root.parent / "seed-clone"
+    clone_origin(origin, seed_clone)
+    env = {"CGREP_REUSE_CACHE_DIR": str(cache_root)}
+    run([str(binary), "index", "--reuse", "strict", "--embeddings", "off"], seed_clone, env)
 
 
-def measure(
+def supports_reuse_flag(binary: Path) -> bool:
+    probe = subprocess.run(
+        [str(binary), "index", "--help"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+    return "--reuse" in (probe.stdout or "")
+
+
+def measure_for_binary(
     binary: Path, runs: int, warmup: int, file_count: int
 ) -> tuple[dict[str, float], dict[str, dict[str, float]]]:
-    cold_samples = measure_cold_index(binary, runs, warmup, file_count)
-    legacy_samples = measure_keyword_legacy(binary, runs, warmup, file_count)
-    ranking_samples = measure_keyword_ranking(binary, runs, warmup, file_count)
-    identifier_samples = measure_identifier_ranking(binary, runs, warmup, file_count)
-    scoped_samples = measure_scoped_ranking(binary, runs, warmup, file_count)
+    with tempfile.TemporaryDirectory(prefix="cgrep-m5-perf-") as tmp:
+        scenario = Path(tmp)
+        origin = setup_origin(scenario, file_count)
+        cache_root = scenario / "cache"
+        cache_root.mkdir(parents=True, exist_ok=True)
+        reuse_supported = supports_reuse_flag(binary)
+        if reuse_supported:
+            seed_reuse_cache(binary, origin, cache_root)
 
-    cold_summary = summarize_latency_ms(cold_samples)
-    legacy_summary = summarize_latency_ms(legacy_samples)
-    ranking_summary = summarize_latency_ms(ranking_samples)
-    identifier_summary = summarize_latency_ms(identifier_samples)
-    scoped_summary = summarize_latency_ms(scoped_samples)
+        counter = {"value": 0}
 
-    metrics = {
-        "cold_index_ms": cold_summary["p50"],
-        "cold_index_throughput_fps": round(file_count / max(cold_summary["p50"] / 1000.0, 0.001), 2),
-        "keyword_legacy_ms": legacy_summary["p50"],
-        "keyword_ranking_ms": ranking_summary["p50"],
-        "identifier_ranking_ms": identifier_summary["p50"],
-        "scoped_ranking_ms": scoped_summary["p50"],
-    }
-    percentiles = {
-        "cold_index_ms": cold_summary,
-        "keyword_legacy_ms": legacy_summary,
-        "keyword_ranking_ms": ranking_summary,
-        "identifier_ranking_ms": identifier_summary,
-        "scoped_ranking_ms": scoped_summary,
-    }
-    return metrics, percentiles
+        def next_clone_dir(name: str) -> Path:
+            counter["value"] += 1
+            dst = scenario / f"{name}-{counter['value']}"
+            return dst
+
+        env = {"CGREP_REUSE_CACHE_DIR": str(cache_root)}
+
+        def index_worker(reuse_mode: str) -> float:
+            clone = next_clone_dir(f"idx-{reuse_mode}")
+            clone_origin(origin, clone)
+            if reuse_supported:
+                cmd = [str(binary), "index", "--reuse", reuse_mode, "--embeddings", "off"]
+            else:
+                cmd = [str(binary), "index", "--embeddings", "off"]
+            return timed_ms(cmd, clone, env)
+
+        def first_search_worker(reuse_mode: str) -> float:
+            clone = next_clone_dir(f"search-{reuse_mode}")
+            clone_origin(origin, clone)
+            if reuse_supported:
+                index_cmd = [str(binary), "index", "--reuse", reuse_mode, "--embeddings", "off"]
+            else:
+                index_cmd = [str(binary), "index", "--embeddings", "off"]
+            run(index_cmd, clone, env)
+            return timed_ms(
+                [
+                    str(binary),
+                    "--format",
+                    "json2",
+                    "--compact",
+                    "search",
+                    "reuse_probe_token",
+                    "--limit",
+                    "100",
+                ],
+                clone,
+                env,
+            )
+
+        off_index = collect_metric_samples(runs, warmup, lambda: index_worker("off"))
+        if reuse_supported:
+            strict_index = collect_metric_samples(runs, warmup, lambda: index_worker("strict"))
+            auto_index = collect_metric_samples(runs, warmup, lambda: index_worker("auto"))
+            strict_first_search = collect_metric_samples(
+                runs, warmup, lambda: first_search_worker("strict")
+            )
+            auto_first_search = collect_metric_samples(
+                runs, warmup, lambda: first_search_worker("auto")
+            )
+        else:
+            strict_index = off_index[:]
+            auto_index = off_index[:]
+            strict_first_search = collect_metric_samples(
+                runs, warmup, lambda: first_search_worker("off")
+            )
+            auto_first_search = strict_first_search[:]
+
+        off_summary = summarize_latency_ms(off_index)
+        strict_summary = summarize_latency_ms(strict_index)
+        auto_summary = summarize_latency_ms(auto_index)
+        strict_search_summary = summarize_latency_ms(strict_first_search)
+        auto_search_summary = summarize_latency_ms(auto_first_search)
+
+        metrics = {
+            "reuse_off_index_ms": off_summary["p50"],
+            "reuse_strict_index_ms": strict_summary["p50"],
+            "reuse_auto_index_ms": auto_summary["p50"],
+            "first_search_after_strict_ms": strict_search_summary["p50"],
+            "first_search_after_auto_ms": auto_search_summary["p50"],
+        }
+        percentiles = {
+            "reuse_off_index_ms": off_summary,
+            "reuse_strict_index_ms": strict_summary,
+            "reuse_auto_index_ms": auto_summary,
+            "first_search_after_strict_ms": strict_search_summary,
+            "first_search_after_auto_ms": auto_search_summary,
+        }
+        return metrics, percentiles
 
 
 def regression_pct(before: float, after: float) -> float:
@@ -249,14 +225,14 @@ def regression_pct(before: float, after: float) -> float:
     return ((after - before) / before) * 100.0
 
 
-def throughput_drop_pct(before: float, after: float) -> float:
-    if before <= 0:
+def relative_pct(reference: float, value: float) -> float:
+    if reference <= 0:
         return 0.0
-    return ((before - after) / before) * 100.0
+    return ((value - reference) / reference) * 100.0
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="M4 keyword ranking performance gate")
+    parser = argparse.ArgumentParser(description="Index warm-start reuse performance gate")
     parser.add_argument("--baseline-bin", required=True, help="Path to baseline cgrep binary")
     parser.add_argument("--candidate-bin", required=True, help="Path to candidate cgrep binary")
     parser.add_argument("--runs", type=int, default=3, help="Measured runs per metric")
@@ -264,6 +240,7 @@ def main() -> int:
     parser.add_argument("--files", type=int, default=1200, help="Synthetic source files per run")
     parser.add_argument("--json-out", default="", help="Optional path to write JSON report")
     args = parser.parse_args()
+
     if args.runs < 1:
         print("--runs must be >= 1")
         return 2
@@ -283,40 +260,29 @@ def main() -> int:
         print(f"candidate binary not found: {candidate_bin}")
         return 2
 
-    baseline, baseline_percentiles = measure(baseline_bin, args.runs, args.warmup, args.files)
-    candidate, candidate_percentiles = measure(candidate_bin, args.runs, args.warmup, args.files)
+    baseline, baseline_percentiles = measure_for_binary(
+        baseline_bin, args.runs, args.warmup, args.files
+    )
+    candidate, candidate_percentiles = measure_for_binary(
+        candidate_bin, args.runs, args.warmup, args.files
+    )
 
     regressions = {
-        "keyword_legacy_ms": round(
-            regression_pct(baseline["keyword_legacy_ms"], candidate["keyword_legacy_ms"]), 2
+        "reuse_off_index_ms": round(
+            regression_pct(baseline["reuse_off_index_ms"], candidate["reuse_off_index_ms"]), 2
         ),
-        "keyword_ranking_ms": round(
-            regression_pct(baseline["keyword_ranking_ms"], candidate["keyword_ranking_ms"]), 2
+        "candidate_strict_vs_off_pct": round(
+            relative_pct(candidate["reuse_off_index_ms"], candidate["reuse_strict_index_ms"]), 2
         ),
-        "identifier_ranking_ms": round(
-            regression_pct(
-                baseline["identifier_ranking_ms"], candidate["identifier_ranking_ms"]
-            ),
-            2,
-        ),
-        "scoped_ranking_ms": round(
-            regression_pct(baseline["scoped_ranking_ms"], candidate["scoped_ranking_ms"]), 2
-        ),
-        "cold_index_throughput_drop_pct": round(
-            throughput_drop_pct(
-                baseline["cold_index_throughput_fps"],
-                candidate["cold_index_throughput_fps"],
-            ),
-            2,
+        "candidate_auto_vs_off_pct": round(
+            relative_pct(candidate["reuse_off_index_ms"], candidate["reuse_auto_index_ms"]), 2
         ),
     }
 
     limits = {
-        "keyword_legacy_ms": 5.0,
-        "keyword_ranking_ms": 10.0,
-        "identifier_ranking_ms": 10.0,
-        "scoped_ranking_ms": 10.0,
-        "cold_index_throughput_drop_pct": 10.0,
+        "reuse_off_index_ms": 5.0,
+        "candidate_strict_vs_off_pct": 10.0,
+        "candidate_auto_vs_off_pct": 10.0,
     }
 
     payload = {
@@ -345,11 +311,7 @@ def main() -> int:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
-    failed = []
-    for key, limit in limits.items():
-        if regressions.get(key, 0.0) > limit:
-            failed.append(key)
-
+    failed = [key for key, limit in limits.items() if regressions.get(key, 0.0) > limit]
     if failed:
         print(f"\nPerf gate failed: {', '.join(failed)}")
         return 1
