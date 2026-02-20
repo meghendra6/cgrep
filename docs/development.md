@@ -20,12 +20,18 @@ python3 scripts/index_perf_gate.py \
 ```
 
 Run this after search/indexing-related changes.
-M4 gate tracks medians for:
+M4 gate tracks latency `p50`/`p95` plus cold-index throughput for:
 - legacy keyword latency
 - ranking-enabled keyword latency
 - identifier-like keyword latency
 - scoped keyword latency
 - cold index throughput
+
+Methodology:
+- `--warmup` executes non-reported warmup runs per metric.
+- `--runs` executes measured runs per metric.
+- `p50` uses median.
+- `p95` uses nearest-rank percentile over measured runs.
 
 ## Release-Ready Checklist
 
