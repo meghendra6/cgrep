@@ -491,6 +491,15 @@ fn main() -> Result<()> {
                 },
             )?;
         }
+        Commands::Status { path } => {
+            indexer::observability::status(path.as_deref(), global_format, compact)?;
+        }
+        Commands::Stats { path } => {
+            indexer::observability::stats(path.as_deref(), global_format, compact)?;
+        }
+        Commands::Doctor { path } => {
+            indexer::observability::doctor(path.as_deref(), global_format, compact)?;
+        }
         Commands::Watch {
             path,
             debounce,

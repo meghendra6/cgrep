@@ -598,6 +598,27 @@ pub enum Commands {
         exclude_paths: Vec<String>,
     },
 
+    /// Show local index and manifest readiness summary
+    Status {
+        /// Path to inspect (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+    },
+
+    /// Show persisted index-run timings and diff counters
+    Stats {
+        /// Path to inspect (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+    },
+
+    /// Diagnose local index/manifest corruption or mismatch (read-only)
+    Doctor {
+        /// Path to inspect (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+    },
+
     /// Watch for file changes and update index
     #[command(visible_aliases = ["wt", "w"])]
     Watch {
@@ -830,6 +851,27 @@ mod tests {
                 assert!(!no_manifest);
             }
             other => panic!("expected index command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn status_stats_doctor_parse() {
+        let status = Cli::try_parse_from(["cgrep", "status", "-p", "src"]).expect("status parse");
+        match status.command {
+            Commands::Status { path } => assert_eq!(path.as_deref(), Some("src")),
+            other => panic!("expected status command, got {other:?}"),
+        }
+
+        let stats = Cli::try_parse_from(["cgrep", "stats", "--path", "."]).expect("stats parse");
+        match stats.command {
+            Commands::Stats { path } => assert_eq!(path.as_deref(), Some(".")),
+            other => panic!("expected stats command, got {other:?}"),
+        }
+
+        let doctor = Cli::try_parse_from(["cgrep", "doctor"]).expect("doctor parse");
+        match doctor.command {
+            Commands::Doctor { path } => assert!(path.is_none()),
+            other => panic!("expected doctor command, got {other:?}"),
         }
     }
 }
