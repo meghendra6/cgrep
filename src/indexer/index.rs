@@ -19,6 +19,7 @@ use tantivy::{
     Index, IndexWriter, TantivyDocument,
 };
 
+use crate::indexer::manifest::{self, ManifestDiffSummary};
 use crate::indexer::scanner::{detect_language, FileScanner};
 use crate::parser::symbols::{Symbol, SymbolExtractor, SymbolKind};
 use cgrep::config::{Config, EmbeddingProviderType};
@@ -625,6 +626,8 @@ struct IndexMetadata {
     files: HashMap<String, FileMetadata>,
     #[serde(default)]
     index_options: Option<StoredIndexOptions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    manifest_diff: Option<ManifestDiffSummary>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -675,6 +678,12 @@ fn load_index_metadata(root: &Path) -> Option<IndexMetadata> {
     let metadata_path = root.join(METADATA_FILE);
     let content = std::fs::read_to_string(metadata_path).ok()?;
     serde_json::from_str(&content).ok()
+}
+
+fn save_index_metadata(root: &Path, metadata: &IndexMetadata) -> Result<()> {
+    let metadata_path = root.join(METADATA_FILE);
+    let metadata_json = serde_json::to_string_pretty(metadata)?;
+    manifest::atomic_write_bytes(&metadata_path, metadata_json.as_bytes())
 }
 
 pub(crate) fn resolve_index_options_for_watch(root: &Path, config: &Config) -> StoredIndexOptions {
@@ -947,6 +956,91 @@ fn path_matches_exclude_patterns(path: &Path, patterns: &[String]) -> bool {
         .any(|pattern| !pattern.is_empty() && path_str.contains(pattern))
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ManifestBuildOptions {
+    pub use_manifest: bool,
+    pub manifest_only: bool,
+    pub print_diff: bool,
+}
+
+impl Default for ManifestBuildOptions {
+    fn default() -> Self {
+        Self {
+            use_manifest: true,
+            manifest_only: false,
+            print_diff: false,
+        }
+    }
+}
+
+fn to_absolute_path(root: &Path, rel: &str) -> PathBuf {
+    if Path::new(rel).is_absolute() {
+        PathBuf::from(rel)
+    } else {
+        root.join(rel)
+    }
+}
+
+fn manifest_from_metadata(
+    root: &Path,
+    files: &HashMap<String, FileMetadata>,
+) -> manifest::Manifest {
+    let mut entries: Vec<manifest::ManifestEntry> = files
+        .iter()
+        .filter_map(|(abs, meta)| {
+            let path = Path::new(abs);
+            let rel = manifest::relative_path(root, path)?;
+            let ext = path
+                .extension()
+                .and_then(|value| value.to_str())
+                .map(|value| value.to_ascii_lowercase());
+            let language = ext.as_deref().and_then(detect_language);
+            Some(manifest::ManifestEntry {
+                path: rel,
+                size: meta.size,
+                mtime: meta.mtime,
+                hash: meta.hash.clone(),
+                language,
+                ext,
+            })
+        })
+        .collect();
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    manifest::Manifest { entries }
+}
+
+fn print_manifest_diff(summary: &ManifestDiffSummary) {
+    println!(
+        "Manifest diff: {} added, {} modified, {} deleted ({} unchanged, {} scanned, {} suspects, {} hashed)",
+        summary.added.len(),
+        summary.modified.len(),
+        summary.deleted.len(),
+        summary.unchanged,
+        summary.scanned,
+        summary.suspects,
+        summary.hashed
+    );
+
+    if !summary.added.is_empty() {
+        println!("  added:");
+        for path in &summary.added {
+            println!("    {path}");
+        }
+    }
+    if !summary.modified.is_empty() {
+        println!("  modified:");
+        for path in &summary.modified {
+            println!("    {path}");
+        }
+    }
+    if !summary.deleted.is_empty() {
+        println!("  deleted:");
+        for path in &summary.deleted {
+            println!("    {path}");
+        }
+    }
+}
+
 /// Tantivy field handles
 pub struct IndexFields {
     pub path: Field,
@@ -1061,8 +1155,14 @@ impl IndexBuilder {
     }
 
     /// Build or rebuild the index (with incremental support)
+    #[allow(dead_code)]
     pub fn build(&self, force: bool, writer_budget_bytes: usize) -> Result<usize> {
-        self.build_with_io_threads(force, writer_budget_bytes, None)
+        self.build_with_io_threads_and_manifest(
+            force,
+            writer_budget_bytes,
+            None,
+            ManifestBuildOptions::default(),
+        )
     }
 
     /// Build or rebuild the index with an optional I/O worker thread override.
@@ -1072,6 +1172,27 @@ impl IndexBuilder {
         writer_budget_bytes: usize,
         io_threads_override: Option<usize>,
     ) -> Result<usize> {
+        self.build_with_io_threads_and_manifest(
+            force,
+            writer_budget_bytes,
+            io_threads_override,
+            ManifestBuildOptions::default(),
+        )
+    }
+
+    pub fn build_with_io_threads_and_manifest(
+        &self,
+        force: bool,
+        writer_budget_bytes: usize,
+        io_threads_override: Option<usize>,
+        manifest_options: ManifestBuildOptions,
+    ) -> Result<usize> {
+        let ManifestBuildOptions {
+            use_manifest,
+            manifest_only,
+            print_diff,
+        } = manifest_options;
+
         let index_path = self.root.join(INDEX_DIR);
         let metadata_path = self.root.join(METADATA_FILE);
 
@@ -1082,6 +1203,143 @@ impl IndexBuilder {
         } else {
             IndexMetadata::default()
         };
+
+        let scanner = FileScanner::with_excludes(&self.root, self.exclude_patterns.clone())
+            .with_includes(self.include_paths.clone())
+            .with_gitignore(self.respect_git_ignore);
+        let files = scanner.list_files()?;
+        let current_paths: HashSet<String> = files
+            .iter()
+            .map(|path| path.to_string_lossy().to_string())
+            .collect();
+        let total_files = files.len();
+
+        let mut manifest_diff = ManifestDiffSummary {
+            scanned: total_files,
+            ..ManifestDiffSummary::default()
+        };
+        let mut manifest_precomputed = false;
+        let mut next_manifest: Option<manifest::Manifest> = None;
+        let mut deleted_paths: Vec<String> = Vec::new();
+        let mut files_to_process: Vec<PathBuf> = files.clone();
+
+        if use_manifest {
+            let old_manifest = manifest::load_manifest(&self.root);
+            let has_prior_snapshot = old_manifest.is_some() || !old_metadata.files.is_empty();
+            if manifest_only || force || print_diff || has_prior_snapshot {
+                let diff =
+                    manifest::compute_manifest_diff(&self.root, &files, old_manifest.as_ref())?;
+                manifest_diff = diff.summary;
+                manifest_precomputed = true;
+                if !force {
+                    deleted_paths = manifest_diff.deleted.clone();
+                    files_to_process = manifest_diff
+                        .added
+                        .iter()
+                        .chain(manifest_diff.modified.iter())
+                        .map(|rel| to_absolute_path(&self.root, rel))
+                        .collect();
+                }
+                if print_diff {
+                    print_manifest_diff(&manifest_diff);
+                }
+                if manifest_only {
+                    manifest::write_manifest(&self.root, &diff.next)?;
+                    let mut metadata = old_metadata;
+                    metadata.index_options = Some(self.stored_index_options());
+                    metadata.manifest_diff = Some(manifest_diff);
+                    save_index_metadata(&self.root, &metadata)?;
+                    println!(
+                        "{} Manifest updated ({} scanned, {} unchanged, {} added, {} modified, {} deleted)",
+                        "✓".green(),
+                        metadata
+                            .manifest_diff
+                            .as_ref()
+                            .map(|summary| summary.scanned)
+                            .unwrap_or(0),
+                        metadata
+                            .manifest_diff
+                            .as_ref()
+                            .map(|summary| summary.unchanged)
+                            .unwrap_or(0),
+                        metadata
+                            .manifest_diff
+                            .as_ref()
+                            .map(|summary| summary.added.len())
+                            .unwrap_or(0),
+                        metadata
+                            .manifest_diff
+                            .as_ref()
+                            .map(|summary| summary.modified.len())
+                            .unwrap_or(0),
+                        metadata
+                            .manifest_diff
+                            .as_ref()
+                            .map(|summary| summary.deleted.len())
+                            .unwrap_or(0),
+                    );
+                    return Ok(0);
+                }
+                next_manifest = Some(diff.next);
+            }
+        } else {
+            deleted_paths = old_metadata
+                .files
+                .keys()
+                .filter(|path| !current_paths.contains(*path))
+                .cloned()
+                .collect();
+            deleted_paths.sort();
+            manifest_diff.deleted = deleted_paths
+                .iter()
+                .filter_map(|path| manifest::relative_path(&self.root, Path::new(path)))
+                .collect();
+            manifest_diff.deleted.sort();
+        }
+
+        enum ProcessedFile {
+            Skipped {
+                path: String,
+                meta: FileMetadata,
+                delete_docs: bool,
+            },
+            Indexed {
+                path: String,
+                meta: FileMetadata,
+                docs: Vec<TantivyDocument>,
+            },
+            ReadError {
+                path: String,
+                fallback: Option<FileMetadata>,
+            },
+        }
+
+        let mut new_metadata = IndexMetadata {
+            files: if use_manifest && !force {
+                old_metadata.files.clone()
+            } else {
+                HashMap::with_capacity(total_files)
+            },
+            index_options: Some(self.stored_index_options()),
+            manifest_diff: None,
+        };
+        let mut indexed_count = 0usize;
+        let mut skipped_count = if use_manifest && !force {
+            manifest_diff.unchanged
+        } else {
+            0usize
+        };
+        let mut deleted_count = 0usize;
+        let mut error_count = 0usize;
+        let mut indexing_error: Option<anyhow::Error> = None;
+
+        let pb = ProgressBar::new(total_files as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("[{bar:40.cyan/blue}] {pos}/{len} files | Indexing {msg}")
+                .expect("valid progress bar template")
+                .progress_chars("##."),
+        );
 
         std::fs::create_dir_all(&index_path)?;
 
@@ -1116,51 +1374,6 @@ impl IndexBuilder {
             .writer(writer_budget_bytes)
             .context("Failed to create index writer")?;
 
-        let scanner = FileScanner::with_excludes(&self.root, self.exclude_patterns.clone())
-            .with_includes(self.include_paths.clone())
-            .with_gitignore(self.respect_git_ignore);
-        let files = scanner.list_files()?;
-        let current_paths: HashSet<String> = files
-            .iter()
-            .map(|path| path.to_string_lossy().to_string())
-            .collect();
-        let total_files = files.len();
-
-        enum ProcessedFile {
-            Skipped {
-                path: String,
-                meta: FileMetadata,
-                delete_docs: bool,
-            },
-            Indexed {
-                path: String,
-                meta: FileMetadata,
-                docs: Vec<TantivyDocument>,
-            },
-            ReadError {
-                path: String,
-                fallback: Option<FileMetadata>,
-            },
-        }
-
-        let mut new_metadata = IndexMetadata {
-            files: HashMap::with_capacity(total_files),
-            index_options: Some(self.stored_index_options()),
-        };
-        let mut indexed_count = 0usize;
-        let mut skipped_count = 0usize;
-        let mut deleted_count = 0usize;
-        let mut error_count = 0usize;
-        let mut indexing_error: Option<anyhow::Error> = None;
-
-        let pb = ProgressBar::new(total_files as u64);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("[{bar:40.cyan/blue}] {pos}/{len} files | Indexing {msg}")
-                .expect("valid progress bar template")
-                .progress_chars("##."),
-        );
-
         let (tx, rx) = mpsc::sync_channel::<ProcessedFile>(64);
         let path_field = self.fields.path;
         let path_exact_field = self.fields.path_exact;
@@ -1172,19 +1385,14 @@ impl IndexBuilder {
         let symbol_end_line_field = self.fields.symbol_end_line;
         let line_number_field = self.fields.line_number;
 
-        if !old_metadata.files.is_empty() {
-            let removed_paths: Vec<String> = old_metadata
-                .files
-                .keys()
-                .filter(|path| !current_paths.contains(*path))
-                .cloned()
-                .collect();
-            if !removed_paths.is_empty() {
-                for path in &removed_paths {
-                    writer.delete_term(Term::from_field_text(path_exact_field, path));
-                }
-                deleted_count = removed_paths.len();
+        if !deleted_paths.is_empty() {
+            for raw in &deleted_paths {
+                let abs = to_absolute_path(&self.root, raw);
+                let abs_str = abs.to_string_lossy().to_string();
+                writer.delete_term(Term::from_field_text(path_exact_field, &abs_str));
+                new_metadata.files.remove(&abs_str);
             }
+            deleted_count = deleted_paths.len();
         }
 
         let io_threads = io_threads_override.unwrap_or_else(|| {
@@ -1203,66 +1411,125 @@ impl IndexBuilder {
             let tx_producer = tx.clone();
             let pb_producer = pb.clone();
             s.spawn(move |_| {
-                files.par_iter().for_each_with(tx_producer, |tx, path| {
-                    let path_str = path.to_string_lossy().to_string();
-                    pb_producer.set_message(path_str.clone());
+                files_to_process
+                    .par_iter()
+                    .for_each_with(tx_producer, |tx, path| {
+                        let path_str = path.to_string_lossy().to_string();
+                        pb_producer.set_message(path_str.clone());
 
-                    let metadata = match std::fs::metadata(path) {
-                        Ok(metadata) => metadata,
-                        Err(_) => {
-                            let _ = tx.send(ProcessedFile::ReadError {
+                        let metadata = match std::fs::metadata(path) {
+                            Ok(metadata) => metadata,
+                            Err(_) => {
+                                let _ = tx.send(ProcessedFile::ReadError {
+                                    path: path_str,
+                                    fallback: None,
+                                });
+                                pb_producer.inc(1);
+                                return;
+                            }
+                        };
+
+                        let mtime = metadata
+                            .modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+                            .map(|d| d.as_nanos() as u64)
+                            .unwrap_or(0);
+                        let size = metadata.len();
+
+                        let existing_meta = old_metadata.files.get(&path_str).cloned();
+
+                        if let Some(meta) =
+                            should_skip_without_read(existing_meta.as_ref(), mtime, size, force)
+                        {
+                            let _ = tx.send(ProcessedFile::Skipped {
                                 path: path_str,
-                                fallback: None,
+                                meta,
+                                delete_docs: false,
                             });
                             pb_producer.inc(1);
                             return;
                         }
-                    };
 
-                    let mtime = metadata
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-                        .map(|d| d.as_nanos() as u64)
-                        .unwrap_or(0);
-                    let size = metadata.len();
+                        let outcome = match read_text_chunks(path, MAX_DOC_BYTES) {
+                            Ok(outcome) => outcome,
+                            Err(_) => {
+                                let _ = tx.send(ProcessedFile::ReadError {
+                                    path: path_str,
+                                    fallback: existing_meta,
+                                });
+                                pb_producer.inc(1);
+                                return;
+                            }
+                        };
 
-                    let existing_meta = old_metadata.files.get(&path_str).cloned();
+                        let (chunks, hash) = match outcome {
+                            ReadOutcome::Text { chunks, hash } => (chunks, hash),
+                            ReadOutcome::Binary { hash } => {
+                                let meta = FileMetadata {
+                                    mtime,
+                                    size,
+                                    hash: hash.unwrap_or_default(),
+                                    symbols: String::new(),
+                                    is_binary: true,
+                                };
+                                let _ = tx.send(ProcessedFile::Skipped {
+                                    path: path_str,
+                                    meta,
+                                    delete_docs: true,
+                                });
+                                pb_producer.inc(1);
+                                return;
+                            }
+                        };
 
-                    if let Some(meta) =
-                        should_skip_without_read(existing_meta.as_ref(), mtime, size, force)
-                    {
-                        let _ = tx.send(ProcessedFile::Skipped {
-                            path: path_str,
-                            meta,
-                            delete_docs: false,
-                        });
-                        pb_producer.inc(1);
-                        return;
-                    }
-
-                    let outcome = match read_text_chunks(path, MAX_DOC_BYTES) {
-                        Ok(outcome) => outcome,
-                        Err(_) => {
-                            let _ = tx.send(ProcessedFile::ReadError {
-                                path: path_str,
-                                fallback: existing_meta,
-                            });
-                            pb_producer.inc(1);
-                            return;
+                        if let Some(meta) = existing_meta.as_ref() {
+                            if !force && !hash.is_empty() && meta.hash == hash {
+                                let mut updated = meta.clone();
+                                updated.mtime = mtime;
+                                updated.size = size;
+                                let _ = tx.send(ProcessedFile::Skipped {
+                                    path: path_str,
+                                    meta: updated,
+                                    delete_docs: false,
+                                });
+                                pb_producer.inc(1);
+                                return;
+                            }
                         }
-                    };
 
-                    let (chunks, hash) = match outcome {
-                        ReadOutcome::Text { chunks, hash } => (chunks, hash),
-                        ReadOutcome::Binary { hash } => {
-                            let meta = FileMetadata {
-                                mtime,
-                                size,
-                                hash: hash.unwrap_or_default(),
-                                symbols: String::new(),
-                                is_binary: true,
-                            };
+                        let lang_str = path
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .and_then(detect_language)
+                            .unwrap_or_default();
+
+                        let full_text = join_chunks(&chunks);
+                        let symbol_list = if !lang_str.is_empty() {
+                            extract_symbols_from_text(&full_text, &lang_str)
+                        } else {
+                            Vec::new()
+                        };
+                        let symbols = if !lang_str.is_empty() {
+                            extract_symbol_names(&symbol_list)
+                        } else {
+                            String::new()
+                        };
+                        let symbol_docs = filter_symbols(
+                            symbol_list.clone(),
+                            self.allowed_symbol_kinds.as_ref(),
+                            self.max_symbols_per_file,
+                        );
+
+                        let meta = FileMetadata {
+                            mtime,
+                            size,
+                            hash,
+                            symbols: symbols.clone(),
+                            is_binary: false,
+                        };
+
+                        if chunks.is_empty() {
                             let _ = tx.send(ProcessedFile::Skipped {
                                 path: path_str,
                                 meta,
@@ -1271,110 +1538,53 @@ impl IndexBuilder {
                             pb_producer.inc(1);
                             return;
                         }
-                    };
 
-                    if let Some(meta) = existing_meta.as_ref() {
-                        if !force && !hash.is_empty() && meta.hash == hash {
-                            let mut updated = meta.clone();
-                            updated.mtime = mtime;
-                            updated.size = size;
-                            let _ = tx.send(ProcessedFile::Skipped {
-                                path: path_str,
-                                meta: updated,
-                                delete_docs: false,
-                            });
-                            pb_producer.inc(1);
-                            return;
+                        let mut docs: Vec<TantivyDocument> =
+                            Vec::with_capacity(chunks.len() + symbol_docs.len());
+                        for chunk in &chunks {
+                            let mut doc = TantivyDocument::default();
+                            doc.add_text(path_field, &path_str);
+                            doc.add_text(path_exact_field, &path_str);
+                            doc.add_text(content_field, &chunk.content);
+                            doc.add_text(language_field, &lang_str);
+                            doc.add_text(symbols_field, &symbols);
+                            doc.add_text(doc_type_field, "file");
+                            doc.add_u64(line_number_field, chunk.start_line);
+                            docs.push(doc);
                         }
-                    }
 
-                    let lang_str = path
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .and_then(detect_language)
-                        .unwrap_or_default();
+                        for symbol in &symbol_docs {
+                            let symbol_id = symbol_id_for(&path_str, &lang_str, symbol);
+                            let content = build_symbol_content(
+                                &full_text,
+                                symbol,
+                                self.symbol_preview_lines,
+                                self.symbol_max_chars,
+                            );
+                            if content.is_empty() {
+                                continue;
+                            }
 
-                    let full_text = join_chunks(&chunks);
-                    let symbol_list = if !lang_str.is_empty() {
-                        extract_symbols_from_text(&full_text, &lang_str)
-                    } else {
-                        Vec::new()
-                    };
-                    let symbols = if !lang_str.is_empty() {
-                        extract_symbol_names(&symbol_list)
-                    } else {
-                        String::new()
-                    };
-                    let symbol_docs = filter_symbols(
-                        symbol_list.clone(),
-                        self.allowed_symbol_kinds.as_ref(),
-                        self.max_symbols_per_file,
-                    );
+                            let mut doc = TantivyDocument::default();
+                            doc.add_text(path_field, &path_str);
+                            doc.add_text(path_exact_field, &path_str);
+                            doc.add_text(content_field, &content);
+                            doc.add_text(language_field, &lang_str);
+                            doc.add_text(symbols_field, &symbol.name);
+                            doc.add_text(doc_type_field, "symbol");
+                            doc.add_text(symbol_id_field, &symbol_id);
+                            doc.add_u64(line_number_field, symbol.line as u64);
+                            doc.add_u64(symbol_end_line_field, symbol.end_line as u64);
+                            docs.push(doc);
+                        }
 
-                    let meta = FileMetadata {
-                        mtime,
-                        size,
-                        hash,
-                        symbols: symbols.clone(),
-                        is_binary: false,
-                    };
-
-                    if chunks.is_empty() {
-                        let _ = tx.send(ProcessedFile::Skipped {
+                        let _ = tx.send(ProcessedFile::Indexed {
                             path: path_str,
                             meta,
-                            delete_docs: true,
+                            docs,
                         });
                         pb_producer.inc(1);
-                        return;
-                    }
-
-                    let mut docs: Vec<TantivyDocument> =
-                        Vec::with_capacity(chunks.len() + symbol_docs.len());
-                    for chunk in &chunks {
-                        let mut doc = TantivyDocument::default();
-                        doc.add_text(path_field, &path_str);
-                        doc.add_text(path_exact_field, &path_str);
-                        doc.add_text(content_field, &chunk.content);
-                        doc.add_text(language_field, &lang_str);
-                        doc.add_text(symbols_field, &symbols);
-                        doc.add_text(doc_type_field, "file");
-                        doc.add_u64(line_number_field, chunk.start_line);
-                        docs.push(doc);
-                    }
-
-                    for symbol in &symbol_docs {
-                        let symbol_id = symbol_id_for(&path_str, &lang_str, symbol);
-                        let content = build_symbol_content(
-                            &full_text,
-                            symbol,
-                            self.symbol_preview_lines,
-                            self.symbol_max_chars,
-                        );
-                        if content.is_empty() {
-                            continue;
-                        }
-
-                        let mut doc = TantivyDocument::default();
-                        doc.add_text(path_field, &path_str);
-                        doc.add_text(path_exact_field, &path_str);
-                        doc.add_text(content_field, &content);
-                        doc.add_text(language_field, &lang_str);
-                        doc.add_text(symbols_field, &symbol.name);
-                        doc.add_text(doc_type_field, "symbol");
-                        doc.add_text(symbol_id_field, &symbol_id);
-                        doc.add_u64(line_number_field, symbol.line as u64);
-                        doc.add_u64(symbol_end_line_field, symbol.end_line as u64);
-                        docs.push(doc);
-                    }
-
-                    let _ = tx.send(ProcessedFile::Indexed {
-                        path: path_str,
-                        meta,
-                        docs,
                     });
-                    pb_producer.inc(1);
-                });
             });
 
             drop(tx);
@@ -1423,9 +1633,41 @@ impl IndexBuilder {
 
         writer.commit()?;
 
-        // Save updated metadata
-        let metadata_json = serde_json::to_string_pretty(&new_metadata)?;
-        std::fs::write(&metadata_path, metadata_json)?;
+        if use_manifest && !manifest_precomputed {
+            manifest_diff.added = files
+                .iter()
+                .filter_map(|path| manifest::relative_path(&self.root, path))
+                .collect();
+            manifest_diff.added.sort();
+            manifest_diff.modified.clear();
+            manifest_diff.deleted = deleted_paths
+                .iter()
+                .filter_map(|path| manifest::relative_path(&self.root, Path::new(path)))
+                .collect();
+            manifest_diff.deleted.sort();
+            manifest_diff.scanned = total_files;
+            manifest_diff.unchanged = skipped_count;
+            manifest_diff.suspects = total_files.saturating_sub(skipped_count);
+            manifest_diff.hashed = total_files.saturating_sub(skipped_count);
+            next_manifest = Some(manifest_from_metadata(&self.root, &new_metadata.files));
+        }
+
+        if let Some(next_manifest) = next_manifest.as_ref() {
+            manifest::write_manifest(&self.root, next_manifest)?;
+        }
+
+        if !use_manifest {
+            manifest_diff.scanned = total_files;
+            manifest_diff.unchanged = skipped_count;
+            manifest_diff.deleted = deleted_paths
+                .iter()
+                .filter_map(|path| manifest::relative_path(&self.root, Path::new(path)))
+                .collect();
+            manifest_diff.deleted.sort();
+        }
+
+        new_metadata.manifest_diff = Some(manifest_diff);
+        save_index_metadata(&self.root, &new_metadata)?;
 
         let indexed = indexed_count;
         let skipped = skipped_count;
@@ -1474,6 +1716,7 @@ impl IndexBuilder {
         let old_metadata: IndexMetadata = serde_json::from_str(&content).unwrap_or_default();
         let mut new_metadata = old_metadata;
         new_metadata.index_options = Some(self.stored_index_options());
+        let old_manifest = manifest::load_manifest(&self.root);
 
         let index = Index::open_in_dir(&index_path).context("Failed to open existing index")?;
         let schema = index.schema();
@@ -1698,8 +1941,11 @@ impl IndexBuilder {
 
         writer.commit()?;
 
-        let metadata_json = serde_json::to_string_pretty(&new_metadata)?;
-        std::fs::write(&metadata_path, metadata_json)?;
+        let manifest_delta =
+            manifest::apply_manifest_delta(&self.root, changed_paths, old_manifest.as_ref())?;
+        manifest::write_manifest(&self.root, &manifest_delta.next)?;
+        new_metadata.manifest_diff = Some(manifest_delta.summary);
+        save_index_metadata(&self.root, &new_metadata)?;
 
         if error_count > 0 {
             eprintln!("Warning: {} files could not be read", error_count);
@@ -1732,6 +1978,9 @@ pub struct RunOptions {
     pub include_paths: Vec<String>,
     pub high_memory: bool,
     pub include_ignored: bool,
+    pub use_manifest: bool,
+    pub manifest_only: bool,
+    pub print_diff: bool,
     pub embeddings_mode: String,
     pub embeddings_force: bool,
 }
@@ -1743,6 +1992,9 @@ pub fn run(path: Option<&str>, options: RunOptions) -> Result<()> {
         include_paths,
         high_memory,
         include_ignored,
+        use_manifest,
+        manifest_only,
+        print_diff,
         embeddings_mode,
         embeddings_force,
     } = options;
@@ -1771,9 +2023,20 @@ pub fn run(path: Option<&str>, options: RunOptions) -> Result<()> {
         eprintln!("Using high-memory indexing: writer budget = 1GiB");
     }
     let writer_budget_bytes = index_options.writer_budget_bytes();
-    let count = builder.build(force, writer_budget_bytes)?;
+    let count = builder.build_with_io_threads_and_manifest(
+        force,
+        writer_budget_bytes,
+        None,
+        ManifestBuildOptions {
+            use_manifest,
+            manifest_only,
+            print_diff,
+        },
+    )?;
 
-    println!("Index complete: {} files", count);
+    if !manifest_only {
+        println!("Index complete: {} files", count);
+    }
 
     let mode = EmbeddingsMode::parse(&embeddings_mode)?;
     if embeddings_force && mode == EmbeddingsMode::Off {
@@ -1781,7 +2044,12 @@ pub fn run(path: Option<&str>, options: RunOptions) -> Result<()> {
         return Ok(());
     }
 
-    if mode != EmbeddingsMode::Off {
+    if manifest_only && mode != EmbeddingsMode::Off {
+        eprintln!("Warning: --manifest-only skips embedding indexing");
+        return Ok(());
+    }
+
+    if mode != EmbeddingsMode::Off && !manifest_only {
         let metadata_path = root.join(METADATA_FILE);
         let content = std::fs::read_to_string(&metadata_path).with_context(|| {
             format!("Failed to read index metadata: {}", metadata_path.display())
@@ -1917,6 +2185,85 @@ mod tests {
             .build(false, DEFAULT_WRITER_BUDGET_BYTES)
             .expect("second build");
         assert_eq!(second, 1);
+    }
+
+    #[test]
+    fn manifest_diff_hashes_only_modified_file() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let one = root.join("one.rs");
+        let two = root.join("two.rs");
+        std::fs::write(&one, "fn one() {}\n").expect("write one");
+        std::fs::write(&two, "fn two() {}\n").expect("write two");
+
+        let builder = IndexBuilder::new(root).expect("builder");
+        let first = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("first build");
+        assert_eq!(first, 2);
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        std::fs::write(&one, "fn one_changed() {}\n").expect("modify one");
+
+        let second = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("second build");
+        assert_eq!(second, 1);
+
+        let metadata = load_metadata(root);
+        let summary = metadata.manifest_diff.expect("manifest summary");
+        assert_eq!(summary.hashed, 1);
+        assert_eq!(summary.modified, vec!["one.rs".to_string()]);
+        assert!(summary.added.is_empty());
+        assert!(summary.deleted.is_empty());
+    }
+
+    #[test]
+    fn force_reindexes_all_files_for_compatibility() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        std::fs::write(root.join("one.rs"), "fn one() {}\n").expect("write one");
+        std::fs::write(root.join("two.rs"), "fn two() {}\n").expect("write two");
+
+        let builder = IndexBuilder::new(root).expect("builder");
+        let first = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("first build");
+        assert_eq!(first, 2);
+
+        let incremental = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("incremental build");
+        assert_eq!(incremental, 0);
+
+        let forced = builder
+            .build(true, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("force build");
+        assert_eq!(forced, 2);
+    }
+
+    #[test]
+    fn rename_replaces_stale_path_docs() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let old_path = root.join("before.rs");
+        let new_path = root.join("after.rs");
+        std::fs::write(&old_path, "fn renamed_symbol() {}\n").expect("write old");
+
+        let builder = IndexBuilder::new(root).expect("builder");
+        let first = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("first build");
+        assert_eq!(first, 1);
+        assert_eq!(count_docs_for_path(root, &old_path), 1);
+
+        std::fs::rename(&old_path, &new_path).expect("rename file");
+        let second = builder
+            .build(false, DEFAULT_WRITER_BUDGET_BYTES)
+            .expect("second build");
+        assert_eq!(second, 1);
+        assert_eq!(count_docs_for_path(root, &old_path), 0);
+        assert_eq!(count_docs_for_path(root, &new_path), 1);
     }
 
     #[test]
@@ -2223,6 +2570,7 @@ mod tests {
         let metadata = IndexMetadata {
             files: HashMap::new(),
             index_options: Some(stored.clone()),
+            manifest_diff: None,
         };
         std::fs::write(
             &metadata_path,
