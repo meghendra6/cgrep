@@ -577,6 +577,18 @@ pub enum Commands {
         #[arg(long)]
         include_ignored: bool,
 
+        /// Disable manifest-based change detection and use legacy incremental behavior
+        #[arg(long = "no-manifest")]
+        no_manifest: bool,
+
+        /// Update only the manifest and diff summary without reindexing docs
+        #[arg(long = "manifest-only", conflicts_with = "no_manifest")]
+        manifest_only: bool,
+
+        /// Print deterministic added/modified/deleted diff after manifest scan
+        #[arg(long = "print-diff", conflicts_with = "no_manifest")]
+        print_diff: bool,
+
         /// Include a path even if it is ignored by .gitignore/.ignore (repeatable)
         #[arg(long = "include-path")]
         include_paths: Vec<String>,
@@ -798,6 +810,26 @@ mod tests {
                 assert_eq!(mode, UsageSearchMode::Ast);
             }
             other => panic!("expected references command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn index_manifest_flags_parse() {
+        let cli = Cli::try_parse_from(["cgrep", "index", "--manifest-only", "--print-diff"])
+            .expect("parse index manifest flags");
+
+        match cli.command {
+            Commands::Index {
+                manifest_only,
+                print_diff,
+                no_manifest,
+                ..
+            } => {
+                assert!(manifest_only);
+                assert!(print_diff);
+                assert!(!no_manifest);
+            }
+            other => panic!("expected index command, got {other:?}"),
         }
     }
 }

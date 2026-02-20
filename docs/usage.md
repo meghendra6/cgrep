@@ -83,6 +83,22 @@ cgrep search "token refresh" -t rust -p src/
 cgrep search "retry logic" -u
 ```
 
+## Index flags
+
+```bash
+# Default incremental index path (manifest enabled)
+cgrep index
+
+# Print added/modified/deleted diff from manifest
+cgrep index --print-diff
+
+# Refresh only manifest metadata (no document reindex)
+cgrep index --manifest-only --print-diff
+
+# Disable manifest path and use legacy incremental flow
+cgrep index --no-manifest
+```
+
 ## Search guide
 
 Use `search` (or alias `s`) explicitly:
