@@ -29,6 +29,9 @@ curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/insta
 cgrep index
 # or non-blocking background build
 cgrep index --background
+# or warm-start from local compatible cache snapshots
+cgrep index --reuse strict
+cgrep index --reuse auto
 
 # 3) Search and navigate
 cgrep s "token validation" src/

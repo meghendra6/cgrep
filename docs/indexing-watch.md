@@ -23,6 +23,11 @@ cgrep index --embeddings precompute
 cgrep index --print-diff
 cgrep index --manifest-only --print-diff
 cgrep index --no-manifest
+
+# Reuse compatible local cache snapshots
+cgrep index --reuse strict
+cgrep index --reuse auto
+cgrep index --reuse off
 ```
 
 ## Watch and daemon
@@ -70,6 +75,17 @@ cgrep watch --no-adaptive
   - stage2 BLAKE3 hash only for suspected changes
 - `--manifest-only` updates manifest + diff summary in `.cgrep/metadata.json` without document reindex
 - `--no-manifest` disables manifest usage and falls back to legacy incremental behavior
+- Reuse cache root:
+  - macOS/Linux: `~/.cache/cgrep/indexes/`
+  - Windows: `%LOCALAPPDATA%/cgrep/indexes/`
+- Reuse snapshot layout:
+  - `repo_key/snapshot_key/tantivy/`
+  - `repo_key/snapshot_key/symbols/`
+  - `repo_key/snapshot_key/manifest/`
+  - `repo_key/snapshot_key/metadata.json`
+- Reuse safety:
+  - stale/nonexistent files are filtered while reuse is active
+  - incompatible/corrupt snapshots fall back to normal indexing
 - Watch mode uses adaptive backoff by default (`--no-adaptive` to disable)
 - Watch defaults are tuned for background operation (`--min-interval 180`, about 3 minutes)
 - Watch reacts only to indexable source extensions and skips temp/swap files

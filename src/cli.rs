@@ -597,6 +597,10 @@ pub enum Commands {
         #[arg(long, hide = true)]
         background_worker: bool,
 
+        /// Reuse local compatible index artifacts: off, strict, or auto
+        #[arg(long = "reuse", default_value = "off")]
+        reuse: String,
+
         /// Disable manifest-based change detection and use legacy incremental behavior
         #[arg(long = "no-manifest")]
         no_manifest: bool,
@@ -877,10 +881,25 @@ mod tests {
             Commands::Index {
                 background,
                 background_worker,
+                reuse,
                 ..
             } => {
                 assert!(background);
                 assert!(!background_worker);
+                assert_eq!(reuse, "off");
+            }
+            other => panic!("expected index command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn index_reuse_mode_parses() {
+        let cli =
+            Cli::try_parse_from(["cgrep", "index", "--reuse", "auto"]).expect("parse reuse mode");
+
+        match cli.command {
+            Commands::Index { reuse, .. } => {
+                assert_eq!(reuse, "auto");
             }
             other => panic!("expected index command, got {other:?}"),
         }
