@@ -15,6 +15,8 @@ use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 use std::time::SystemTime;
 use tantivy::{
     schema::{Field, Schema, Term, STORED, STRING, TEXT},
@@ -22,6 +24,7 @@ use tantivy::{
 };
 
 use crate::indexer::manifest::{self, ManifestDiffSummary};
+use crate::indexer::reuse::{self, ReuseDecision, ReuseMode, ReuseProfile};
 use crate::indexer::scanner::{detect_language, FileScanner};
 use crate::indexer::status::{self, BuildStatus};
 use crate::parser::symbols::{Symbol, SymbolExtractor, SymbolKind};
@@ -1983,6 +1986,7 @@ pub struct RunOptions {
     pub include_ignored: bool,
     pub background: bool,
     pub background_worker: bool,
+    pub reuse_mode: String,
     pub use_manifest: bool,
     pub manifest_only: bool,
     pub print_diff: bool,
@@ -2016,6 +2020,47 @@ fn resolve_effective_options(
     (config, index_options, symbol_options)
 }
 
+fn reuse_profile_hash(
+    index_options: &StoredIndexOptions,
+    symbol_options: &SymbolIndexOptions,
+    use_manifest: bool,
+) -> String {
+    #[derive(Serialize)]
+    struct ReuseProfileHash<'a> {
+        exclude_paths: &'a [String],
+        include_paths: &'a [String],
+        respect_git_ignore: bool,
+        high_memory: bool,
+        symbol_preview_lines: usize,
+        symbol_max_chars: usize,
+        max_symbols_per_file: usize,
+        allowed_symbol_kinds: Vec<String>,
+        use_manifest: bool,
+    }
+
+    let mut allowed_symbol_kinds: Vec<String> = symbol_options
+        .allowed_symbol_kinds
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    allowed_symbol_kinds.sort();
+
+    let payload = ReuseProfileHash {
+        exclude_paths: &index_options.exclude_paths,
+        include_paths: &index_options.include_paths,
+        respect_git_ignore: index_options.respect_git_ignore,
+        high_memory: index_options.high_memory,
+        symbol_preview_lines: symbol_options.symbol_preview_lines,
+        symbol_max_chars: symbol_options.symbol_max_chars,
+        max_symbols_per_file: symbol_options.max_symbols_per_file,
+        allowed_symbol_kinds,
+        use_manifest,
+    };
+    let raw = serde_json::to_vec(&payload).unwrap_or_default();
+    blake3::hash(&raw).to_hex().to_string()
+}
+
 fn build_background_worker_args(root: &Path, options: &RunOptions) -> Vec<String> {
     let mut args = vec![
         "index".to_string(),
@@ -2045,6 +2090,8 @@ fn build_background_worker_args(root: &Path, options: &RunOptions) -> Vec<String
     if options.embeddings_force {
         args.push("--embeddings-force".to_string());
     }
+    args.push("--reuse".to_string());
+    args.push(options.reuse_mode.clone());
 
     args.push("--embeddings".to_string());
     args.push(options.embeddings_mode.clone());
@@ -2087,6 +2134,9 @@ fn spawn_background_worker(root: &Path, options: &RunOptions) -> Result<u32> {
 fn run_foreground(
     root: &Path,
     options: &RunOptions,
+    config: &Config,
+    index_options: &StoredIndexOptions,
+    symbol_options: &SymbolIndexOptions,
     mut background_status: Option<&mut BuildStatus>,
 ) -> Result<()> {
     let force = options.force;
@@ -2095,13 +2145,11 @@ fn run_foreground(
     let print_diff = options.print_diff;
     let embeddings_mode = options.embeddings_mode.as_str();
     let embeddings_force = options.embeddings_force;
-    let (config, index_options, symbol_options) = resolve_effective_options(root, options);
-
     if let Some(status_state) = background_status.as_mut() {
         status::mark_build_phase(root, status_state, "indexing", 0, 0, "indexing files")?;
     }
 
-    let builder = IndexBuilder::with_options(root, index_options.clone(), symbol_options)?;
+    let builder = IndexBuilder::with_options(root, index_options.clone(), symbol_options.clone())?;
     if index_options.high_memory {
         eprintln!("Using high-memory indexing: writer budget = 1GiB");
     }
@@ -2163,7 +2211,7 @@ fn run_foreground(
         let index_metadata: IndexMetadata =
             serde_json::from_str(&content).context("Failed to parse index metadata")?;
 
-        let stats = index_embeddings(root, mode, embeddings_force, &config, &index_metadata)?;
+        let stats = index_embeddings(root, mode, embeddings_force, config, &index_metadata)?;
         if stats.files_embedded > 0 || stats.files_skipped_up_to_date > 0 || stats.files_deleted > 0
         {
             println!(
@@ -2181,6 +2229,7 @@ fn run_foreground(
 
 pub fn run(path: Option<&str>, options: RunOptions) -> Result<()> {
     let root = resolve_root(path)?;
+    let reuse_mode = ReuseMode::parse(&options.reuse_mode)?;
 
     if options.background && !options.background_worker {
         let existing = status::read_status_with_recovery(&root)?;
@@ -2217,6 +2266,15 @@ pub fn run(path: Option<&str>, options: RunOptions) -> Result<()> {
         return Ok(());
     }
 
+    let (config, index_options, symbol_options) = resolve_effective_options(&root, &options);
+    let profile_hash = reuse_profile_hash(&index_options, &symbol_options, options.use_manifest);
+    let reuse_profile = ReuseProfile {
+        profile_hash: profile_hash.clone(),
+        excludes: index_options.exclude_paths.clone(),
+        includes: index_options.include_paths.clone(),
+        respect_git_ignore: index_options.respect_git_ignore,
+    };
+
     let mut background_state = if options.background_worker {
         Some(status::mark_build_start(
             &root,
@@ -2229,7 +2287,79 @@ pub fn run(path: Option<&str>, options: RunOptions) -> Result<()> {
         None
     };
 
-    let result = run_foreground(&root, &options, background_state.as_mut());
+    let mut reuse_decision = if options.force {
+        ReuseDecision::miss(reuse_mode, None, "force_rebuild_requested")
+    } else if options.manifest_only {
+        ReuseDecision::miss(reuse_mode, None, "manifest_only")
+    } else {
+        reuse::try_restore_snapshot(&root, reuse_mode, &reuse_profile)?
+    };
+    if let Some(reason) = reuse_decision.reason.as_ref() {
+        if reuse_mode != ReuseMode::Off {
+            eprintln!(
+                "Reuse {}: {} ({})",
+                reuse_mode.as_str(),
+                reuse_decision.decision,
+                reason
+            );
+        }
+    } else if reuse_decision.decision == "hit" {
+        eprintln!(
+            "Reuse {}: hit (snapshot={})",
+            reuse_mode.as_str(),
+            reuse_decision.snapshot_key.as_deref().unwrap_or("")
+        );
+    }
+    let track_reuse_state =
+        reuse_mode != ReuseMode::Off || reuse::load_runtime_state(&root).is_some();
+
+    if track_reuse_state {
+        let _ = reuse::save_runtime_state(&root, &reuse_decision.as_runtime_state());
+    }
+
+    if reuse_decision.active {
+        if let Ok(raw_ms) = std::env::var("CGREP_REUSE_HOLD_MS") {
+            if let Ok(ms) = raw_ms.parse::<u64>() {
+                if ms > 0 {
+                    thread::sleep(Duration::from_millis(ms));
+                }
+            }
+        }
+    }
+
+    let result = run_foreground(
+        &root,
+        &options,
+        &config,
+        &index_options,
+        &symbol_options,
+        background_state.as_mut(),
+    );
+
+    if result.is_ok() {
+        if reuse_decision.active {
+            reuse_decision.active = false;
+        }
+        if reuse_mode != ReuseMode::Off && !options.manifest_only {
+            match reuse::store_snapshot(&root, &profile_hash) {
+                Ok(Some((repo_key, snapshot_key))) => {
+                    reuse_decision.repo_key.get_or_insert(repo_key);
+                    reuse_decision.snapshot_key.get_or_insert(snapshot_key);
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    eprintln!("Warning: failed to store reuse snapshot: {err}");
+                }
+            }
+        }
+    } else if reuse_decision.decision == "hit" {
+        // Keep active stale filtering enabled until next successful index.
+        reuse_decision.active = true;
+    }
+
+    if track_reuse_state {
+        let _ = reuse::save_runtime_state(&root, &reuse_decision.as_runtime_state());
+    }
 
     if let Some(status_state) = background_state.as_mut() {
         match &result {

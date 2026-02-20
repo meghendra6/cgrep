@@ -12,6 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::cli::OutputFormat;
 use crate::indexer::manifest;
+use crate::indexer::reuse;
 use cgrep::output::print_json;
 
 const STATUS_FILE_NAME: &str = "status.json";
@@ -77,6 +78,8 @@ struct StatusResult {
     pid: Option<u32>,
     message: String,
     daemon: DaemonStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reuse: Option<reuse::ReuseRuntimeState>,
 }
 
 #[derive(Debug, Serialize)]
@@ -305,6 +308,7 @@ pub fn run(path: Option<&str>, format: OutputFormat, compact: bool) -> Result<()
     let root = resolve_root(path)?;
     let status = read_status_with_recovery(&root)?;
     let daemon = daemon_status(&root);
+    let reuse_state = reuse::load_runtime_state(&root);
     let result = StatusResult {
         root: root.display().to_string(),
         phase: status.phase.clone(),
@@ -316,6 +320,7 @@ pub fn run(path: Option<&str>, format: OutputFormat, compact: bool) -> Result<()
         pid: status.pid,
         message: status.message.clone(),
         daemon,
+        reuse: reuse_state,
     };
 
     match format {
@@ -347,6 +352,20 @@ pub fn run(path: Option<&str>, format: OutputFormat, compact: bool) -> Result<()
             }
             if !result.message.is_empty() {
                 println!("Message: {}", result.message);
+            }
+            if let Some(reuse) = result.reuse.as_ref() {
+                let mut detail = format!("decision={}", reuse.decision);
+                if let Some(source) = reuse.source.as_ref() {
+                    detail.push_str(&format!(", source={source}"));
+                }
+                if let Some(snapshot) = reuse.snapshot_key.as_ref() {
+                    detail.push_str(&format!(", snapshot={snapshot}"));
+                }
+                if let Some(reason) = reuse.reason.as_ref() {
+                    detail.push_str(&format!(", reason={reason}"));
+                }
+                detail.push_str(&format!(", active={}", reuse.active));
+                println!("Reuse: {}", detail);
             }
             if result.daemon.running {
                 println!(

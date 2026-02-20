@@ -8,7 +8,7 @@ use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Component, Path, PathBuf};
 use std::time::Instant;
 use tantivy::{
@@ -19,6 +19,7 @@ use tantivy::{
 };
 
 use crate::cli::OutputFormat;
+use crate::indexer::reuse;
 use crate::indexer::scanner::FileScanner;
 use crate::query::changed_files::ChangedFiles;
 use crate::query::scope_query::build_scope_path_query;
@@ -1242,6 +1243,87 @@ fn index_fingerprint(index_root: &Path) -> Option<String> {
     Some(blake3::hash(&bytes).to_hex()[..16].to_string())
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct ReuseIndexMetadata {
+    #[serde(default)]
+    files: HashMap<String, ReuseFileMetadata>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ReuseFileMetadata {
+    #[serde(default)]
+    hash: String,
+}
+
+#[derive(Debug, Clone)]
+struct ReuseStaleFilter {
+    hashes: HashMap<String, String>,
+}
+
+fn reuse_stale_filter_active(index_root: &Path) -> bool {
+    reuse::load_runtime_state(index_root)
+        .map(|state| state.active)
+        .unwrap_or(false)
+}
+
+fn load_reuse_stale_filter(index_root: &Path) -> Option<ReuseStaleFilter> {
+    if !reuse_stale_filter_active(index_root) {
+        return None;
+    }
+
+    let metadata_path = index_root.join(INDEX_DIR).join("metadata.json");
+    let raw = fs::read_to_string(metadata_path).ok()?;
+    let metadata: ReuseIndexMetadata = serde_json::from_str(&raw).ok()?;
+    let hashes = metadata
+        .files
+        .into_iter()
+        .filter_map(|(path, file)| {
+            if file.hash.is_empty() {
+                None
+            } else {
+                Some((path, file.hash))
+            }
+        })
+        .collect::<HashMap<_, _>>();
+
+    Some(ReuseStaleFilter { hashes })
+}
+
+fn hash_file_streaming(path: &Path) -> Option<String> {
+    let file = fs::File::open(path).ok()?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = blake3::Hasher::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let read = reader.read(&mut buf).ok()?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buf[..read]);
+    }
+    Some(hasher.finalize().to_hex().to_string())
+}
+
+fn candidate_is_fresh(
+    candidate: &IndexCandidate,
+    stale_filter: &ReuseStaleFilter,
+    hash_cache: &mut HashMap<PathBuf, Option<String>>,
+) -> bool {
+    if !candidate.full_path.is_file() {
+        return false;
+    }
+    let Some(expected_hash) = stale_filter.hashes.get(&candidate.stored_path) else {
+        return false;
+    };
+    let actual_hash = hash_cache
+        .entry(candidate.full_path.clone())
+        .or_insert_with(|| hash_file_streaming(&candidate.full_path));
+    actual_hash
+        .as_ref()
+        .map(|hash| hash == expected_hash)
+        .unwrap_or(false)
+}
+
 fn context_for_line_cached(
     file_path: &Path,
     line_num: Option<usize>,
@@ -1624,8 +1706,16 @@ fn keyword_search(
         && !fuzzy
         && should_force_scan_for_literal_query(query);
     let full_index_available = has_full_index(index_path);
-    let use_index =
+    let mut use_index =
         requested_mode == IndexMode::Index && full_index_available && !force_scan_for_literal_query;
+    let reuse_active = reuse_stale_filter_active(index_root);
+    if use_index && reuse_active && !index_root.join(INDEX_DIR).join("metadata.json").is_file() {
+        eprintln!(
+            "Reuse stale-filter metadata missing at {}. Falling back to scan mode.",
+            index_root.join(INDEX_DIR).join("metadata.json").display()
+        );
+        use_index = false;
+    }
     if requested_mode == IndexMode::Index && !full_index_available {
         eprintln!(
             "Index not found at {}. Falling back to scan mode.",
@@ -1670,7 +1760,7 @@ fn keyword_search(
         search_root: Some(search_root.to_string_lossy().to_string()),
         changed: changed_component,
     };
-    let effective_use_cache = use_cache && !ranking_strategy.explain;
+    let effective_use_cache = use_cache && !ranking_strategy.explain && !reuse_active;
 
     if effective_use_cache {
         if let Ok(cache) = SearchCache::new(index_root, cache_ttl_ms) {
@@ -2341,8 +2431,15 @@ fn index_search(
     let mut files_with_matches: HashSet<String> = HashSet::new();
     let mut results: Vec<SearchResult> = Vec::new();
     let mut context_cache: HashMap<PathBuf, Vec<String>> = HashMap::new();
+    let stale_filter = load_reuse_stale_filter(index_root);
+    let mut file_hash_cache: HashMap<PathBuf, Option<String>> = HashMap::new();
 
     for candidate in candidates {
+        if let Some(filter) = stale_filter.as_ref() {
+            if !candidate_is_fresh(&candidate, filter, &mut file_hash_cache) {
+                continue;
+            }
+        }
         let (context_before, context_after) = context_for_line_cached(
             &candidate.full_path,
             candidate.line,
