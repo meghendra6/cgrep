@@ -32,6 +32,7 @@ cgrep index --background
 
 # 3) Search and navigate
 cgrep s "token validation" src/
+cgrep --format json2 --compact search "target_fn" --explain
 cgrep d handle_auth
 cgrep r UserService
 cgrep read src/auth.rs
@@ -83,6 +84,7 @@ Notes:
 - If you also pass scope/options, place them before `--`.
   Example: `cgrep search -p src -- --help`
 - Direct shorthand `cgrep "query"` is intentionally not used.
+- `--explain` is supported for keyword mode and emits deterministic score components.
 - `cgrep read` requires a non-empty path argument.
 - `search` result `path` is always reusable:
   workspace-internal scopes return workspace-relative paths, and external scopes return absolute paths.

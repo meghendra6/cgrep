@@ -133,6 +133,7 @@ cgrep search "<query>" \
   --no-ignore \
   -u, --changed [REV] \
   -M, --mode keyword|semantic|hybrid \
+  --explain \
   -B, --budget tight|balanced|full|off \
   -P, --profile human|agent|fast
 ```
@@ -161,6 +162,34 @@ Mode notes:
 Deprecated compatibility aliases:
 - `--keyword`, `--semantic`, `--hybrid` (use `--mode`)
 
+### Keyword ranking + explain
+
+```bash
+# deterministic score breakdown for top matches (keyword mode)
+cgrep --format json2 --compact search "target_fn" --explain
+```
+
+Ranking notes:
+- Multi-signal keyword ranking is config-gated via `[ranking] enabled = true`.
+- Default (`enabled = false`) keeps legacy keyword ordering.
+- Query classifier is deterministic:
+  - `identifier-like`: single token with `[A-Za-z0-9_:. $]` characters only.
+  - `phrase-like`: everything else (including whitespace).
+- Stable tie-break order:
+  1. final score (desc)
+  2. path (asc)
+  3. line (asc)
+  4. snippet (asc)
+
+`--explain` emits for top K results (`[ranking].explain_top_k`, default `5`):
+- `bm25`
+- `path_boost` (includes language-filter match boost)
+- `symbol_boost`
+- `changed_boost`
+- `kind_boost`
+- `penalties`
+- `final_score`
+
 ### Budget presets
 
 | Preset | Intent |
@@ -186,6 +215,7 @@ cgrep search --help-advanced
 
 Common advanced flags:
 - `--no-index`, `--fuzzy`
+- `--explain`
 - `--agent-cache`, `--cache-ttl`
 - `--context-pack`
 - `--max-chars-per-snippet`, `--max-context-chars`, `--max-total-chars`

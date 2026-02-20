@@ -20,6 +20,12 @@ python3 scripts/index_perf_gate.py \
 ```
 
 Run this after search/indexing-related changes.
+M4 gate tracks medians for:
+- legacy keyword latency
+- ranking-enabled keyword latency
+- identifier-like keyword latency
+- scoped keyword latency
+- cold index throughput
 
 ## Release-Ready Checklist
 
