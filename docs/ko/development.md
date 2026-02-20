@@ -11,7 +11,12 @@ cargo clippy --all-targets --all-features -- -D warnings
 ## 성능 게이트
 
 ```bash
-python3 scripts/perf_gate.py
+python3 scripts/index_perf_gate.py \
+  --baseline-bin /path/to/baseline/cgrep \
+  --candidate-bin /path/to/candidate/cgrep \
+  --runs 3 \
+  --warmup 1 \
+  --files 1200
 ```
 
 검색/인덱싱 관련 변경 뒤에는 반드시 실행하세요.
@@ -21,7 +26,7 @@ python3 scripts/perf_gate.py
 - 빌드 통과 (`cargo build`)
 - 테스트 통과 (`cargo test`)
 - Clippy 경고 0개 (`-D warnings`)
-- 성능 게이트 통과 (`scripts/perf_gate.py`)
+- 성능 게이트 통과 (`scripts/index_perf_gate.py`)
 - CLI/동작 변경 시 문서 동기화 완료
 
 ## 벤치마크: 에이전트 토큰 효율 (PyTorch)

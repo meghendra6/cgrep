@@ -322,6 +322,10 @@ pub enum Commands {
         #[arg(short = 'M', long, value_enum, help_heading = "Mode")]
         mode: Option<CliSearchMode>,
 
+        /// Emit deterministic score component breakdown for top matches
+        #[arg(long, help_heading = "Mode")]
+        explain: bool,
+
         /// Deprecated: use `--mode keyword`
         #[arg(
             long,
@@ -709,6 +713,7 @@ mod tests {
                 profile,
                 exclude,
                 changed,
+                explain,
                 ..
             } => {
                 assert_eq!(query.as_deref(), Some("auth flow"));
@@ -717,6 +722,7 @@ mod tests {
                 assert_eq!(profile.as_deref(), Some("agent"));
                 assert_eq!(exclude.as_deref(), Some("target/**"));
                 assert_eq!(changed.as_deref(), Some("HEAD"));
+                assert!(!explain);
             }
             other => panic!("expected search command, got {other:?}"),
         }
@@ -757,6 +763,19 @@ mod tests {
                 assert_eq!(path_positional.as_deref(), Some("src"));
                 assert!(recursive);
                 assert!(no_ignore);
+            }
+            other => panic!("expected search command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_explain_flag_parses() {
+        let cli = Cli::try_parse_from(["cgrep", "search", "needle", "--explain"])
+            .expect("parse search explain flag");
+
+        match cli.command {
+            Commands::Search { explain, .. } => {
+                assert!(explain);
             }
             other => panic!("expected search command, got {other:?}"),
         }

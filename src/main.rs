@@ -95,6 +95,7 @@ fn print_search_advanced_help() {
     println!("  --dedupe-context               Remove duplicate context lines");
     println!("  --path-alias                   Use p1/p2 path aliases in json2");
     println!("  --suppress-boilerplate         Suppress repeated import/header lines");
+    println!("  --explain                      Emit score component breakdown (top results)");
     println!();
     println!("Deprecated mode aliases (compatibility only):");
     println!("  --keyword | --semantic | --hybrid  (use --mode instead)");
@@ -162,6 +163,7 @@ fn main() -> Result<()> {
             keyword,
             semantic,
             hybrid,
+            explain,
             help_advanced,
             context_pack,
             agent_cache,
@@ -301,6 +303,7 @@ fn main() -> Result<()> {
                 false,
                 explicit_mode,
                 bootstrap_index,
+                explain,
             )?;
         }
         Commands::Read {
@@ -362,6 +365,7 @@ fn main() -> Result<()> {
                     true,
                     true,
                     true,
+                    false,
                     false,
                 )?;
             }

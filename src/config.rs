@@ -85,6 +85,72 @@ impl SearchConfig {
     }
 }
 
+/// Keyword ranking configuration (non-embedding signals).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct RankingConfig {
+    /// Enable multi-signal keyword ranking.
+    pub enabled: Option<bool>,
+    /// Path/filename token overlap boost weight.
+    pub path_weight: Option<f32>,
+    /// Symbol exact/prefix boost weight.
+    pub symbol_weight: Option<f32>,
+    /// Language filter match boost weight.
+    pub language_weight: Option<f32>,
+    /// Changed-files boost weight.
+    pub changed_weight: Option<f32>,
+    /// Kind boost weight for identifier-like queries.
+    pub kind_weight: Option<f32>,
+    /// Penalty weight for weak identifier matches.
+    pub weak_signal_penalty: Option<f32>,
+    /// Number of top results with score explanation.
+    pub explain_top_k: Option<usize>,
+}
+
+impl RankingConfig {
+    pub fn enabled(&self) -> bool {
+        self.enabled.unwrap_or(false)
+    }
+
+    pub fn path_weight(&self) -> f32 {
+        clamp_weight(self.path_weight, 1.0, 0.0, 3.0)
+    }
+
+    pub fn symbol_weight(&self) -> f32 {
+        clamp_weight(self.symbol_weight, 1.0, 0.0, 3.0)
+    }
+
+    pub fn language_weight(&self) -> f32 {
+        clamp_weight(self.language_weight, 1.0, 0.0, 3.0)
+    }
+
+    pub fn changed_weight(&self) -> f32 {
+        clamp_weight(self.changed_weight, 1.0, 0.0, 3.0)
+    }
+
+    pub fn kind_weight(&self) -> f32 {
+        clamp_weight(self.kind_weight, 1.0, 0.0, 3.0)
+    }
+
+    pub fn weak_signal_penalty(&self) -> f32 {
+        clamp_weight(self.weak_signal_penalty, 1.0, 0.0, 3.0)
+    }
+
+    pub fn explain_top_k(&self) -> usize {
+        self.explain_top_k
+            .filter(|value| (1..=50).contains(value))
+            .unwrap_or(5)
+    }
+}
+
+fn clamp_weight(value: Option<f32>, default: f32, min: f32, max: f32) -> f32 {
+    let raw = value.unwrap_or(default);
+    if !raw.is_finite() {
+        return default;
+    }
+    raw.clamp(min, max)
+}
+
 /// Embedding configuration
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
@@ -357,6 +423,10 @@ pub struct Config {
     #[serde(default)]
     pub index: IndexConfig,
 
+    /// Ranking configuration
+    #[serde(default)]
+    pub ranking: RankingConfig,
+
     /// Named profiles (e.g., "human", "agent", "fast")
     #[serde(default, rename = "profile")]
     pub profiles: HashMap<String, ProfileConfig>,
@@ -460,6 +530,11 @@ impl Config {
         &self.index
     }
 
+    /// Get the ranking configuration
+    pub fn ranking(&self) -> &RankingConfig {
+        &self.ranking
+    }
+
     /// Check if embeddings should be enabled based on configuration and environment
     pub fn embeddings_enabled(&self) -> bool {
         match self.embeddings.enabled() {
@@ -467,5 +542,50 @@ impl Config {
             EmbeddingEnabled::On => true,
             EmbeddingEnabled::Auto => true,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ranking_config_defaults_to_compatibility_mode() {
+        let cfg = Config::default();
+        assert!(!cfg.ranking().enabled());
+        assert_eq!(cfg.ranking().path_weight(), 1.0);
+        assert_eq!(cfg.ranking().symbol_weight(), 1.0);
+        assert_eq!(cfg.ranking().language_weight(), 1.0);
+        assert_eq!(cfg.ranking().changed_weight(), 1.0);
+        assert_eq!(cfg.ranking().kind_weight(), 1.0);
+        assert_eq!(cfg.ranking().weak_signal_penalty(), 1.0);
+        assert_eq!(cfg.ranking().explain_top_k(), 5);
+    }
+
+    #[test]
+    fn ranking_config_clamps_invalid_values() {
+        let cfg: Config = toml::from_str(
+            r#"
+[ranking]
+enabled = true
+path_weight = -10.0
+symbol_weight = 999.0
+language_weight = nan
+changed_weight = inf
+kind_weight = 2.5
+weak_signal_penalty = -0.5
+explain_top_k = 0
+"#,
+        )
+        .expect("parse config");
+
+        assert!(cfg.ranking().enabled());
+        assert_eq!(cfg.ranking().path_weight(), 0.0);
+        assert_eq!(cfg.ranking().symbol_weight(), 3.0);
+        assert_eq!(cfg.ranking().language_weight(), 1.0);
+        assert_eq!(cfg.ranking().changed_weight(), 1.0);
+        assert_eq!(cfg.ranking().kind_weight(), 2.5);
+        assert_eq!(cfg.ranking().weak_signal_penalty(), 0.0);
+        assert_eq!(cfg.ranking().explain_top_k(), 5);
     }
 }

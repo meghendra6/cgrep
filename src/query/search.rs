@@ -23,7 +23,7 @@ use crate::indexer::scanner::FileScanner;
 use crate::query::changed_files::ChangedFiles;
 use crate::query::scope_query::build_scope_path_query;
 use cgrep::cache::{CacheKey, SearchCache};
-use cgrep::config::{Config, EmbeddingProviderType};
+use cgrep::config::{Config, EmbeddingProviderType, RankingConfig};
 use cgrep::embedding::{
     CommandProvider, DummyProvider, EmbeddingProvider, EmbeddingProviderConfig, EmbeddingStorage,
     FastEmbedder, DEFAULT_EMBEDDING_DIM,
@@ -68,6 +68,21 @@ pub struct SearchResult {
     /// Symbol end line (for semantic/hybrid)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chunk_end: Option<u32>,
+    /// Keyword ranking component breakdown (only with --explain)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explain: Option<ScoreExplain>,
+}
+
+/// Deterministic keyword ranking breakdown.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ScoreExplain {
+    pub bm25: f32,
+    pub path_boost: f32,
+    pub symbol_boost: f32,
+    pub changed_boost: f32,
+    pub kind_boost: f32,
+    pub penalties: f32,
+    pub final_score: f32,
 }
 
 /// Minimal search result for JSON output
@@ -126,6 +141,90 @@ impl<'a> SearchResultCompactJson<'a> {
 enum IndexMode {
     Index,
     Scan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QueryClass {
+    IdentifierLike,
+    PhraseLike,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RankingWeights {
+    path_weight: f32,
+    symbol_weight: f32,
+    language_weight: f32,
+    changed_weight: f32,
+    kind_weight: f32,
+    weak_signal_penalty: f32,
+}
+
+#[derive(Debug, Clone)]
+struct RankingStrategy {
+    enabled: bool,
+    explain: bool,
+    explain_top_k: usize,
+    query_class: QueryClass,
+    query_tokens: Vec<String>,
+    identifier_query: Option<String>,
+    language_filter: Option<String>,
+    changed_requested: bool,
+    weights: RankingWeights,
+}
+
+impl RankingStrategy {
+    fn from_config(
+        config: &RankingConfig,
+        query: &str,
+        file_type: Option<&str>,
+        changed_filter: Option<&ChangedFiles>,
+        explain: bool,
+    ) -> Self {
+        Self {
+            enabled: config.enabled(),
+            explain,
+            explain_top_k: config.explain_top_k(),
+            query_class: classify_query(query),
+            query_tokens: query_tokens_for_ranking(query),
+            identifier_query: single_identifier_query(query),
+            language_filter: file_type.map(|value| value.to_ascii_lowercase()),
+            changed_requested: changed_filter.is_some(),
+            weights: RankingWeights {
+                path_weight: config.path_weight(),
+                symbol_weight: config.symbol_weight(),
+                language_weight: config.language_weight(),
+                changed_weight: config.changed_weight(),
+                kind_weight: config.kind_weight(),
+                weak_signal_penalty: config.weak_signal_penalty(),
+            },
+        }
+    }
+
+    fn cache_mode_suffix(&self) -> String {
+        format!(
+            "rk{}:qc{}:ex{}",
+            usize::from(self.enabled),
+            match self.query_class {
+                QueryClass::IdentifierLike => "id",
+                QueryClass::PhraseLike => "ph",
+            },
+            usize::from(self.explain)
+        )
+    }
+}
+
+fn legacy_ranking_strategy(
+    query: &str,
+    file_type: Option<&str>,
+    changed_filter: Option<&ChangedFiles>,
+) -> RankingStrategy {
+    RankingStrategy::from_config(
+        &RankingConfig::default(),
+        query,
+        file_type,
+        changed_filter,
+        false,
+    )
 }
 
 struct SearchOutcome {
@@ -200,10 +299,17 @@ struct SearchJson2Result {
     context_before: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     context_after: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    explain: Option<ScoreExplain>,
 }
 
 impl SearchJson2Result {
-    fn from_result(result: &SearchResult, include_context: bool, path_value: Option<&str>) -> Self {
+    fn from_result(
+        result: &SearchResult,
+        include_context: bool,
+        include_explain: bool,
+        path_value: Option<&str>,
+    ) -> Self {
         let (start_line, end_line) = if let Some(line) = result.line {
             let start = line.saturating_sub(result.context_before.len());
             let end = line + result.context_after.len();
@@ -235,6 +341,11 @@ impl SearchJson2Result {
             },
             context_after: if include_context && !result.context_after.is_empty() {
                 Some(result.context_after.clone())
+            } else {
+                None
+            },
+            explain: if include_explain {
+                result.explain.clone()
             } else {
                 None
             },
@@ -296,6 +407,7 @@ pub fn run(
     persist_agent_hints: bool,
     explicit_mode: bool,
     bootstrap_index: bool,
+    explain: bool,
 ) -> Result<()> {
     let start_time = Instant::now();
     let use_color = use_colors() && format == OutputFormat::Text;
@@ -370,6 +482,18 @@ pub fn run(
     }
     let effective_cache_ttl = cache_ttl.unwrap_or(DEFAULT_CACHE_TTL_MS);
 
+    let explain_keyword = explain && effective_search_mode == HybridSearchMode::Keyword;
+    if explain && !explain_keyword {
+        eprintln!("Warning: --explain is currently supported for --mode keyword only; ignoring.");
+    }
+    let ranking_strategy = RankingStrategy::from_config(
+        config.ranking(),
+        query,
+        file_type,
+        changed_filter.as_ref(),
+        explain_keyword,
+    );
+
     let mut outcome = match effective_search_mode {
         HybridSearchMode::Semantic | HybridSearchMode::Hybrid => {
             // Use hybrid search
@@ -417,6 +541,7 @@ pub fn run(
             no_ignore,
             use_cache,
             effective_cache_ttl,
+            &ranking_strategy,
         )?,
     };
     let mut confidence = estimate_confidence(&outcome.results, effective_search_mode);
@@ -555,7 +680,7 @@ pub fn run(
                         .as_ref()
                         .and_then(|lookup| lookup.get(&result.path))
                         .map(|s| s.as_str());
-                    SearchJson2Result::from_result(result, !compact, alias)
+                    SearchJson2Result::from_result(result, !compact, explain_keyword, alias)
                 })
                 .collect();
             let payload_chars = estimate_json2_payload_chars(&json2_results);
@@ -704,6 +829,21 @@ pub fn run(
                         let highlighted = highlight_snippet(&result.snippet);
                         for line in highlighted.lines().take(3) {
                             println!("    {}", line);
+                        }
+                    }
+
+                    if explain_keyword {
+                        if let Some(explain) = &result.explain {
+                            println!(
+                                "    [score] bm25={:.4} path={:.4} symbol={:.4} changed={:.4} kind={:.4} penalties={:.4} final={:.4}",
+                                explain.bm25,
+                                explain.path_boost,
+                                explain.symbol_boost,
+                                explain.changed_boost,
+                                explain.kind_boost,
+                                explain.penalties,
+                                explain.final_score
+                            );
                         }
                     }
 
@@ -1160,6 +1300,7 @@ struct IndexCandidate {
     full_path: PathBuf,
     display_path: String,
     score: f32,
+    explain: Option<ScoreExplain>,
     snippet: String,
     line: Option<usize>,
     symbol_id: Option<String>,
@@ -1183,6 +1324,7 @@ fn collect_index_candidates(
     recursive: bool,
     fuzzy: bool,
     case_sensitive: bool,
+    ranking_strategy: &RankingStrategy,
 ) -> Result<Vec<IndexCandidate>> {
     let index_path = index_root.join(INDEX_DIR);
     if !index_path.exists() {
@@ -1200,6 +1342,9 @@ fn collect_index_candidates(
     let content_field = schema
         .get_field("content")
         .context("Missing content field")?;
+    let language_field = schema
+        .get_field("language")
+        .context("Missing language field")?;
     let path_field = schema.get_field("path").context("Missing path field")?;
     let symbols_field = schema
         .get_field("symbols")
@@ -1269,8 +1414,6 @@ fn collect_index_candidates(
 
     let fetch_limit = max_candidates.saturating_mul(5).max(1);
     let top_docs = searcher.search(&parsed_query, &TopDocs::with_limit(fetch_limit))?;
-    let ranking_tokens = query_tokens_for_ranking(query);
-    let ranking_identifier = single_identifier_query(query);
 
     let mut candidates: Vec<IndexCandidate> = Vec::new();
     let mut per_path_counts: HashMap<String, usize> = HashMap::new();
@@ -1351,10 +1494,30 @@ fn collect_index_candidates(
             .get_first(doc_type_field)
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let rank_boost = 1.0
-            + path_ranking_bonus(&scope_path, &ranking_tokens)
-            + symbol_ranking_bonus(doc_type_value, symbols_value, ranking_identifier.as_deref());
-        let adjusted_score = *score * rank_boost;
+        let language_value = doc
+            .get_first(language_field)
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let symbol_kind = if doc_type_value == "symbol" {
+            infer_symbol_kind_from_content(content_value)
+        } else {
+            None
+        };
+        let score_components = compute_keyword_score_components(
+            *score,
+            &scope_path,
+            doc_type_value,
+            symbols_value,
+            language_value,
+            symbol_kind.as_deref(),
+            ranking_strategy,
+        );
+        let adjusted_score = score_components.final_score;
+        let explain = if ranking_strategy.explain {
+            Some(score_components.to_explain())
+        } else {
+            None
+        };
 
         let symbol_id = if doc_type_value == "symbol" {
             doc.get_first(symbol_id_field)
@@ -1389,6 +1552,7 @@ fn collect_index_candidates(
                         full_path: full_path.clone(),
                         display_path: display_path.clone(),
                         score: adjusted_score,
+                        explain: explain.clone(),
                         snippet,
                         line: Some(line_offset + rel_line.saturating_sub(1)),
                         symbol_id: None,
@@ -1412,6 +1576,7 @@ fn collect_index_candidates(
             full_path,
             display_path,
             score: adjusted_score,
+            explain,
             snippet,
             line: line_num,
             symbol_id,
@@ -1452,6 +1617,7 @@ fn keyword_search(
     no_ignore: bool,
     use_cache: bool,
     cache_ttl_ms: u64,
+    ranking_strategy: &RankingStrategy,
 ) -> Result<SearchOutcome> {
     let force_scan_for_literal_query = requested_mode == IndexMode::Index
         && regex.is_none()
@@ -1483,14 +1649,15 @@ fn keyword_search(
     let cache_key = CacheKey {
         query: normalized_query,
         mode: format!(
-            "keyword:{}:r{}:ni{}:pv2",
+            "keyword:{}:r{}:ni{}:{}:pv3",
             if effective_mode == IndexMode::Index {
                 "index"
             } else {
                 "scan"
             },
             usize::from(recursive),
-            usize::from(no_ignore)
+            usize::from(no_ignore),
+            ranking_strategy.cache_mode_suffix(),
         ),
         max_results,
         context,
@@ -1503,8 +1670,9 @@ fn keyword_search(
         search_root: Some(search_root.to_string_lossy().to_string()),
         changed: changed_component,
     };
+    let effective_use_cache = use_cache && !ranking_strategy.explain;
 
-    if use_cache {
+    if effective_use_cache {
         if let Ok(cache) = SearchCache::new(index_root, cache_ttl_ms) {
             if let Ok(Some(entry)) = cache.get::<KeywordCachePayload>(&cache_key) {
                 return Ok(SearchOutcome {
@@ -1534,6 +1702,7 @@ fn keyword_search(
             fuzzy,
             case_sensitive,
             recursive,
+            ranking_strategy,
         )?
     } else {
         scan_search(
@@ -1551,10 +1720,11 @@ fn keyword_search(
             case_sensitive,
             recursive,
             no_ignore,
+            ranking_strategy,
         )?
     };
 
-    if use_cache {
+    if effective_use_cache {
         if let Ok(cache) = SearchCache::new(index_root, cache_ttl_ms) {
             let payload = KeywordCachePayload {
                 results: outcome.results.clone(),
@@ -1656,6 +1826,23 @@ fn query_tokens_for_ranking(query: &str) -> Vec<String> {
         .collect()
 }
 
+fn classify_query(query: &str) -> QueryClass {
+    let trimmed = query.trim();
+    if trimmed.is_empty() || trimmed.contains(char::is_whitespace) {
+        return QueryClass::PhraseLike;
+    }
+    if trimmed.len() > 128 {
+        return QueryClass::PhraseLike;
+    }
+    if trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | ':' | '.' | '$'))
+    {
+        return QueryClass::IdentifierLike;
+    }
+    QueryClass::PhraseLike
+}
+
 fn query_requires_literal_handling(query: &str) -> bool {
     query.chars().any(is_query_parser_metachar)
 }
@@ -1748,9 +1935,34 @@ fn single_identifier_query(query: &str) -> Option<String> {
     }
 }
 
-fn path_ranking_bonus(display_path: &str, query_tokens: &[String]) -> f32 {
+#[derive(Debug, Clone, Copy)]
+struct ScoreComponents {
+    bm25: f32,
+    path_boost: f32,
+    symbol_boost: f32,
+    changed_boost: f32,
+    kind_boost: f32,
+    penalties: f32,
+    final_score: f32,
+}
+
+impl ScoreComponents {
+    fn to_explain(self) -> ScoreExplain {
+        ScoreExplain {
+            bm25: self.bm25,
+            path_boost: self.path_boost,
+            symbol_boost: self.symbol_boost,
+            changed_boost: self.changed_boost,
+            kind_boost: self.kind_boost,
+            penalties: self.penalties,
+            final_score: self.final_score,
+        }
+    }
+}
+
+fn path_signal_components(display_path: &str, query_tokens: &[String]) -> (f32, f32) {
     let path = display_path.to_ascii_lowercase();
-    let mut bonus: f32 = 0.0;
+    let mut bonus = 0.0f32;
     for token in query_tokens {
         if path.contains(token) {
             bonus += 0.03;
@@ -1762,7 +1974,12 @@ fn path_ranking_bonus(display_path: &str, query_tokens: &[String]) -> f32 {
             penalty += 0.08;
         }
     }
-    (bonus.min(0.15) - penalty.min(0.25)).clamp(-0.25, 0.15)
+    (bonus.min(0.15), penalty.min(0.25))
+}
+
+fn path_ranking_bonus(display_path: &str, query_tokens: &[String]) -> f32 {
+    let (bonus, penalty) = path_signal_components(display_path, query_tokens);
+    (bonus - penalty).clamp(-0.25, 0.15)
 }
 
 fn symbol_ranking_bonus(
@@ -1797,6 +2014,175 @@ fn symbol_ranking_bonus(
         0.03
     } else {
         0.0
+    }
+}
+
+fn infer_symbol_kind_from_content(content: &str) -> Option<String> {
+    let first_line = content.lines().next()?.trim();
+    let kind = first_line.split_whitespace().last()?.to_ascii_lowercase();
+    if matches!(
+        kind.as_str(),
+        "function"
+            | "method"
+            | "class"
+            | "struct"
+            | "trait"
+            | "interface"
+            | "module"
+            | "enum"
+            | "type"
+            | "property"
+            | "constant"
+            | "variable"
+    ) {
+        Some(kind)
+    } else {
+        None
+    }
+}
+
+fn infer_kind_from_snippet(snippet: &str) -> Option<String> {
+    let trimmed = snippet.trim_start().to_ascii_lowercase();
+    if trimmed.starts_with("fn ") || trimmed.starts_with("def ") || trimmed.starts_with("function ")
+    {
+        return Some("function".to_string());
+    }
+    if trimmed.starts_with("class ") {
+        return Some("class".to_string());
+    }
+    if trimmed.starts_with("module ") || trimmed.starts_with("mod ") {
+        return Some("module".to_string());
+    }
+    None
+}
+
+fn kind_ranking_bonus(doc_type: &str, symbol_kind: Option<&str>, query_class: QueryClass) -> f32 {
+    if query_class != QueryClass::IdentifierLike || doc_type != "symbol" {
+        return 0.0;
+    }
+    match symbol_kind.unwrap_or_default() {
+        "function" | "method" => 0.18,
+        "class" | "struct" | "trait" | "interface" => 0.15,
+        "module" | "enum" | "type" => 0.12,
+        _ => 0.0,
+    }
+}
+
+fn language_ranking_bonus(
+    scope_path: &str,
+    language_value: &str,
+    language_filter: Option<&str>,
+) -> f32 {
+    let Some(filter) = language_filter else {
+        return 0.0;
+    };
+    if language_value.eq_ignore_ascii_case(filter) || matches_file_type(scope_path, Some(filter)) {
+        0.04
+    } else {
+        0.0
+    }
+}
+
+fn query_class_weights(class: QueryClass) -> (f32, f32, f32, f32, f32, f32) {
+    match class {
+        QueryClass::IdentifierLike => (0.75, 1.35, 1.05, 0.90, 1.20, 1.15),
+        QueryClass::PhraseLike => (1.10, 0.60, 1.00, 0.80, 0.30, 0.50),
+    }
+}
+
+fn weak_signal_penalty(
+    strategy: &RankingStrategy,
+    scope_path: &str,
+    symbol_boost_raw: f32,
+    kind_boost_raw: f32,
+) -> f32 {
+    if strategy.query_class != QueryClass::IdentifierLike {
+        return 0.0;
+    }
+
+    let has_identifier_in_path = strategy
+        .identifier_query
+        .as_deref()
+        .map(|ident| scope_path.to_ascii_lowercase().contains(ident))
+        .unwrap_or(false);
+
+    if symbol_boost_raw <= 0.0 && kind_boost_raw <= 0.0 && !has_identifier_in_path {
+        -0.08
+    } else {
+        0.0
+    }
+}
+
+fn compute_keyword_score_components(
+    bm25: f32,
+    scope_path: &str,
+    doc_type: &str,
+    symbols_value: &str,
+    language_value: &str,
+    symbol_kind: Option<&str>,
+    strategy: &RankingStrategy,
+) -> ScoreComponents {
+    let bm25 = if bm25.is_finite() { bm25.max(0.0) } else { 0.0 };
+    let path_legacy = path_ranking_bonus(scope_path, &strategy.query_tokens);
+    let symbol_legacy = symbol_ranking_bonus(
+        doc_type,
+        symbols_value,
+        strategy.identifier_query.as_deref(),
+    );
+
+    if !strategy.enabled {
+        let factor = (1.0 + path_legacy + symbol_legacy).max(0.05);
+        return ScoreComponents {
+            bm25,
+            path_boost: path_legacy,
+            symbol_boost: symbol_legacy,
+            changed_boost: 0.0,
+            kind_boost: 0.0,
+            penalties: 0.0,
+            final_score: bm25 * factor,
+        };
+    }
+
+    let (path_base, noisy_penalty) = path_signal_components(scope_path, &strategy.query_tokens);
+    let symbol_base = symbol_ranking_bonus(
+        doc_type,
+        symbols_value,
+        strategy.identifier_query.as_deref(),
+    );
+    let language_base = language_ranking_bonus(
+        scope_path,
+        language_value,
+        strategy.language_filter.as_deref(),
+    );
+    let changed_base = if strategy.changed_requested {
+        0.05
+    } else {
+        0.0
+    };
+    let kind_base = kind_ranking_bonus(doc_type, symbol_kind, strategy.query_class);
+    let weak_penalty_base = weak_signal_penalty(strategy, scope_path, symbol_base, kind_base);
+
+    let (path_class_w, symbol_class_w, language_class_w, changed_class_w, kind_class_w, penalty_w) =
+        query_class_weights(strategy.query_class);
+
+    let language_boost = language_base * strategy.weights.language_weight * language_class_w;
+    let path_boost = (path_base * strategy.weights.path_weight * path_class_w) + language_boost;
+    let symbol_boost = symbol_base * strategy.weights.symbol_weight * symbol_class_w;
+    let changed_boost = changed_base * strategy.weights.changed_weight * changed_class_w;
+    let kind_boost = kind_base * strategy.weights.kind_weight * kind_class_w;
+    let penalties =
+        (-noisy_penalty) + (weak_penalty_base * strategy.weights.weak_signal_penalty * penalty_w);
+
+    let factor =
+        (1.0 + path_boost + symbol_boost + changed_boost + kind_boost + penalties).clamp(0.05, 5.0);
+    ScoreComponents {
+        bm25,
+        path_boost,
+        symbol_boost,
+        changed_boost,
+        kind_boost,
+        penalties,
+        final_score: bm25 * factor,
     }
 }
 
@@ -1932,6 +2318,7 @@ fn index_search(
     fuzzy: bool,
     case_sensitive: bool,
     recursive: bool,
+    ranking_strategy: &RankingStrategy,
 ) -> Result<SearchOutcome> {
     let candidates = collect_index_candidates(
         query,
@@ -1948,6 +2335,7 @@ fn index_search(
         recursive,
         fuzzy,
         case_sensitive,
+        ranking_strategy,
     )?;
 
     let mut files_with_matches: HashSet<String> = HashSet::new();
@@ -1978,8 +2366,18 @@ fn index_search(
             result_id: None,
             chunk_start: None,
             chunk_end: None,
+            explain: candidate.explain,
         });
     }
+
+    if ranking_strategy.enabled || ranking_strategy.explain {
+        sort_results_deterministic(&mut results);
+    }
+    trim_explain_results(
+        &mut results,
+        ranking_strategy.explain,
+        ranking_strategy.explain_top_k,
+    );
 
     let total_matches = results.len();
 
@@ -2008,13 +2406,13 @@ fn scan_search(
     case_sensitive: bool,
     recursive: bool,
     no_ignore: bool,
+    ranking_strategy: &RankingStrategy,
 ) -> Result<SearchOutcome> {
     if query.trim().is_empty() {
         anyhow::bail!("Search query cannot be empty");
     }
 
     let query_lower = query.to_ascii_lowercase();
-    let ranking_tokens = query_tokens_for_ranking(query);
 
     let scanner = FileScanner::new(root)
         .with_recursive(recursive)
@@ -2032,7 +2430,13 @@ fn scan_search(
         let scope_path = scope_relative_path(&file.path, root)
             .unwrap_or_else(|| file.path.display().to_string());
         let display_path = workspace_display_path(&file.path, workspace_root);
-        let file_score = scan_match_score(&scope_path, &ranking_tokens);
+        let language_value = file
+            .path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .and_then(crate::indexer::scanner::detect_language)
+            .unwrap_or_default()
+            .to_string();
         if let Some(filter) = changed_filter {
             if !filter.matches_rel_path(&scope_path) {
                 continue;
@@ -2064,9 +2468,19 @@ fn scan_search(
                 }
 
                 let snippet = truncate_with_ellipsis(line.trim(), 150);
+                let symbol_kind = infer_kind_from_snippet(&snippet);
+                let score_components = compute_keyword_score_components(
+                    1.0,
+                    &scope_path,
+                    "file",
+                    "",
+                    language_value.as_str(),
+                    symbol_kind.as_deref(),
+                    ranking_strategy,
+                );
                 results.push(SearchResult {
                     path: display_path.clone(),
-                    score: file_score,
+                    score: score_components.final_score,
                     snippet,
                     line: Some(idx + 1),
                     context_before: vec![],
@@ -2077,6 +2491,11 @@ fn scan_search(
                     result_id: None,
                     chunk_start: None,
                     chunk_end: None,
+                    explain: if ranking_strategy.explain {
+                        Some(score_components.to_explain())
+                    } else {
+                        None
+                    },
                 });
             }
             continue;
@@ -2092,10 +2511,20 @@ fn scan_search(
             }
 
             let snippet = truncate_with_ellipsis(line.trim(), 150);
+            let symbol_kind = infer_kind_from_snippet(&snippet);
+            let score_components = compute_keyword_score_components(
+                1.0,
+                &scope_path,
+                "file",
+                "",
+                language_value.as_str(),
+                symbol_kind.as_deref(),
+                ranking_strategy,
+            );
             let (context_before, context_after) = get_context_from_lines(&lines, idx + 1, context);
             results.push(SearchResult {
                 path: display_path.clone(),
-                score: file_score,
+                score: score_components.final_score,
                 snippet,
                 line: Some(idx + 1),
                 context_before,
@@ -2106,6 +2535,11 @@ fn scan_search(
                 result_id: None,
                 chunk_start: None,
                 chunk_end: None,
+                explain: if ranking_strategy.explain {
+                    Some(score_components.to_explain())
+                } else {
+                    None
+                },
             });
         }
     }
@@ -2114,6 +2548,11 @@ fn scan_search(
     if results.len() > max_results {
         results.truncate(max_results);
     }
+    trim_explain_results(
+        &mut results,
+        ranking_strategy.explain,
+        ranking_strategy.explain_top_k,
+    );
 
     let files_with_matches_count = results
         .iter()
@@ -2173,17 +2612,7 @@ fn contains_ascii_case_insensitive(haystack: &str, needle_lower: &str) -> bool {
     })
 }
 
-fn scan_match_score(scope_path: &str, ranking_tokens: &[String]) -> f32 {
-    let path_bonus = path_ranking_bonus(scope_path, ranking_tokens);
-    let score = 1.0 + path_bonus;
-    if score.is_finite() {
-        score.max(0.0)
-    } else {
-        1.0
-    }
-}
-
-fn sort_and_dedupe_scan_results(results: &mut Vec<SearchResult>) {
+fn sort_results_deterministic(results: &mut [SearchResult]) {
     results.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
@@ -2192,6 +2621,25 @@ fn sort_and_dedupe_scan_results(results: &mut Vec<SearchResult>) {
             .then_with(|| a.line.cmp(&b.line))
             .then_with(|| a.snippet.cmp(&b.snippet))
     });
+}
+
+fn trim_explain_results(results: &mut [SearchResult], explain_enabled: bool, top_k: usize) {
+    if !explain_enabled {
+        for result in results.iter_mut() {
+            result.explain = None;
+        }
+        return;
+    }
+
+    for (idx, result) in results.iter_mut().enumerate() {
+        if idx >= top_k {
+            result.explain = None;
+        }
+    }
+}
+
+fn sort_and_dedupe_scan_results(results: &mut Vec<SearchResult>) {
+    sort_results_deterministic(results);
     let mut seen: HashSet<(String, Option<usize>, String)> = HashSet::new();
     results
         .retain(|result| seen.insert((result.path.clone(), result.line, result.snippet.clone())));
@@ -2280,6 +2728,7 @@ fn hybrid_search(
                             result_id: hr.result_id.clone(),
                             chunk_start: hr.chunk_start,
                             chunk_end: hr.chunk_end,
+                            explain: None,
                         }
                     })
                     .collect();
@@ -2334,6 +2783,7 @@ fn hybrid_search(
         ));
     }
 
+    let ranking_strategy = legacy_ranking_strategy(query, file_type, changed_filter);
     let bm25_candidates = collect_index_candidates(
         query,
         index_root,
@@ -2349,6 +2799,7 @@ fn hybrid_search(
         recursive,
         false,
         false,
+        &ranking_strategy,
     )?;
 
     // Convert to BM25Result format
@@ -2509,6 +2960,7 @@ fn hybrid_search(
             result_id: hr.result_id.clone(),
             chunk_start: hr.chunk_start,
             chunk_end: hr.chunk_end,
+            explain: None,
         });
     }
 
@@ -2818,6 +3270,7 @@ mod tests {
             false,
             true,
             false,
+            &legacy_ranking_strategy("world", None, None),
         )
         .expect("scan");
 
@@ -2848,6 +3301,7 @@ mod tests {
             true,
             true,
             false,
+            &legacy_ranking_strategy(r"\d{3}", None, None),
         )
         .expect("scan");
 
@@ -2919,6 +3373,7 @@ mod tests {
             false,
             false,
             true,
+            &legacy_ranking_strategy("needle", None, None),
         )
         .expect("index search");
 
@@ -2961,6 +3416,7 @@ mod tests {
             false,
             false,
             true,
+            &legacy_ranking_strategy("needle", None, None),
         )
         .expect("index search");
 
@@ -2997,6 +3453,7 @@ mod tests {
             false,
             false,
             false,
+            &legacy_ranking_strategy("needle", None, None),
         )
         .expect("index search");
 
@@ -3035,6 +3492,7 @@ mod tests {
             false,
             false,
             true,
+            &legacy_ranking_strategy("cpu_fallback_path", None, None),
         )
         .expect("index search");
 
@@ -3059,6 +3517,7 @@ mod tests {
                 result_id: None,
                 chunk_start: None,
                 chunk_end: None,
+                explain: None,
             },
             SearchResult {
                 path: "src/lib.rs".to_string(),
@@ -3073,6 +3532,7 @@ mod tests {
                 result_id: None,
                 chunk_start: None,
                 chunk_end: None,
+                explain: None,
             },
         ];
 
@@ -3097,6 +3557,7 @@ mod tests {
             result_id: None,
             chunk_start: None,
             chunk_end: None,
+            explain: None,
         };
 
         let a = stable_result_id(&result);
@@ -3129,6 +3590,66 @@ mod tests {
 
         assert!(exact > partial);
         assert!(partial >= none);
+    }
+
+    #[test]
+    fn query_classifier_is_deterministic() {
+        assert_eq!(classify_query("target_fn"), QueryClass::IdentifierLike);
+        assert_eq!(
+            classify_query("crate::service::run"),
+            QueryClass::IdentifierLike
+        );
+        assert_eq!(
+            classify_query("retry backoff strategy"),
+            QueryClass::PhraseLike
+        );
+        assert_eq!(classify_query("target-fn"), QueryClass::PhraseLike);
+    }
+
+    #[test]
+    fn legacy_components_match_previous_keyword_formula() {
+        let strategy = legacy_ranking_strategy("target_fn", None, None);
+        let components = compute_keyword_score_components(
+            3.5,
+            "src/auth/target_fn.rs",
+            "symbol",
+            "target_fn",
+            "rust",
+            Some("function"),
+            &strategy,
+        );
+        let expected = 3.5
+            * (1.0
+                + path_ranking_bonus(
+                    "src/auth/target_fn.rs",
+                    &query_tokens_for_ranking("target_fn"),
+                )
+                + symbol_ranking_bonus("symbol", "target_fn", Some("target_fn")));
+        assert!((components.final_score - expected).abs() < 0.0001);
+    }
+
+    #[test]
+    fn explain_trimming_keeps_only_top_k() {
+        let mut results = vec![
+            sample_result("a.rs", 1, "alpha"),
+            sample_result("b.rs", 2, "beta"),
+            sample_result("c.rs", 3, "gamma"),
+        ];
+        for (idx, result) in results.iter_mut().enumerate() {
+            result.explain = Some(ScoreExplain {
+                bm25: 1.0 + idx as f32,
+                path_boost: 0.0,
+                symbol_boost: 0.0,
+                changed_boost: 0.0,
+                kind_boost: 0.0,
+                penalties: 0.0,
+                final_score: 1.0 + idx as f32,
+            });
+        }
+        trim_explain_results(&mut results, true, 2);
+        assert!(results[0].explain.is_some());
+        assert!(results[1].explain.is_some());
+        assert!(results[2].explain.is_none());
     }
 
     #[test]
@@ -3173,6 +3694,7 @@ mod tests {
             result_id: None,
             chunk_start: None,
             chunk_end: None,
+            explain: None,
         }
     }
 
