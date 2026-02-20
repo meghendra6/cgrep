@@ -1457,9 +1457,10 @@ fn keyword_search(
         && regex.is_none()
         && !fuzzy
         && should_force_scan_for_literal_query(query);
+    let full_index_available = has_full_index(index_path);
     let use_index =
-        requested_mode == IndexMode::Index && index_path.exists() && !force_scan_for_literal_query;
-    if requested_mode == IndexMode::Index && !index_path.exists() {
+        requested_mode == IndexMode::Index && full_index_available && !force_scan_for_literal_query;
+    if requested_mode == IndexMode::Index && !full_index_available {
         eprintln!(
             "Index not found at {}. Falling back to scan mode.",
             index_path.display()
@@ -2012,30 +2013,31 @@ fn scan_search(
         anyhow::bail!("Search query cannot be empty");
     }
 
-    let query_lower = if !case_sensitive {
-        query.to_lowercase()
-    } else {
-        String::new()
-    };
+    let query_lower = query.to_ascii_lowercase();
+    let ranking_tokens = query_tokens_for_ranking(query);
+
     let scanner = FileScanner::new(root)
         .with_recursive(recursive)
         .with_gitignore(!no_ignore);
-    let files = scanner.scan()?;
+    let mut files = scanner.scan()?;
+    files.sort_by(|a, b| a.path.cmp(&b.path));
 
     let mut results: Vec<SearchResult> = Vec::new();
-    let mut files_with_matches: HashSet<String> = HashSet::new();
-    let mut total_matches = 0;
+    let candidate_cap = max_results.max(1);
 
     'files: for file in files {
+        if results.len() >= candidate_cap {
+            break;
+        }
         let scope_path = scope_relative_path(&file.path, root)
             .unwrap_or_else(|| file.path.display().to_string());
         let display_path = workspace_display_path(&file.path, workspace_root);
+        let file_score = scan_match_score(&scope_path, &ranking_tokens);
         if let Some(filter) = changed_filter {
             if !filter.matches_rel_path(&scope_path) {
                 continue;
             }
         }
-
         if !matches_file_type(&scope_path, file_type) {
             continue;
         }
@@ -2054,31 +2056,17 @@ fn scan_search(
 
         if context == 0 {
             for (idx, line) in file.content.lines().enumerate() {
-                if results.len() >= max_results {
+                if results.len() >= candidate_cap {
                     break 'files;
                 }
-
-                let matched = if let Some(re) = regex {
-                    re.is_match(line)
-                } else if case_sensitive {
-                    line.contains(query)
-                } else {
-                    line.to_lowercase().contains(&query_lower)
-                };
-
-                if !matched {
+                if !scan_line_matches(line, query, &query_lower, regex, case_sensitive) {
                     continue;
                 }
 
-                files_with_matches.insert(display_path.clone());
-                total_matches += 1;
-
-                let trimmed = line.trim();
-                let snippet = truncate_with_ellipsis(trimmed, 150);
-
+                let snippet = truncate_with_ellipsis(line.trim(), 150);
                 results.push(SearchResult {
                     path: display_path.clone(),
-                    score: 1.0,
+                    score: file_score,
                     snippet,
                     line: Some(idx + 1),
                     context_before: vec![],
@@ -2091,59 +2079,122 @@ fn scan_search(
                     chunk_end: None,
                 });
             }
-        } else {
-            let lines: Vec<&str> = file.content.lines().collect();
-            for (idx, line) in lines.iter().enumerate() {
-                if results.len() >= max_results {
-                    break 'files;
-                }
+            continue;
+        }
 
-                let matched = if let Some(re) = regex {
-                    re.is_match(line)
-                } else if case_sensitive {
-                    line.contains(query)
-                } else {
-                    line.to_lowercase().contains(&query_lower)
-                };
-
-                if !matched {
-                    continue;
-                }
-
-                files_with_matches.insert(display_path.clone());
-                total_matches += 1;
-
-                let trimmed = line.trim();
-                let snippet = truncate_with_ellipsis(trimmed, 150);
-
-                let (context_before, context_after) =
-                    get_context_from_lines(&lines, idx + 1, context);
-
-                results.push(SearchResult {
-                    path: display_path.clone(),
-                    score: 1.0,
-                    snippet,
-                    line: Some(idx + 1),
-                    context_before,
-                    context_after,
-                    text_score: None,
-                    vector_score: None,
-                    hybrid_score: None,
-                    result_id: None,
-                    chunk_start: None,
-                    chunk_end: None,
-                });
+        let lines: Vec<&str> = file.content.lines().collect();
+        for (idx, line) in lines.iter().enumerate() {
+            if results.len() >= candidate_cap {
+                break 'files;
             }
+            if !scan_line_matches(line, query, &query_lower, regex, case_sensitive) {
+                continue;
+            }
+
+            let snippet = truncate_with_ellipsis(line.trim(), 150);
+            let (context_before, context_after) = get_context_from_lines(&lines, idx + 1, context);
+            results.push(SearchResult {
+                path: display_path.clone(),
+                score: file_score,
+                snippet,
+                line: Some(idx + 1),
+                context_before,
+                context_after,
+                text_score: None,
+                vector_score: None,
+                hybrid_score: None,
+                result_id: None,
+                chunk_start: None,
+                chunk_end: None,
+            });
         }
     }
 
+    sort_and_dedupe_scan_results(&mut results);
+    if results.len() > max_results {
+        results.truncate(max_results);
+    }
+
+    let files_with_matches_count = results
+        .iter()
+        .map(|result| result.path.clone())
+        .collect::<HashSet<_>>()
+        .len();
+    let total_matches = results.len();
+
     Ok(SearchOutcome {
         results,
-        files_with_matches: files_with_matches.len(),
+        files_with_matches: files_with_matches_count,
         total_matches,
         mode: IndexMode::Scan,
         cache_hit: false,
     })
+}
+
+fn has_full_index(index_path: &Path) -> bool {
+    index_path.join("meta.json").is_file()
+}
+
+fn scan_line_matches(
+    line: &str,
+    query: &str,
+    query_lower: &str,
+    regex: Option<&Regex>,
+    case_sensitive: bool,
+) -> bool {
+    if let Some(re) = regex {
+        return re.is_match(line);
+    }
+    if case_sensitive {
+        line.contains(query)
+    } else {
+        contains_ascii_case_insensitive(line, query_lower)
+    }
+}
+
+fn contains_ascii_case_insensitive(haystack: &str, needle_lower: &str) -> bool {
+    if needle_lower.is_empty() {
+        return true;
+    }
+    if needle_lower.len() > haystack.len() {
+        return false;
+    }
+    if !haystack.is_ascii() || !needle_lower.is_ascii() {
+        return haystack.to_ascii_lowercase().contains(needle_lower);
+    }
+
+    let needle = needle_lower.as_bytes();
+    let haystack_bytes = haystack.as_bytes();
+    haystack_bytes.windows(needle.len()).any(|window| {
+        window
+            .iter()
+            .zip(needle.iter())
+            .all(|(a, b)| a.to_ascii_lowercase() == *b)
+    })
+}
+
+fn scan_match_score(scope_path: &str, ranking_tokens: &[String]) -> f32 {
+    let path_bonus = path_ranking_bonus(scope_path, ranking_tokens);
+    let score = 1.0 + path_bonus;
+    if score.is_finite() {
+        score.max(0.0)
+    } else {
+        1.0
+    }
+}
+
+fn sort_and_dedupe_scan_results(results: &mut Vec<SearchResult>) {
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.path.cmp(&b.path))
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.snippet.cmp(&b.snippet))
+    });
+    let mut seen: HashSet<(String, Option<usize>, String)> = HashSet::new();
+    results
+        .retain(|result| seen.insert((result.path.clone(), result.line, result.snippet.clone())));
 }
 
 /// Hybrid search combining BM25 with vector embeddings
