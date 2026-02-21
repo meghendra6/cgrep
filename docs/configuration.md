@@ -56,6 +56,14 @@ batch_size = 4      # lower = less memory, often faster on CPU
   - `explain_top_k`: `1..=50` (default `5`)
 - Out-of-range or non-finite values fall back to safe defaults.
 
+## Deterministic output defaults
+
+- For automation/agents, set profile defaults to deterministic output:
+  - `[profile.agent].format = "json2"`
+  - use CLI `--compact` for stable machine parsing
+- Optional payload fields are omitted when empty; consumers should not require `null` placeholders.
+- Request timing fields (for example `elapsed_ms`) are informational, not ordering keys.
+
 ## Index Ignore Policy
 
 - `cgrep index` now respects `.gitignore`/`.ignore` by default.
@@ -68,3 +76,11 @@ batch_size = 4      # lower = less memory, often faster on CPU
 - `cgrep watch` and `cgrep daemon` reuse the latest index profile stored in `.cgrep/metadata.json`.
 - The reused profile preserves the options from the latest `cgrep index` run as-is.
 - If no stored profile exists yet, watch falls back to `[index]` config defaults.
+
+## Artifact compatibility notes
+
+- `.cgrep/status.json`: background/index readiness state.
+- `.cgrep/reuse-state.json`: reuse decisions and fallback reasons (optional).
+- `.cgrep/manifest/` + `.cgrep/metadata.json`: incremental/reuse metadata.
+
+These files are additive runtime artifacts. Existing consumers can ignore unknown optional fields safely.

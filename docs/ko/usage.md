@@ -16,7 +16,7 @@
 | `cgrep watch` (`wt`, `w`) | 파일 변경 감시 후 재인덱싱 |
 | `cgrep daemon <start|status|stop>` (`bg`) | 백그라운드 watch daemon 관리 |
 | `cgrep mcp <serve|install|uninstall>` | MCP 서버 및 host 설정 연동 |
-| `cgrep agent <...>` (`a`) | 에이전트 locate/expand + 연동 설치 |
+| `cgrep agent <...>` (`a`) | 에이전트 plan/locate/expand + 연동 설치 |
 | `cgrep completions <shell>` | 셸 자동완성 생성 |
 
 ## grep/rg 전환 빠른 경로
@@ -62,6 +62,7 @@ cgrep d handle_auth               # definition
 cgrep r UserService               # references
 cgrep c validate_token            # callers
 cgrep dep src/auth.rs             # dependents
+cgrep a p "trace auth middleware flow"
 cgrep a l "token validation" -B tight -u
 ```
 
@@ -213,6 +214,61 @@ cgrep definition <name> \
 - `text`: 사람이 읽기 쉬운 형식
 - `json`: 단순 배열/객체 페이로드
 - `json2`: 자동화/에이전트용 구조화 페이로드
+
+## 결정적 `json2`/`--compact` 계약
+
+정렬 규칙:
+- 최상위 필드는 struct 정의 순서대로 안정적으로 출력됩니다.
+- `results[]`는 결정적 정렬 규칙을 따릅니다.
+- search 동점 처리 순서:
+  1. score (내림차순)
+  2. path (오름차순)
+  3. line (오름차순)
+  4. snippet (오름차순)
+- agent plan 후보 동점 처리 순서:
+  1. locate score (내림차순)
+  2. path (오름차순)
+  3. line (오름차순)
+  4. id (오름차순)
+
+필수/선택 필드 정책:
+- 명령별 스키마의 필수 필드(`meta`, `results`, `steps`, `candidates`, `result`)는 항상 존재합니다.
+- 선택 필드는 값이 있을 때만 출력되며, 기본적으로 `null` 대신 생략됩니다.
+  예시:
+  - search: `context_before`, `context_after`, `explain`
+  - status: `reuse`
+  - agent plan: `diagnostics`, `error`
+- 파서는 필드 이름 기준으로 처리하고, 위치 기반 가정은 피하세요.
+
+ID 안정성:
+- 동일한 저장소/쿼리/옵션/상태에서는 search/agent ID가 안정적으로 유지됩니다.
+- 결정성 보장은 정렬/필드 존재성 기준이며, `elapsed_ms` 같은 요청 시점 통계는 정보성 필드입니다.
+
+## 마이그레이션 및 호환성 노트
+
+추가된 플래그(기본 동작은 명시적으로 켜지지 않으면 유지):
+- search:
+  - `--explain`
+- index:
+  - `--background`
+  - `--reuse off|strict|auto` (기본값 `off`)
+  - `--manifest-only`
+  - `--print-diff`
+  - `--no-manifest`
+- agent:
+  - `agent plan`
+  - `agent plan --max-steps`
+  - `agent plan --max-candidates`
+
+호환성 보장:
+- 기존 별칭(`s`, `d`, `r`, `c`, `dep`, `i`, `a l`, `a x`)은 계속 동작합니다.
+- deprecated 모드 별칭(`--keyword`, `--semantic`, `--hybrid`)도 계속 허용됩니다.
+- `json2` 스키마는 additive 방식이며, 선택 필드 추가는 기존 필수 필드를 깨지 않습니다.
+
+새로운 `.cgrep/` 아티팩트:
+- `.cgrep/status.json`
+- `.cgrep/reuse-state.json`
+- `.cgrep/manifest/`, `.cgrep/metadata.json` (증분/재사용 메타데이터)
 
 ## 지원 언어
 

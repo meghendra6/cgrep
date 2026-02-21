@@ -13,6 +13,7 @@ Current release: **v1.5.1**
 | Set up token-efficient agent retrieval | [Agent Workflow](./agent.md) |
 | Connect editor/host tools via MCP | [MCP](./mcp.md) |
 | Keep large repo index fresh | [Indexing and Watch](./indexing-watch.md) |
+| Operate background/reuse safely | [Operations](./operations.md) |
 | Tune defaults and profiles | [Configuration](./configuration.md) |
 | Use semantic/hybrid retrieval | [Embeddings](./embeddings.md) |
 | Fix common failures quickly | [Troubleshooting](./troubleshooting.md) |
@@ -34,6 +35,7 @@ cgrep read src/auth.rs
 ```bash
 ID=$(cgrep agent locate "where token validation happens" --compact | jq -r '.results[0].id')
 cgrep agent expand --id "$ID" -C 8 --compact
+cgrep --format json2 --compact agent plan "trace authentication middleware flow"
 ```
 
 ## Benchmark References
