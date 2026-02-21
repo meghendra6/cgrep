@@ -328,6 +328,32 @@ pub struct ProfileConfig {
     pub agent_cache: Option<bool>,
 }
 
+const PROFILE_HUMAN_ALIASES: &[&str] = &["human", "user", "developer", "dev"];
+const PROFILE_AGENT_ALIASES: &[&str] = &["agent", "ai", "ai-agent", "coding-agent", "coding_agent"];
+const PROFILE_FAST_ALIASES: &[&str] = &["fast", "quick"];
+
+/// Normalize profile aliases to built-in profile names.
+///
+/// Returns `Some("human" | "agent" | "fast")` for built-in names and aliases,
+/// otherwise `None`.
+pub fn canonical_profile_name(name: &str) -> Option<&'static str> {
+    let normalized = name.trim().to_ascii_lowercase();
+    if PROFILE_HUMAN_ALIASES.contains(&normalized.as_str()) {
+        Some("human")
+    } else if PROFILE_AGENT_ALIASES.contains(&normalized.as_str()) {
+        Some("agent")
+    } else if PROFILE_FAST_ALIASES.contains(&normalized.as_str()) {
+        Some("fast")
+    } else {
+        None
+    }
+}
+
+/// Returns true when the name is a built-in profile or alias.
+pub fn is_builtin_profile(name: &str) -> bool {
+    canonical_profile_name(name).is_some()
+}
+
 impl ProfileConfig {
     /// Create the "human" profile preset
     pub fn human() -> Self {
@@ -495,13 +521,42 @@ impl Config {
         cli_value.or(self.max_results).unwrap_or(10)
     }
 
+    /// Resolve a CLI/profile name to the effective profile key.
+    ///
+    /// Resolution order:
+    /// 1. Exact custom profile match
+    /// 2. Built-in alias normalization
+    /// 3. Original trimmed value
+    pub fn resolve_profile_name(&self, raw: &str) -> String {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return String::new();
+        }
+        if self.profiles.contains_key(trimmed) {
+            return trimmed.to_string();
+        }
+        if let Some(canonical) = canonical_profile_name(trimmed) {
+            return canonical.to_string();
+        }
+        trimmed.to_string()
+    }
+
+    /// Return true if a custom profile exists with an exact key match.
+    pub fn has_profile(&self, name: &str) -> bool {
+        self.profiles.contains_key(name)
+    }
+
     /// Get a profile by name, falling back to built-in presets
     pub fn profile(&self, name: &str) -> ProfileConfig {
         if let Some(profile) = self.profiles.get(name) {
             profile.clone()
         } else {
+            let canonical = canonical_profile_name(name).unwrap_or(name);
+            if let Some(profile) = self.profiles.get(canonical) {
+                return profile.clone();
+            }
             // Built-in presets
-            match name {
+            match canonical {
                 "human" => ProfileConfig::human(),
                 "agent" => ProfileConfig::agent(),
                 "fast" => ProfileConfig::fast(),
@@ -587,5 +642,33 @@ explain_top_k = 0
         assert_eq!(cfg.ranking().kind_weight(), 2.5);
         assert_eq!(cfg.ranking().weak_signal_penalty(), 0.0);
         assert_eq!(cfg.ranking().explain_top_k(), 5);
+    }
+
+    #[test]
+    fn profile_aliases_resolve_to_builtins() {
+        let cfg = Config::default();
+        assert_eq!(cfg.resolve_profile_name("user"), "human");
+        assert_eq!(cfg.resolve_profile_name("AI"), "agent");
+        assert_eq!(cfg.resolve_profile_name("quick"), "fast");
+
+        assert_eq!(cfg.profile("user").format(), ConfigOutputFormat::Text);
+        assert_eq!(cfg.profile("ai").format(), ConfigOutputFormat::Json2);
+        assert_eq!(cfg.profile("quick").max_results(), 10);
+    }
+
+    #[test]
+    fn custom_profile_key_wins_before_alias_normalization() {
+        let cfg: Config = toml::from_str(
+            r#"
+[profile.user]
+format = "json"
+max_results = 7
+"#,
+        )
+        .expect("parse custom profile");
+
+        assert_eq!(cfg.resolve_profile_name("user"), "user");
+        assert_eq!(cfg.profile("user").format(), ConfigOutputFormat::Json);
+        assert_eq!(cfg.profile("user").max_results(), 7);
     }
 }

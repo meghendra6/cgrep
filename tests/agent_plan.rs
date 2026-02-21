@@ -200,6 +200,55 @@ fn scoped_plan_executes_map_step() {
 }
 
 #[test]
+fn scoped_plan_emits_reusable_read_followups() {
+    let dir = TempDir::new().expect("tempdir");
+    write_fixture(dir.path());
+    run_index(dir.path());
+
+    let payload = run_json2(
+        dir.path(),
+        &[
+            "agent",
+            "plan",
+            "trace authentication middleware flow",
+            "--path",
+            "src",
+            "--max-steps",
+            "6",
+            "--max-candidates",
+            "4",
+        ],
+    );
+    let read_steps = payload["steps"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|step| step.get("command").and_then(Value::as_str) == Some("read"))
+        .collect::<Vec<_>>();
+    assert!(!read_steps.is_empty(), "expected read follow-up steps");
+
+    for step in read_steps {
+        let args = step["args"]
+            .as_array()
+            .expect("read args")
+            .iter()
+            .filter_map(Value::as_str)
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
+        let read_path = Path::new(args.first().expect("read path arg"));
+        assert!(
+            read_path.starts_with("src"),
+            "expected path rebased to repo root: {}",
+            read_path.display()
+        );
+
+        let mut read_cmd_args = vec!["read".to_string()];
+        read_cmd_args.extend(args);
+        let _ = run_success(dir.path(), &read_cmd_args);
+    }
+}
+
+#[test]
 fn agent_plan_payload_is_bounded_against_locate_expand_baseline() {
     let dir = TempDir::new().expect("tempdir");
     write_fixture(dir.path());

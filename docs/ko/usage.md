@@ -149,7 +149,7 @@ cgrep search "<query>" \
   -M, --mode keyword|semantic|hybrid \
   --explain \
   -B, --budget tight|balanced|full|off \
-  -P, --profile human|agent|fast
+  -P, --profile human|agent|fast  # 별칭: user/ai/quick
 ```
 
 예시:
@@ -217,9 +217,19 @@ cgrep --format json2 --compact search "target_fn" --explain
 
 | 프로필 | 사용 목적 |
 |---|---|
-| `human` | 사람이 읽기 좋은 출력 |
-| `agent` | 구조화 + 토큰 효율 기본값 |
-| `fast` | 빠른 탐색 |
+| `human` (`user`, `developer`, `dev`) | 사람이 읽기 좋은 출력 |
+| `agent` (`ai`, `ai-agent`, `coding-agent`) | 구조화 + 토큰 효율 기본값 |
+| `fast` (`quick`) | 빠른 탐색 |
+
+시나리오별 빠른 레시피:
+
+```bash
+# 사용자 중심 인터랙티브 워크플로
+cgrep s "auth refresh token" -P user -C 2
+
+# AI 코딩 에이전트 워크플로 (결정적 + compact)
+cgrep s "auth refresh token" -P ai -B tight --format json2 --compact
+```
 
 ### 고급 옵션
 

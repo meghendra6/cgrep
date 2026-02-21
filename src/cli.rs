@@ -17,7 +17,7 @@ use clap_complete::Shell;
     about,
     long_about = None,
     override_usage = "cgrep [OPTIONS] <COMMAND>",
-    after_help = "Search quickstart:\n  cgrep s \"token refresh\" src/\n  cgrep search -r --include '**/*.rs' needle src/\n\nLiteral query tips:\n  cgrep search -- --literal\n  cgrep s read"
+    after_help = "Search quickstart:\n  cgrep s \"token refresh\" src/\n  cgrep search -r --include '**/*.rs' needle src/\n\nLiteral query tips:\n  cgrep search -- --literal\n  cgrep s read\n\nScenario presets:\n  cgrep s \"auth flow\" -P user\n  cgrep s \"auth flow\" -P ai -B tight --format json2 --compact"
 )]
 pub struct Cli {
     /// Output format (text or json)
@@ -328,7 +328,7 @@ pub enum Commands {
         #[arg(short = 'B', long, value_enum, help_heading = "Core")]
         budget: Option<CliBudgetPreset>,
 
-        /// Use a preset profile (human, agent, fast)
+        /// Use a preset profile (human/user, agent/ai, fast/quick)
         #[arg(short = 'P', long, help_heading = "Core")]
         profile: Option<String>,
 

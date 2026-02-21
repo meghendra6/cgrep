@@ -35,6 +35,7 @@ cgrep index --reuse auto
 
 # 3) Search and navigate
 cgrep s "token validation" src/
+cgrep s "auth middleware" -P user
 cgrep --format json2 --compact search "target_fn" --explain
 cgrep d handle_auth
 cgrep r UserService
@@ -65,6 +66,8 @@ cgrep agent expand --id "$ID" -C 8 --compact
 
 # Deterministic retrieval plan
 cgrep --format json2 --compact agent plan "trace authentication middleware flow"
+# AI-agent preset aliases also work in search mode
+cgrep search "trace auth flow" -P ai -B tight --format json2 --compact
 ```
 
 Validate end-to-end (core/incremental/agent/status/docs):
@@ -97,10 +100,12 @@ Notes:
   Example: `cgrep search -p src -- --help`
 - Direct shorthand `cgrep "query"` is intentionally not used.
 - `--explain` is supported for keyword mode and emits deterministic score components.
+- `--profile` accepts aliases: `user/developer -> human`, `ai/ai-agent/coding-agent -> agent`, `quick -> fast`.
 - `cgrep read` requires a non-empty path argument.
 - `search` result `path` is always reusable:
   workspace-internal scopes return workspace-relative paths, and external scopes return absolute paths.
 - `json2`/`--compact` deterministic contract and tie-break rules are documented in `docs/usage.md`.
+- `agent plan` now includes bounded `read` follow-up steps for top candidates, improving verification loops.
 
 For MCP usage:
 - Codex setup uses `cgrep agent install codex` (not `cgrep mcp install codex`).

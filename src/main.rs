@@ -84,6 +84,7 @@ fn budget_defaults(preset: Option<CliBudgetPreset>) -> BudgetDefaults {
 
 fn print_search_advanced_help() {
     println!("Advanced search options:");
+    println!("  -P, --profile <name>           Presets: human/user, agent/ai, fast/quick");
     println!("  --no-index                     Force scan mode (no index)");
     println!("  --fuzzy                        Fuzzy matching (index mode only)");
     println!("  --context-pack <n>             Merge overlapping context windows");
@@ -191,8 +192,27 @@ fn main() -> Result<()> {
             let config = effective_path
                 .map(cgrep::config::Config::load_for_dir)
                 .unwrap_or_else(cgrep::config::Config::load);
-            let profile_config = profile.as_deref().map(|name| config.profile(name));
-            let agent_profile_active = profile.as_deref() == Some("agent");
+            let requested_profile = profile
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty());
+            let resolved_profile_name =
+                requested_profile.map(|name| config.resolve_profile_name(name));
+            if let Some(requested) = requested_profile {
+                let unknown_profile = resolved_profile_name.as_deref() == Some(requested)
+                    && !config.has_profile(requested)
+                    && !cgrep::config::is_builtin_profile(requested);
+                if unknown_profile {
+                    eprintln!(
+                        "Warning: unknown profile `{}`. Built-ins: human (aliases: user, developer, dev), agent (aliases: ai, ai-agent, coding-agent, coding_agent), fast (alias: quick).",
+                        requested
+                    );
+                }
+            }
+            let profile_config = resolved_profile_name
+                .as_deref()
+                .map(|name| config.profile(name));
+            let agent_profile_active = resolved_profile_name.as_deref() == Some("agent");
             let budget_preset = budget.or(if agent_profile_active {
                 Some(CliBudgetPreset::Balanced)
             } else {
