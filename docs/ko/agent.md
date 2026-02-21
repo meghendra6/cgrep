@@ -43,6 +43,16 @@ cgrep --format json2 --compact agent plan "validate_token" --max-steps 6 --max-c
 - `candidates[]`: 후속 탐색용 안정적인 ID + 요약
 - `error`(선택): 옵션 검증 실패 시 machine-parseable 에러
 
+결정적 정렬/동점 처리 규칙:
+- step 순서는 전략 단계(`map -> locate -> expand -> navigation`) 순서로 고정됩니다.
+- step ID는 안정적인 형식(`sNN_<slug>`)을 사용합니다.
+- candidate 동점 처리 순서:
+  1. score (내림차순)
+  2. path (오름차순)
+  3. line (오름차순)
+  4. id (오름차순)
+- 선택 필드(`diagnostics`, `error`)는 비어 있으면 생략됩니다.
+
 단축 별칭 형태:
 
 ```bash

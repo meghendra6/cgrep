@@ -288,6 +288,61 @@ Format summary:
 - `json`: simple array/object payload
 - `json2`: structured payload for automation/agents
 
+## Deterministic `json2`/`--compact` contract
+
+Ordering rules:
+- top-level object fields are emitted in stable struct order.
+- `results[]` are emitted in deterministic ranking order.
+- search tie-break order:
+  1. score (desc)
+  2. path (asc)
+  3. line (asc)
+  4. snippet (asc)
+- agent plan tie-break order:
+  1. locate score (desc)
+  2. path (asc)
+  3. line (asc)
+  4. id (asc)
+
+Required and optional field policy:
+- required fields are always present for a command's schema (`meta`, `results`, `steps`, `candidates`, `result`).
+- optional fields are omitted (not `null`) unless they carry meaningful data.
+  Examples:
+  - search: `context_before`, `context_after`, `explain`
+  - status: `reuse`
+  - agent plan: `diagnostics`, `error`
+- consumers should parse by field name, not by positional assumptions.
+
+ID stability:
+- search/agent IDs are stable for identical repo/query/options/state.
+- deterministic mode guarantees stable ordering and field presence; request-level timing fields (for example `elapsed_ms`) remain informational.
+
+## Migration and compatibility notes
+
+Additive flags (default behavior unchanged unless explicitly set):
+- search:
+  - `--explain`
+- index:
+  - `--background`
+  - `--reuse off|strict|auto` (default `off`)
+  - `--manifest-only`
+  - `--print-diff`
+  - `--no-manifest`
+- agent:
+  - `agent plan`
+  - `agent plan --max-steps`
+  - `agent plan --max-candidates`
+
+Compatibility guarantees:
+- existing aliases (`s`, `d`, `r`, `c`, `dep`, `i`, `a l`, `a x`) remain valid.
+- deprecated mode aliases (`--keyword`, `--semantic`, `--hybrid`) remain accepted.
+- `json2` schemas are additive; new optional fields do not break existing required fields.
+
+New `.cgrep/` artifacts to be aware of:
+- `.cgrep/status.json`
+- `.cgrep/reuse-state.json`
+- `.cgrep/manifest/` and `.cgrep/metadata.json` (incremental/reuse metadata)
+
 ## Supported languages
 
 AST symbol extraction:

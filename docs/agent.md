@@ -42,6 +42,16 @@ Planner options:
 - `candidates[]`: stable IDs + short follow-up summaries
 - `error` (optional): deterministic machine-parseable option validation failures
 
+Deterministic ordering and tie-break rules:
+- step order is emitted by strategy stage sequence (`map -> locate -> expand -> navigation`).
+- step IDs are stable (`sNN_<slug>`).
+- candidate order follows locate ranking with deterministic ties:
+  1. score (desc)
+  2. path (asc)
+  3. line (asc)
+  4. id (asc)
+- optional fields (`diagnostics`, `error`) are omitted when empty.
+
 Short alias form:
 
 ```bash

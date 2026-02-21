@@ -13,6 +13,7 @@
 | 저토큰 에이전트 조회 흐름 적용 | [에이전트 워크플로](./agent.md) |
 | 에디터/호스트 MCP 연동 | [MCP](./mcp.md) |
 | 대형 저장소 인덱스 운용 | [인덱싱과 Watch](./indexing-watch.md) |
+| 백그라운드/reuse 운영 점검 | [운영 가이드](./operations.md) |
 | 기본값/프로필 튜닝 | [설정](./configuration.md) |
 | semantic/hybrid 검색 사용 | [임베딩](./embeddings.md) |
 | 자주 발생하는 문제 해결 | [문제 해결](./troubleshooting.md) |
@@ -34,6 +35,7 @@ cgrep read src/auth.rs
 ```bash
 ID=$(cgrep agent locate "where token validation happens" --compact | jq -r '.results[0].id')
 cgrep agent expand --id "$ID" -C 8 --compact
+cgrep --format json2 --compact agent plan "trace authentication middleware flow"
 ```
 
 ## 벤치마크 문서

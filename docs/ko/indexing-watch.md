@@ -18,6 +18,19 @@ cgrep index --include-ignored
 # 임베딩 모드
 cgrep index --embeddings auto
 cgrep index --embeddings precompute
+
+# 매니페스트 제어(증분 경로)
+cgrep index --print-diff
+cgrep index --manifest-only --print-diff
+cgrep index --no-manifest
+
+# 백그라운드 전체 인덱스 빌드
+cgrep index --background
+
+# 로컬 호환 스냅샷 재사용
+cgrep index --reuse strict
+cgrep index --reuse auto
+cgrep index --reuse off
 ```
 
 ## Watch와 daemon
@@ -56,9 +69,19 @@ cgrep watch --no-adaptive
 ## 동작 참고
 
 - 인덱스는 `.cgrep/` 아래에 저장
+- 매니페스트는 `.cgrep/manifest/` 아래에 저장 (`version`, `v1.json`, 선택적 `root.hash`)
 - 하위 디렉터리에서 검색해도 가장 가까운 상위 인덱스를 재사용
 - 인덱싱은 기본적으로 `.gitignore`/`.ignore`를 존중 (`--include-ignored`로 전체 포함 가능)
 - `--include-path <path>`로 ignore 경로 중 일부만 선택적으로 인덱싱 가능
+- `--manifest-only`는 문서 재인덱싱 없이 `.cgrep/metadata.json`의 매니페스트/요약만 갱신
+- `--no-manifest`는 매니페스트 경로를 비활성화하고 기존 증분 동작으로 폴백
+- 재사용 캐시 루트:
+  - macOS/Linux: `~/.cache/cgrep/indexes/`
+  - Windows: `%LOCALAPPDATA%/cgrep/indexes/`
+- 재사용 안전성:
+  - 재사용 활성 중 stale/nonexistent 파일은 결과에서 필터링
+  - 비호환/손상 스냅샷은 일반 인덱싱으로 폴백
+- `status`는 `.cgrep/status.json`에서 결정적 준비/진행 필드를 읽어 표시
 - watch는 기본적으로 적응형 backoff 사용 (`--no-adaptive`로 비활성화)
 - watch 기본값은 백그라운드 운용 기준으로 조정 (`--min-interval 180`, 약 3분)
 - watch는 인덱싱 가능한 확장자만 반응하고 temp/swap 파일은 건너뜀
@@ -93,3 +116,6 @@ pkill -f "cgrep watch"
 - `--min-interval 180` 이상
 - `--debounce 30` 이상
 - 적응형 모드 기본값 유지
+
+참고:
+- 운영 런북: `docs/ko/operations.md`

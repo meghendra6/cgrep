@@ -8,6 +8,20 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
+## 단일 명령 검증 워크플로우
+
+```bash
+CGREP_BIN=cgrep bash scripts/validate_all.sh
+```
+
+이 워크플로우는 다음을 한 번에 점검합니다.
+- 핵심 인덱싱/검색 흐름
+- 증분 업데이트 경로(`--print-diff`)
+- agent plan 흐름
+- status/search 통계 payload 점검(`json2 --compact`)
+- 저장소 통합 파일이 있을 때 doctor 흐름(`scripts/doctor.sh`)
+- 문서 로컬 링크 sanity 체크(README + docs 허브 파일)
+
 ## 성능 게이트
 
 ```bash
@@ -32,6 +46,8 @@ python3 scripts/agent_plan_perf_gate.py \
 
 성능 게이트는 다음 지표의 지연시간 `p50`/`p95`를 추적합니다.
 - `--reuse off` 기준 fresh worktree 인덱싱 지연
+- `--reuse off` 이후 첫 keyword 검색 지연
+- 작은 tracked 파일 변경 후 증분 인덱스 업데이트 지연(`--reuse off`)
 - `--reuse strict` 기준 fresh worktree 인덱싱 지연
 - `--reuse auto` 기준 fresh worktree 인덱싱 지연
 - `--reuse strict` 이후 첫 keyword 검색 지연
@@ -46,11 +62,19 @@ python3 scripts/agent_plan_perf_gate.py \
 - `p50`: median
 - `p95`: nearest-rank percentile
 
+CI 임계값(중앙값 기준):
+- 검색 회귀 > `5%`: 실패
+- cold index build 회귀 > `10%`: 실패
+- 증분/reuse 업데이트 회귀 > `10%`: 실패
+- agent plan 회귀 > `10%`: 실패
+- agent-plan 성능 체크에서는 작은 절대 편차(`<= 3ms`)를 노이즈로 처리
+
 ## 릴리즈 전 체크리스트
 
 - 빌드 통과 (`cargo build`)
 - 테스트 통과 (`cargo test`)
 - Clippy 경고 0개 (`-D warnings`)
+- 검증 워크플로우 통과 (`scripts/validate_all.sh`)
 - 성능 게이트 통과 (`scripts/index_perf_gate.py`, `scripts/agent_plan_perf_gate.py`)
 - CLI/동작 변경 시 문서 동기화 완료
 

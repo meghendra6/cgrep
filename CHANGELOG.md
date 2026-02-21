@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added `scripts/validate_all.sh` as a single deterministic validation workflow for indexing/search, incremental update, agent plan, status/search-stats checks, doctor flow, and docs link sanity checks.
+- Added operations runbooks: `docs/operations.md` and `docs/ko/operations.md`.
+- Added hardening integration tests in `tests/m7_hardening.rs` covering deterministic json2/compact contracts, cross-feature option matrix smoke, and legacy mode-alias compatibility.
+
+### Changed
+- Consolidated docs around deterministic output and compatibility:
+  - `README.md`, `docs/usage.md`, `docs/ko/usage.md`
+  - `docs/configuration.md`, `docs/ko/configuration.md`
+  - `docs/agent.md`, `docs/ko/agent.md`
+  - `docs/index.md`, `docs/ko/index.md`
+  - `docs/indexing-watch.md`, `docs/ko/indexing-watch.md`
+  - `docs/development.md`, `docs/ko/development.md`
+- Extended `perf-gate` workflow coverage to include deterministic local validation (`scripts/validate_all.sh`) in addition to existing perf gates.
+
+### Compatibility
+- No default CLI behavior changes: new flows are opt-in via explicit flags/commands.
+- Existing aliases and deprecated compatibility mode flags remain supported.
+- `json2` contracts remain additive; optional fields are omitted when empty and required fields remain stable.
+
+### Known limitations
+- Search timing fields (for example `elapsed_ms`) are intentionally informational and should not be used as deterministic ordering keys.
+- Docs link sanity checks validate repository-local links in core docs targets; external URL health remains out of scope.
+
 ## [1.5.1] - 2026-02-19
 
 ### Changed

@@ -67,6 +67,12 @@ cgrep agent expand --id "$ID" -C 8 --compact
 cgrep --format json2 --compact agent plan "trace authentication middleware flow"
 ```
 
+Validate end-to-end (core/incremental/agent/status/docs):
+
+```bash
+CGREP_BIN=cgrep bash scripts/validate_all.sh
+```
+
 Details:
 - Agent setup guide: <https://meghendra6.github.io/cgrep/agent/>
 - MCP integration guide: <https://meghendra6.github.io/cgrep/mcp/>
@@ -94,6 +100,7 @@ Notes:
 - `cgrep read` requires a non-empty path argument.
 - `search` result `path` is always reusable:
   workspace-internal scopes return workspace-relative paths, and external scopes return absolute paths.
+- `json2`/`--compact` deterministic contract and tie-break rules are documented in `docs/usage.md`.
 
 For MCP usage:
 - Codex setup uses `cgrep agent install codex` (not `cgrep mcp install codex`).
@@ -148,6 +155,7 @@ PyTorch scenario-completion benchmark snapshots:
 - Agent workflow: `docs/agent.md`
 - MCP integration: `docs/mcp.md`
 - Indexing/watch/daemon: `docs/indexing-watch.md`
+- Operations: `docs/operations.md`
 - Configuration: `docs/configuration.md`
 - Embeddings mode: `docs/embeddings.md`
 - Troubleshooting: `docs/troubleshooting.md`

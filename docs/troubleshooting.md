@@ -21,4 +21,6 @@
 cgrep index
 cgrep search "sanity check" -m 5
 cgrep search "sanity check" --mode keyword -m 5
+cgrep --format json2 --compact status
+CGREP_BIN=cgrep bash scripts/validate_all.sh
 ```

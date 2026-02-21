@@ -24,6 +24,9 @@ cgrep index --print-diff
 cgrep index --manifest-only --print-diff
 cgrep index --no-manifest
 
+# Build full index in background and return immediately
+cgrep index --background
+
 # Reuse compatible local cache snapshots
 cgrep index --reuse strict
 cgrep index --reuse auto
@@ -86,6 +89,7 @@ cgrep watch --no-adaptive
 - Reuse safety:
   - stale/nonexistent files are filtered while reuse is active
   - incompatible/corrupt snapshots fall back to normal indexing
+- `status` reads `.cgrep/status.json` and reports deterministic readiness/progress fields
 - Watch mode uses adaptive backoff by default (`--no-adaptive` to disable)
 - Watch defaults are tuned for background operation (`--min-interval 180`, about 3 minutes)
 - Watch reacts only to indexable source extensions and skips temp/swap files
@@ -120,3 +124,6 @@ For very large repositories, prefer:
 - `--min-interval 180` or higher
 - `--debounce 30` or higher
 - keeping adaptive mode enabled (default)
+
+See also:
+- operations runbook: `docs/operations.md`

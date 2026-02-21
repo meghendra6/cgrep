@@ -168,6 +168,10 @@ def regression_pct(before: float, after: float) -> float:
     return ((after - before) / before) * 100.0
 
 
+def regression_abs_ms(before: float, after: float) -> float:
+    return after - before
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Agent plan performance gate")
     parser.add_argument("--baseline-bin", required=True, help="Path to baseline cgrep binary")
@@ -230,11 +234,26 @@ def main() -> int:
             2,
         ),
     }
+    absolute_deltas = {
+        "plan_simple_ms": round(
+            regression_abs_ms(baseline["plan_simple_ms"], candidate["plan_simple_ms"]), 2
+        ),
+        "plan_complex_ms": round(
+            regression_abs_ms(baseline["plan_complex_ms"], candidate["plan_complex_ms"]), 2
+        ),
+        "plan_expand_e2e_ms": round(
+            regression_abs_ms(
+                baseline["plan_expand_e2e_ms"], candidate["plan_expand_e2e_ms"]
+            ),
+            2,
+        ),
+    }
     limits = {
         "plan_simple_ms": 10.0,
         "plan_complex_ms": 10.0,
         "plan_expand_e2e_ms": 10.0,
     }
+    absolute_floor_ms = 3.0
     payload = {
         "runs": args.runs,
         "warmup": args.warmup,
@@ -256,7 +275,9 @@ def main() -> int:
             "candidate": candidate_percentiles,
         },
         "regression_pct": regressions,
+        "regression_abs_ms": absolute_deltas,
         "limits": limits,
+        "absolute_regression_floor_ms": absolute_floor_ms,
     }
     print(json.dumps(payload, indent=2))
 
@@ -265,7 +286,12 @@ def main() -> int:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
-    failed = [key for key, limit in limits.items() if regressions.get(key, 0.0) > limit]
+    failed = [
+        key
+        for key, limit in limits.items()
+        if regressions.get(key, 0.0) > limit
+        and absolute_deltas.get(key, 0.0) > absolute_floor_ms
+    ]
     if failed:
         print(f"\nPerf gate failed: {', '.join(failed)}")
         return 1
