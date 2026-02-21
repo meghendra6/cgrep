@@ -35,10 +35,12 @@ cgrep --format json2 --compact agent plan "validate_token" --max-steps 6 --max-c
 - `--max-steps <n>`: 출력 step 수 상한 (기본 `6`)
 - `--max-candidates <n>`: 최종 후보 수 상한 (기본 `5`)
 - `--budget <tight|balanced|full|off>`: locate 단계 예산 프리셋 재사용
+- `--profile <agent|ai|...>`: planner 메타데이터 프로필 라벨 (별칭은 built-in으로 정규화)
 - `--path`, `--changed`, `--mode`: locate 전략에 전달
 - map 실행 정책:
   - `--path` 사용 시: planner가 `map`을 실제 실행
   - `--path` 미사용 시: 대형 저장소 지연을 줄이기 위해 `map`을 `planned`로 유지
+  - `locate/expand` 이후 상위 후보에 대해 bounded `read` 후속 step을 추가해 확인 루프를 단축
 
 `json2` 출력 구조:
 - `meta`: query/profile/budget/strategy + 저장소 fingerprint/version 정보
@@ -47,7 +49,7 @@ cgrep --format json2 --compact agent plan "validate_token" --max-steps 6 --max-c
 - `error`(선택): 옵션 검증 실패 시 machine-parseable 에러
 
 결정적 정렬/동점 처리 규칙:
-- step 순서는 전략 단계(`map -> locate -> expand -> navigation`) 순서로 고정됩니다.
+- step 순서는 전략 단계(`map -> locate -> expand -> navigation -> read-verification`) 순서로 고정됩니다.
 - step ID는 안정적인 형식(`sNN_<slug>`)을 사용합니다.
 - candidate 동점 처리 순서:
   1. score (내림차순)

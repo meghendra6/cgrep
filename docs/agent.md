@@ -34,10 +34,12 @@ Planner options:
 - `--max-steps <n>`: cap emitted steps (default `6`)
 - `--max-candidates <n>`: cap final candidates (default `5`)
 - `--budget <tight|balanced|full|off>`: reused for locate stage
+- `--profile <agent|ai|...>`: planner metadata profile label (aliases normalize to built-ins)
 - `--path`, `--changed`, `--mode`: forwarded to locate strategy
 - map execution policy:
   - with `--path`: planner executes `map`
   - without `--path`: planner keeps `map` as `planned` to bound latency on large repos
+  - after `locate/expand`, planner adds bounded `read` follow-up steps for top candidates to speed verification loops
 
 `json2` payload fields:
 - `meta`: query/profile/budget/strategy and repository fingerprint/version info
@@ -46,7 +48,7 @@ Planner options:
 - `error` (optional): deterministic machine-parseable option validation failures
 
 Deterministic ordering and tie-break rules:
-- step order is emitted by strategy stage sequence (`map -> locate -> expand -> navigation`).
+- step order is emitted by strategy stage sequence (`map -> locate -> expand -> navigation -> read-verification`).
 - step IDs are stable (`sNN_<slug>`).
 - candidate order follows locate ranking with deterministic ties:
   1. score (desc)
