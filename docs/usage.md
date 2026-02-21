@@ -149,7 +149,7 @@ cgrep search "<query>" \
   -M, --mode keyword|semantic|hybrid \
   --explain \
   -B, --budget tight|balanced|full|off \
-  -P, --profile human|agent|fast
+  -P, --profile human|agent|fast  # aliases: user/ai/quick
 ```
 
 Examples:
@@ -217,9 +217,19 @@ Ranking notes:
 
 | Profile | Typical use |
 |---|---|
-| `human` | Readable interactive output |
-| `agent` | Structured + token-efficient defaults |
-| `fast` | Quick exploratory search |
+| `human` (`user`, `developer`, `dev`) | Readable interactive output |
+| `agent` (`ai`, `ai-agent`, `coding-agent`) | Structured + token-efficient defaults |
+| `fast` (`quick`) | Quick exploratory search |
+
+Scenario quick recipes:
+
+```bash
+# user-focused interactive workflow
+cgrep s "auth refresh token" -P user -C 2
+
+# AI coding-agent workflow (deterministic + compact)
+cgrep s "auth refresh token" -P ai -B tight --format json2 --compact
+```
 
 ### Advanced options
 
