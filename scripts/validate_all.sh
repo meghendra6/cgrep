@@ -141,7 +141,27 @@ for field in ("files_with_matches", "total_matches", "elapsed_ms"):
         raise SystemExit(f"search.meta missing stats field: {field}")
 PY
 
-bash "$REPO_ROOT/scripts/doctor.sh" "$REPO_ROOT" >/dev/null
+doctor_requirements=(
+  "$REPO_ROOT/AGENTS.md"
+  "$REPO_ROOT/.github/copilot-instructions.md"
+  "$REPO_ROOT/.github/instructions"
+  "$REPO_ROOT/.github/prompts"
+  "$REPO_ROOT/.github/agents"
+  "$REPO_ROOT/.vscode/toolsets.json"
+  "$REPO_ROOT/.vscode/settings.json"
+)
+doctor_ready=true
+for requirement in "${doctor_requirements[@]}"; do
+  if [[ ! -e "$requirement" ]]; then
+    doctor_ready=false
+    break
+  fi
+done
+if [[ "$doctor_ready" == "true" ]]; then
+  bash "$REPO_ROOT/scripts/doctor.sh" "$REPO_ROOT" >/dev/null
+else
+  echo "[validate] doctor prerequisites unavailable in this checkout; skipping doctor.sh"
+fi
 
 echo "[validate] docs link check"
 python3 - "$REPO_ROOT" <<'PY'

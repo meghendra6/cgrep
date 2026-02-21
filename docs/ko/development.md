@@ -19,7 +19,7 @@ CGREP_BIN=cgrep bash scripts/validate_all.sh
 - 증분 업데이트 경로(`--print-diff`)
 - agent plan 흐름
 - status/search 통계 payload 점검(`json2 --compact`)
-- doctor 흐름(`scripts/doctor.sh`)
+- 저장소 통합 파일이 있을 때 doctor 흐름(`scripts/doctor.sh`)
 - 문서 로컬 링크 sanity 체크(README + docs 허브 파일)
 
 ## 성능 게이트

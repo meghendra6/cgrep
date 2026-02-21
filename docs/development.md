@@ -19,7 +19,7 @@ This single workflow verifies:
 - incremental update path (`--print-diff`)
 - agent planning flow (`agent plan`)
 - status/search stats payload checks (`json2 --compact`)
-- doctor flow (`scripts/doctor.sh`)
+- doctor flow (`scripts/doctor.sh`) when repository-integrations files are present
 - docs local-link sanity checks (README + docs hub files)
 
 ## Performance Gate
