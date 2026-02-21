@@ -68,6 +68,15 @@ fn write_fixture(root: &Path) {
     );
 }
 
+fn map_step(payload: &Value) -> &Value {
+    payload["steps"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|step| step.get("command").and_then(Value::as_str) == Some("map"))
+        .expect("map step")
+}
+
 #[test]
 fn agent_plan_json2_compact_is_byte_stable() {
     let dir = TempDir::new().expect("tempdir");
@@ -138,6 +147,56 @@ fn agent_plan_emits_expected_step_sequence_by_query_shape() {
     assert!(id_commands.contains(&"definition"));
     assert!(id_commands.contains(&"references"));
     assert!(id_commands.contains(&"callers"));
+}
+
+#[test]
+fn unscoped_phrase_plan_keeps_map_step_planned() {
+    let dir = TempDir::new().expect("tempdir");
+    write_fixture(dir.path());
+    run_index(dir.path());
+
+    let payload = run_json2(
+        dir.path(),
+        &[
+            "agent",
+            "plan",
+            "trace authentication middleware flow",
+            "--max-steps",
+            "6",
+            "--max-candidates",
+            "4",
+        ],
+    );
+    let map = map_step(&payload);
+    assert_eq!(map["status"], "planned");
+    assert!(map.get("result_count").is_none());
+    let reason = map["reason"].as_str().expect("map reason");
+    assert!(reason.contains("skipped execution for unscoped planning"));
+}
+
+#[test]
+fn scoped_plan_executes_map_step() {
+    let dir = TempDir::new().expect("tempdir");
+    write_fixture(dir.path());
+    run_index(dir.path());
+
+    let payload = run_json2(
+        dir.path(),
+        &[
+            "agent",
+            "plan",
+            "trace authentication middleware flow",
+            "--path",
+            "src",
+            "--max-steps",
+            "6",
+            "--max-candidates",
+            "4",
+        ],
+    );
+    let map = map_step(&payload);
+    assert_eq!(map["status"], "executed");
+    assert!(map.get("result_count").and_then(Value::as_u64).is_some());
 }
 
 #[test]
