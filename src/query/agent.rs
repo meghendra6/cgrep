@@ -468,7 +468,8 @@ pub fn run_plan(query: &str, options: &AgentPlanOptions) -> Result<()> {
     }
 
     if !payload.candidates.is_empty() {
-        let verification_templates = candidate_read_templates(&payload.candidates);
+        let verification_templates =
+            candidate_read_templates(&payload.candidates, &search_root, &execution_root);
         for (args, reason) in verification_templates {
             if payload.steps.len() >= max_steps {
                 break;
@@ -765,14 +766,23 @@ fn navigation_templates(
     ]
 }
 
-fn candidate_read_templates(candidates: &[AgentPlanCandidate]) -> Vec<(Vec<String>, String)> {
+fn candidate_read_templates(
+    candidates: &[AgentPlanCandidate],
+    search_root: &Path,
+    execution_root: &Path,
+) -> Vec<(Vec<String>, String)> {
     let mut templates = Vec::new();
     let mut seen_paths = HashSet::new();
     for candidate in candidates {
-        if candidate.path.is_empty() || !seen_paths.insert(candidate.path.clone()) {
+        if candidate.path.is_empty() {
             continue;
         }
-        let mut args = vec![candidate.path.clone()];
+        let read_path =
+            normalize_plan_read_path(candidate.path.as_str(), search_root, execution_root);
+        if !seen_paths.insert(read_path.clone()) {
+            continue;
+        }
+        let mut args = vec![read_path];
         let reason = if let Some(line) = candidate.line {
             let start = line.saturating_sub(PLAN_VERIFY_READ_WINDOW).max(1);
             let end = line.saturating_add(PLAN_VERIFY_READ_WINDOW);
@@ -794,6 +804,25 @@ fn candidate_read_templates(candidates: &[AgentPlanCandidate]) -> Vec<(Vec<Strin
         }
     }
     templates
+}
+
+fn normalize_plan_read_path(
+    candidate_path: &str,
+    search_root: &Path,
+    execution_root: &Path,
+) -> String {
+    let input_path = Path::new(candidate_path);
+    let absolute = if input_path.is_absolute() {
+        input_path.to_path_buf()
+    } else {
+        search_root.join(input_path)
+    };
+    if let Ok(relative) = absolute.strip_prefix(execution_root) {
+        if !relative.as_os_str().is_empty() {
+            return relative.to_string_lossy().to_string();
+        }
+    }
+    absolute.to_string_lossy().to_string()
 }
 
 fn run_cgrep_json<T>(
@@ -1251,43 +1280,82 @@ mod tests {
 
     #[test]
     fn candidate_read_templates_prioritize_unique_paths_with_sections() {
+        let workspace = tempdir().expect("tempdir");
+        let execution_root = workspace.path().to_path_buf();
+        let search_root = execution_root.join("src");
+
         let candidates = vec![
             AgentPlanCandidate {
                 id: "id-a".to_string(),
-                path: "src/a.rs".to_string(),
+                path: "query/a.rs".to_string(),
                 line: Some(30),
                 summary: "alpha".to_string(),
                 score: 0.9,
             },
             AgentPlanCandidate {
                 id: "id-b".to_string(),
-                path: "src/a.rs".to_string(),
+                path: "query/a.rs".to_string(),
                 line: Some(120),
                 summary: "beta".to_string(),
                 score: 0.8,
             },
             AgentPlanCandidate {
                 id: "id-c".to_string(),
-                path: "src/b.rs".to_string(),
+                path: "query/b.rs".to_string(),
                 line: None,
                 summary: "gamma".to_string(),
                 score: 0.7,
             },
         ];
 
-        let templates = candidate_read_templates(&candidates);
+        let templates = candidate_read_templates(&candidates, &search_root, &execution_root);
         assert_eq!(templates.len(), 2);
+
+        let first_path = PathBuf::from(&templates[0].0[0]);
+        let second_path = PathBuf::from(&templates[1].0[0]);
+        assert_eq!(first_path, PathBuf::from("src").join("query").join("a.rs"));
+        assert_eq!(second_path, PathBuf::from("src").join("query").join("b.rs"));
         assert_eq!(
             templates[0].0,
             vec![
-                "src/a.rs".to_string(),
+                PathBuf::from("src")
+                    .join("query")
+                    .join("a.rs")
+                    .to_string_lossy()
+                    .to_string(),
                 "--section".to_string(),
                 "18-42".to_string()
             ]
         );
-        assert_eq!(templates[1].0, vec!["src/b.rs".to_string()]);
+        assert_eq!(
+            templates[1].0,
+            vec![PathBuf::from("src")
+                .join("query")
+                .join("b.rs")
+                .to_string_lossy()
+                .to_string()]
+        );
         assert!(templates[0]
             .1
             .contains("bounded in-file context around line 30"));
+    }
+
+    #[test]
+    fn normalize_plan_read_path_rebases_to_execution_root() {
+        let workspace = tempdir().expect("tempdir");
+        let execution_root = workspace.path();
+        let search_root = execution_root.join("src");
+
+        let rebased = normalize_plan_read_path("query/mod.rs", &search_root, execution_root);
+        assert_eq!(
+            PathBuf::from(rebased),
+            PathBuf::from("src").join("query").join("mod.rs")
+        );
+
+        let external_dir = tempdir().expect("external tempdir");
+        let external_path = external_dir.path().join("external.rs");
+        let external_input = external_path.to_string_lossy().to_string();
+        let external = normalize_plan_read_path(&external_input, &search_root, execution_root);
+        assert_eq!(PathBuf::from(external), external_path);
     }
 }

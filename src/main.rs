@@ -204,7 +204,7 @@ fn main() -> Result<()> {
                     && !cgrep::config::is_builtin_profile(requested);
                 if unknown_profile {
                     eprintln!(
-                        "Warning: unknown profile `{}`. Built-ins: human (aliases: user, developer), agent (aliases: ai, ai-agent, coding-agent), fast (alias: quick).",
+                        "Warning: unknown profile `{}`. Built-ins: human (aliases: user, developer, dev), agent (aliases: ai, ai-agent, coding-agent, coding_agent), fast (alias: quick).",
                         requested
                     );
                 }
