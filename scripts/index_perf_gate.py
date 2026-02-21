@@ -180,7 +180,23 @@ def measure_for_binary(
                 env,
             )
 
+        def incremental_update_worker() -> float:
+            clone = next_clone_dir("incremental-off")
+            clone_origin(origin, clone)
+            base_index_cmd = [str(binary), "index", "--embeddings", "off"]
+            run(base_index_cmd, clone, env)
+            target = clone / "src" / "mod_0.rs"
+            with target.open("a", encoding="utf-8") as fh:
+                fh.write("// incremental_update_probe\n")
+            return timed_ms(base_index_cmd, clone, env)
+
         off_index = collect_metric_samples(runs, warmup, lambda: index_worker("off"))
+        off_first_search = collect_metric_samples(
+            runs, warmup, lambda: first_search_worker("off")
+        )
+        incremental_update = collect_metric_samples(
+            runs, warmup, incremental_update_worker
+        )
         if reuse_supported:
             strict_index = collect_metric_samples(runs, warmup, lambda: index_worker("strict"))
             auto_index = collect_metric_samples(runs, warmup, lambda: index_worker("auto"))
@@ -199,6 +215,8 @@ def measure_for_binary(
             auto_first_search = strict_first_search[:]
 
         off_summary = summarize_latency_ms(off_index)
+        off_search_summary = summarize_latency_ms(off_first_search)
+        incremental_summary = summarize_latency_ms(incremental_update)
         strict_summary = summarize_latency_ms(strict_index)
         auto_summary = summarize_latency_ms(auto_index)
         strict_search_summary = summarize_latency_ms(strict_first_search)
@@ -206,6 +224,8 @@ def measure_for_binary(
 
         metrics = {
             "reuse_off_index_ms": off_summary["p50"],
+            "first_search_after_off_ms": off_search_summary["p50"],
+            "incremental_update_off_ms": incremental_summary["p50"],
             "reuse_strict_index_ms": strict_summary["p50"],
             "reuse_auto_index_ms": auto_summary["p50"],
             "first_search_after_strict_ms": strict_search_summary["p50"],
@@ -213,6 +233,8 @@ def measure_for_binary(
         }
         percentiles = {
             "reuse_off_index_ms": off_summary,
+            "first_search_after_off_ms": off_search_summary,
+            "incremental_update_off_ms": incremental_summary,
             "reuse_strict_index_ms": strict_summary,
             "reuse_auto_index_ms": auto_summary,
             "first_search_after_strict_ms": strict_search_summary,
@@ -273,6 +295,20 @@ def main() -> int:
         "reuse_off_index_ms": round(
             regression_pct(baseline["reuse_off_index_ms"], candidate["reuse_off_index_ms"]), 2
         ),
+        "first_search_after_off_ms": round(
+            regression_pct(
+                baseline["first_search_after_off_ms"],
+                candidate["first_search_after_off_ms"],
+            ),
+            2,
+        ),
+        "incremental_update_off_ms": round(
+            regression_pct(
+                baseline["incremental_update_off_ms"],
+                candidate["incremental_update_off_ms"],
+            ),
+            2,
+        ),
         "candidate_strict_vs_off_pct": round(
             relative_pct(candidate["reuse_off_index_ms"], candidate["reuse_strict_index_ms"]), 2
         ),
@@ -283,6 +319,8 @@ def main() -> int:
 
     limits = {
         "reuse_off_index_ms": 5.0,
+        "first_search_after_off_ms": 5.0,
+        "incremental_update_off_ms": 10.0,
         "candidate_strict_vs_off_pct": 10.0,
         "candidate_auto_vs_off_pct": 10.0,
     }

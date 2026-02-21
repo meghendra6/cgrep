@@ -29,6 +29,9 @@ jobs:
           cargo build --release
           cp target/release/cgrep /tmp/cgrep-candidate-bin
 
+      - name: Run deterministic validation workflow
+        run: CGREP_BIN=/tmp/cgrep-candidate-bin bash scripts/validate_all.sh
+
       - name: Build baseline binary (merge-base with main)
         run: |
           git fetch --no-tags --depth=1 origin main
