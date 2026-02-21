@@ -64,6 +64,8 @@ struct AgentExpandPayload {
 struct AgentHintEntry {
     id: String,
     path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    id_path: Option<String>,
     line: usize,
     updated_at: u64,
 }
@@ -283,19 +285,25 @@ pub fn run_plan(query: &str, options: &AgentPlanOptions) -> Result<()> {
             status: "planned".to_string(),
             result_count: None,
         };
-        match run_cgrep_json::<PlanMapPayload>(&execution_root, "map", &args) {
-            Ok(map_payload) => {
-                step.status = "executed".to_string();
-                step.result_count = Some(map_payload.entries.len());
+        // Keep planner latency bounded on very large unscoped repositories.
+        // Execute map only when caller explicitly scopes planning with --path.
+        if options.path.is_some() {
+            match run_cgrep_json::<PlanMapPayload>(&execution_root, "map", &args) {
+                Ok(map_payload) => {
+                    step.status = "executed".to_string();
+                    step.result_count = Some(map_payload.entries.len());
+                }
+                Err(code) => {
+                    step.status = "failed".to_string();
+                    payload.diagnostics.push(AgentPlanDiagnostic {
+                        code,
+                        message: "map step failed".to_string(),
+                        step_id: Some(step_id.clone()),
+                    });
+                }
             }
-            Err(code) => {
-                step.status = "failed".to_string();
-                payload.diagnostics.push(AgentPlanDiagnostic {
-                    code,
-                    message: "map step failed".to_string(),
-                    step_id: Some(step_id.clone()),
-                });
-            }
+        } else {
+            step.reason = "Capture structure on demand; skipped execution for unscoped planning to keep latency bounded.".to_string();
         }
         payload.steps.push(step);
     }
@@ -914,18 +922,30 @@ pub(crate) fn persist_expand_hints(
         if hint.line == 0 || hint.path.is_empty() {
             continue;
         }
+        let id_path = hint
+            .id_path
+            .as_deref()
+            .filter(|path| !path.is_empty())
+            .unwrap_or(hint.path.as_str())
+            .to_string();
         let id = match hint.id {
             Some(id) => id,
             None => {
                 if hint.snippet.is_empty() {
                     continue;
                 }
-                stable_result_id(&hint.path, hint.line, &hint.snippet)
+                stable_result_id(&id_path, hint.line, &hint.snippet)
             }
+        };
+        let entry_id_path = if id_path == hint.path {
+            None
+        } else {
+            Some(id_path)
         };
         let entry = AgentHintEntry {
             id: id.clone(),
             path: hint.path,
+            id_path: entry_id_path,
             line: hint.line,
             updated_at: now,
         };
@@ -955,6 +975,7 @@ pub(crate) fn persist_expand_hints(
 pub(crate) struct AgentHintInput {
     pub id: Option<String>,
     pub path: String,
+    pub id_path: Option<String>,
     pub line: usize,
     pub snippet: String,
 }
@@ -1019,8 +1040,15 @@ fn resolve_from_hint(
     }
 
     let snippet = line_to_snippet(lines[hint.line - 1].as_str());
-    let actual_id = stable_result_id(&hint.path, hint.line, &snippet);
-    if actual_id != hint.id {
+    let id_path = hint.id_path.as_deref().unwrap_or(hint.path.as_str());
+    let mut id_matches = stable_result_id(id_path, hint.line, &snippet) == hint.id;
+    if !id_matches && hint.id_path.is_none() {
+        if let Some(scope_name) = search_root.file_name().and_then(|name| name.to_str()) {
+            let prefixed_id_path = format!("{scope_name}/{}", hint.path);
+            id_matches = stable_result_id(&prefixed_id_path, hint.line, &snippet) == hint.id;
+        }
+    }
+    if !id_matches {
         return None;
     }
 
@@ -1075,14 +1103,14 @@ fn normalize_path(path: &Path) -> PathBuf {
 
 fn line_to_snippet(line: &str) -> String {
     let trimmed = line.trim();
-    if trimmed.len() <= 150 {
-        trimmed.to_string()
-    } else {
-        format!("{}...", &trimmed[..150])
+    let mut char_indices = trimmed.char_indices();
+    match char_indices.nth(150) {
+        Some((cutoff, _)) => format!("{}...", &trimmed[..cutoff]),
+        None => trimmed.to_string(),
     }
 }
 
-fn stable_result_id(path: &str, line: usize, snippet: &str) -> String {
+pub(crate) fn stable_result_id(path: &str, line: usize, snippet: &str) -> String {
     let payload = format!("{}:{}:{}", path, line, snippet);
     let hash = blake3::hash(payload.as_bytes());
     hash.to_hex()[..16].to_string()
@@ -1136,6 +1164,7 @@ mod tests {
         let hints = vec![AgentHintInput {
             id: None,
             path: "src/lib.rs".to_string(),
+            id_path: None,
             line: 3,
             snippet: "fn alpha() {}".to_string(),
         }];
@@ -1145,5 +1174,16 @@ mod tests {
         let only = map.values().next().expect("entry");
         assert_eq!(only.path, "src/lib.rs");
         assert_eq!(only.line, 3);
+    }
+
+    #[test]
+    fn line_to_snippet_handles_multibyte_boundaries() {
+        let mut raw = "a".repeat(149);
+        raw.push('’');
+        raw.push_str(" trailing text to exceed the snippet threshold");
+        let snippet = line_to_snippet(&raw);
+        assert!(snippet.ends_with("..."));
+        assert_eq!(snippet.chars().count(), 153);
+        assert!(snippet.contains('’'));
     }
 }

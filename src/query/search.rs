@@ -663,6 +663,7 @@ pub fn run(
                         result.line.map(|line| crate::query::agent::AgentHintInput {
                             id: result.result_id.clone(),
                             path: normalize_hint_path(&result.path, &search_root, &workspace_root),
+                            id_path: Some(result.path.clone()),
                             line,
                             snippet: result.snippet.clone(),
                         })

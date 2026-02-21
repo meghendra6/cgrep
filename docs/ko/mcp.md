@@ -70,6 +70,8 @@ printf '%s\n' \
 ## 노출 MCP 도구
 
 - `cgrep_search`
+- `cgrep_agent_locate`
+- `cgrep_agent_expand`
 - `cgrep_read`
 - `cgrep_map`
 - `cgrep_symbols`
@@ -82,6 +84,8 @@ printf '%s\n' \
 ## 도구 인자 참고
 
 - MCP 도구는 optional `cwd`를 받아 상대경로 해석 기준을 고정할 수 있습니다.
+- `cgrep_search`는 기본적으로 balanced 출력 예산과 `path_alias`/`dedupe_context`/`suppress_boilerplate`를 사용합니다(명시적으로 비활성화하지 않는 한).
+- `cgrep_search`는 기본적으로 `auto_index=true`입니다. 인덱스가 없으면 bootstrap 인덱싱 1회를 시도하고, 실패 시 scan으로 폴백합니다.
 - `cgrep_search`는 `-n`, `--help`처럼 `-`로 시작하는 쿼리를 리터럴 검색어로 처리합니다.
 - `cgrep_search`는 빈/공백 쿼리를 일관되게 거부합니다 (`regex=true` 포함).
 - `cgrep_search` 결과 `path`는 재사용 가능하도록 유지됩니다:

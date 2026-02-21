@@ -35,6 +35,9 @@ Planner options:
 - `--max-candidates <n>`: cap final candidates (default `5`)
 - `--budget <tight|balanced|full|off>`: reused for locate stage
 - `--path`, `--changed`, `--mode`: forwarded to locate strategy
+- map execution policy:
+  - with `--path`: planner executes `map`
+  - without `--path`: planner keeps `map` as `planned` to bound latency on large repos
 
 `json2` payload fields:
 - `meta`: query/profile/budget/strategy and repository fingerprint/version info

@@ -24,6 +24,7 @@ nav:
   - Agent Workflow: agent.md
   - MCP: mcp.md
   - Indexing and Watch: indexing-watch.md
+  - Operations: operations.md
   - Configuration: configuration.md
   - Embeddings: embeddings.md
   - Benchmark:
@@ -38,6 +39,7 @@ nav:
       - 에이전트 워크플로: ko/agent.md
       - MCP: ko/mcp.md
       - 인덱싱과 Watch: ko/indexing-watch.md
+      - 운영 가이드: ko/operations.md
       - 설정: ko/configuration.md
       - 임베딩: ko/embeddings.md
       - 문제 해결: ko/troubleshooting.md

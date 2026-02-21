@@ -22,6 +22,20 @@ This single workflow verifies:
 - doctor flow (`scripts/doctor.sh`) when repository-integrations files are present
 - docs local-link sanity checks (README + docs hub files)
 
+## Docs Site Validation (GitHub Pages)
+
+Local preview:
+
+```bash
+mkdocs serve
+```
+
+Strict build parity with CI (`docs-pages` workflow):
+
+```bash
+mkdocs build --strict
+```
+
 ## Performance Gate
 
 ```bash
@@ -116,5 +130,4 @@ Outputs:
 - `docs/benchmarks/pytorch-codex-agent-efficiency.md`
 - `local/benchmarks/pytorch-codex-agent-efficiency.json` (local-only)
 
-Latest checked snapshot (`2026-02-18`, `runs=1`, `gpt-5-codex`, `medium`):
-- baseline `89,764` -> cgrep `21,092` billable tokens (`76.5%` reduction)
+Latest measured snapshot is maintained in the benchmark document.

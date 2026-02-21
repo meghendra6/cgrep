@@ -15,6 +15,7 @@
 | `cgrep index` (`ix`, `i`) | 인덱스 생성/재생성 |
 | `cgrep watch` (`wt`, `w`) | 파일 변경 감시 후 재인덱싱 |
 | `cgrep daemon <start|status|stop>` (`bg`) | 백그라운드 watch daemon 관리 |
+| `cgrep status` (`st`) | basic/full 준비 상태 + 백그라운드 인덱스 상태 조회 |
 | `cgrep mcp <serve|install|uninstall>` | MCP 서버 및 host 설정 연동 |
 | `cgrep agent <...>` (`a`) | 에이전트 plan/locate/expand + 연동 설치 |
 | `cgrep completions <shell>` | 셸 자동완성 생성 |
@@ -84,6 +85,48 @@ cgrep search "token refresh" -t rust -p src/
 cgrep search "retry logic" -u
 ```
 
+## 인덱스 플래그
+
+```bash
+# 기본 증분 인덱스 경로(매니페스트 사용)
+cgrep index
+
+# 매니페스트 기준 추가/수정/삭제 diff 출력
+cgrep index --print-diff
+
+# 문서 재인덱싱 없이 매니페스트 메타데이터만 갱신
+cgrep index --manifest-only --print-diff
+
+# 매니페스트 경로 비활성화(legacy 증분 경로 사용)
+cgrep index --no-manifest
+
+# 전체 인덱스를 백그라운드에서 빌드하고 즉시 반환
+cgrep index --background
+
+# 로컬 호환 캐시 스냅샷 재사용(HEAD 정확 일치)
+cgrep index --reuse strict
+
+# 로컬 근사 스냅샷 재사용
+cgrep index --reuse auto
+
+# 재사용 비활성화(기본값)
+cgrep index --reuse off
+```
+
+## Status 가이드
+
+```bash
+# 사람 친화 출력
+cgrep status
+
+# 자동화/에이전트용 구조화 출력
+cgrep --format json2 --compact status
+```
+
+`status`에는 재사용 시도 시 `reuse` 정보가 선택적으로 포함됩니다:
+- `mode`, `decision`, `active`
+- `source`, `snapshot_key`, `repo_key`, `reason` (가능한 경우)
+
 ## 검색 가이드
 
 `search`(또는 별칭 `s`)를 명시적으로 사용하세요.
@@ -104,6 +147,7 @@ cgrep search "<query>" \
   --no-ignore \
   -u, --changed [REV] \
   -M, --mode keyword|semantic|hybrid \
+  --explain \
   -B, --budget tight|balanced|full|off \
   -P, --profile human|agent|fast
 ```
@@ -132,6 +176,34 @@ cgrep search "token refresh" --mode hybrid    # embeddings + index 필요
 하위 호환 별칭(권장하지 않음):
 - `--keyword`, `--semantic`, `--hybrid` (대신 `--mode` 사용)
 
+### Keyword 랭킹 + explain
+
+```bash
+# keyword 모드 상위 결과 점수 분해(결정적 출력)
+cgrep --format json2 --compact search "target_fn" --explain
+```
+
+랭킹 참고:
+- 다중 신호 랭킹은 `[ranking] enabled = true`일 때만 적용됩니다.
+- 기본값(`enabled = false`)은 기존 keyword 정렬을 유지합니다.
+- 쿼리 분류는 결정적 규칙을 사용합니다:
+  - `identifier-like`: 공백 없는 단일 토큰이며 `[A-Za-z0-9_:. $]` 문자만 포함
+  - `phrase-like`: 그 외(공백 포함)
+- 동점 처리 순서:
+  1. 최종 점수 (내림차순)
+  2. path (오름차순)
+  3. line (오름차순)
+  4. snippet (오름차순)
+
+`--explain`은 상위 K개 결과(`ranking.explain_top_k`, 기본 `5`)에 대해 다음 항목을 출력합니다:
+- `bm25`
+- `path_boost` (언어 필터 매치 가중치 포함)
+- `symbol_boost`
+- `changed_boost`
+- `kind_boost`
+- `penalties`
+- `final_score`
+
 ### Budget 프리셋
 
 | 프리셋 | 목적 |
@@ -157,6 +229,7 @@ cgrep search --help-advanced
 
 자주 쓰는 고급 플래그:
 - `--no-index`, `--fuzzy`
+- `--explain`
 - `--agent-cache`, `--cache-ttl`
 - `--context-pack`
 - `--max-chars-per-snippet`, `--max-context-chars`, `--max-total-chars`
