@@ -2,7 +2,7 @@
 
 Local-first code search and navigation for users and AI agents.
 
-Current release: **v1.5.1**
+Current release: **v1.5.2**
 
 ## Start By Goal
 
@@ -42,7 +42,7 @@ cgrep --format json2 --compact agent plan "trace authentication middleware flow"
 
 - [Benchmark: Agent Token Efficiency (PyTorch)](./benchmarks/pytorch-agent-token-efficiency.md)
 - [Benchmark: Codex Agent Efficiency (PyTorch)](./benchmarks/pytorch-codex-agent-efficiency.md)
-- Latest Codex snapshot (February 21, 2026 UTC): cgrep billable tokens **51,035** vs baseline **104,456** (**51.1%** reduction, `runs=1`).
+- Latest Codex snapshot (February 21, 2026 UTC): cgrep billable tokens **41,011** vs baseline **114,060** (**64.0%** reduction, `runs=1`).
 - Latest measured numbers are tracked in each benchmark page.
 
 ## Language And Site

@@ -31,6 +31,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Search timing fields (for example `elapsed_ms`) are intentionally informational and should not be used as deterministic ordering keys.
 - Docs link sanity checks validate repository-local links in core docs targets; external URL health remains out of scope.
 
+## [1.5.2] - 2026-02-21
+
+### Changed
+- Bumped package version to `v1.5.2` and synchronized current-release markers across `Cargo.toml`, `README.md`, and docs hubs (EN/KO).
+- Updated installation verification snippets to use `TAG=v1.5.2` in both English and Korean docs.
+- Refreshed Codex benchmark methodology so baseline runs prohibit `cgrep` but allow autonomous non-cgrep retrieval, while cgrep mode requires explicit cgrep usage.
+- Hardened benchmark command-policy checks for determinism (`--help` token matching, shell-control rejection, tool allowlists, exact cgrep binary/subcommand validation).
+- Refreshed Codex benchmark snapshot to the latest measured run (`114,060` -> `41,011`, `64.0%` billable-token reduction, `runs=1`).
+- Reviewed and polished docs wording for newly-added operational/validation features so README and docs hubs remain concise and consistent.
+
 ## [1.5.1] - 2026-02-19
 
 ### Changed
