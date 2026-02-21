@@ -7,15 +7,18 @@ pub mod install;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{mpsc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
 const PROTOCOL_VERSION: &str = "2024-11-05";
 const DEFAULT_MCP_TOOL_TIMEOUT_MS: u64 = 45_000;
+const DEFAULT_MCP_TOOL_MAX_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
+const PIPE_DRAIN_GRACE_MS: u64 = 250;
+const MIN_PIPE_DRAIN_WAIT_MS: u64 = 1_000;
 const AUTO_INDEX_FAILURE_TTL_MS: u64 = 60_000;
 static AUTO_INDEX_FAILURES: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
 
@@ -799,19 +802,59 @@ fn run_cgrep(args: &[String], cwd: Option<&str>) -> Result<String, String> {
     let mut child = command
         .spawn()
         .map_err(|e| format!("failed to execute cgrep: {}", e))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "failed to capture cgrep stdout".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "failed to capture cgrep stderr".to_string())?;
+    let max_output_bytes = mcp_tool_max_output_bytes();
+    let stdout_reader = spawn_pipe_reader(stdout, "stdout", max_output_bytes);
+    let stderr_reader = spawn_pipe_reader(stderr, "stderr", max_output_bytes);
+
     let timeout = mcp_tool_timeout();
     let started_at = Instant::now();
+    let mut captured_stdout: Option<Vec<u8>> = None;
+    let mut captured_stderr: Option<Vec<u8>> = None;
 
-    loop {
-        match child
-            .try_wait()
-            .map_err(|e| format!("failed to wait for cgrep: {}", e))?
-        {
-            Some(_) => break,
-            None => {
+    let status = loop {
+        if captured_stdout.is_none() {
+            match poll_pipe_reader(&stdout_reader, "stdout") {
+                Ok(Some(bytes)) => captured_stdout = Some(bytes),
+                Ok(None) => {}
+                Err(err) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    drain_pipe_reader(&stdout_reader);
+                    drain_pipe_reader(&stderr_reader);
+                    return Err(err);
+                }
+            }
+        }
+        if captured_stderr.is_none() {
+            match poll_pipe_reader(&stderr_reader, "stderr") {
+                Ok(Some(bytes)) => captured_stderr = Some(bytes),
+                Ok(None) => {}
+                Err(err) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    drain_pipe_reader(&stdout_reader);
+                    drain_pipe_reader(&stderr_reader);
+                    return Err(err);
+                }
+            }
+        }
+
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
                 if started_at.elapsed() >= timeout {
                     let _ = child.kill();
                     let _ = child.wait();
+                    drain_pipe_reader(&stdout_reader);
+                    drain_pipe_reader(&stderr_reader);
                     return Err(format!(
                         "cgrep MCP tool call timed out after {}ms. Retry with narrower scope (`path`, `glob`, or `changed`).",
                         timeout.as_millis()
@@ -819,17 +862,29 @@ fn run_cgrep(args: &[String], cwd: Option<&str>) -> Result<String, String> {
                 }
                 thread::sleep(Duration::from_millis(10));
             }
+            Err(err) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                drain_pipe_reader(&stdout_reader);
+                drain_pipe_reader(&stderr_reader);
+                return Err(format!("failed to wait for cgrep: {err}"));
+            }
         }
-    }
+    };
 
-    let output = child
-        .wait_with_output()
-        .map_err(|e| format!("failed to read cgrep output: {}", e))?;
+    let pipe_wait = output_drain_wait(timeout, started_at);
+    let stdout_bytes = match captured_stdout.take() {
+        Some(bytes) => bytes,
+        None => wait_pipe_reader(&stdout_reader, "stdout", pipe_wait)?,
+    };
+    let stderr_bytes = match captured_stderr.take() {
+        Some(bytes) => bytes,
+        None => wait_pipe_reader(&stderr_reader, "stderr", pipe_wait)?,
+    };
+    let stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
+    let stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    if output.status.success() {
+    if status.success() {
         Ok(stdout.trim_end().to_string())
     } else {
         let mut msg = String::new();
@@ -843,10 +898,91 @@ fn run_cgrep(args: &[String], cwd: Option<&str>) -> Result<String, String> {
             msg.push_str(stdout.trim());
         }
         if msg.is_empty() {
-            msg = format!("cgrep exited with status {}", output.status);
+            msg = format!("cgrep exited with status {status}");
         }
         Err(msg)
     }
+}
+
+fn spawn_pipe_reader<R>(
+    mut pipe: R,
+    stream: &'static str,
+    max_output_bytes: usize,
+) -> mpsc::Receiver<Result<Vec<u8>, String>>
+where
+    R: Read + Send + 'static,
+{
+    let (tx, rx) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let result = read_pipe_with_limit(&mut pipe, stream, max_output_bytes);
+        let _ = tx.send(result);
+    });
+    rx
+}
+
+fn read_pipe_with_limit<R: Read>(
+    pipe: &mut R,
+    stream: &'static str,
+    max_output_bytes: usize,
+) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        let read = pipe
+            .read(&mut chunk)
+            .map_err(|err| format!("failed to read cgrep {stream}: {err}"))?;
+        if read == 0 {
+            break;
+        }
+        if out.len().saturating_add(read) > max_output_bytes {
+            return Err(format!(
+                "cgrep MCP tool call output exceeded {} bytes. Retry with narrower scope (`path`, `glob`, or `changed`).",
+                max_output_bytes
+            ));
+        }
+        out.extend_from_slice(&chunk[..read]);
+    }
+    Ok(out)
+}
+
+fn poll_pipe_reader(
+    reader: &mpsc::Receiver<Result<Vec<u8>, String>>,
+    stream: &'static str,
+) -> Result<Option<Vec<u8>>, String> {
+    match reader.try_recv() {
+        Ok(Ok(bytes)) => Ok(Some(bytes)),
+        Ok(Err(err)) => Err(err),
+        Err(mpsc::TryRecvError::Empty) => Ok(None),
+        Err(mpsc::TryRecvError::Disconnected) => {
+            Err(format!("failed to receive cgrep {stream} output"))
+        }
+    }
+}
+
+fn wait_pipe_reader(
+    reader: &mpsc::Receiver<Result<Vec<u8>, String>>,
+    stream: &'static str,
+    timeout: Duration,
+) -> Result<Vec<u8>, String> {
+    match reader.recv_timeout(timeout) {
+        Ok(Ok(bytes)) => Ok(bytes),
+        Ok(Err(err)) => Err(err),
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            Err(format!("timed out while draining cgrep {stream} output"))
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err(format!("failed to receive cgrep {stream} output"))
+        }
+    }
+}
+
+fn drain_pipe_reader(reader: &mpsc::Receiver<Result<Vec<u8>, String>>) {
+    let _ = reader.recv_timeout(Duration::from_millis(PIPE_DRAIN_GRACE_MS));
+}
+
+fn output_drain_wait(timeout: Duration, started_at: Instant) -> Duration {
+    let remaining = timeout.saturating_sub(started_at.elapsed());
+    remaining.max(Duration::from_millis(MIN_PIPE_DRAIN_WAIT_MS))
 }
 
 fn mcp_tool_timeout() -> Duration {
@@ -855,6 +991,14 @@ fn mcp_tool_timeout() -> Duration {
         .and_then(|raw| raw.trim().parse::<u64>().ok())
         .unwrap_or(DEFAULT_MCP_TOOL_TIMEOUT_MS);
     Duration::from_millis(timeout_ms)
+}
+
+fn mcp_tool_max_output_bytes() -> usize {
+    std::env::var("CGREP_MCP_TOOL_MAX_OUTPUT_BYTES")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_MCP_TOOL_MAX_OUTPUT_BYTES)
 }
 
 fn tool_definitions() -> Vec<Value> {
