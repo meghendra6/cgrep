@@ -110,10 +110,9 @@ Notes:
 For MCP usage:
 - Codex setup uses `cgrep agent install codex` (not `cgrep mcp install codex`).
 - `cgrep mcp install` host values: `claude-code`, `cursor`, `windsurf`, `vscode`, `claude-desktop`.
-- `cgrep_search` treats dash-prefixed queries as literal text automatically.
 - Pass optional `cwd` in MCP tool arguments to pin relative-path resolution.
 - After `cgrep agent install codex`, restart the current Codex session so updated MCP config is reloaded.
-- MCP install writes `command = "cgrep"` by default, so binary updates apply without reinstalling MCP config.
+- Host-specific behavior and tool details: `docs/mcp.md`.
 
 ## Core Commands
 
@@ -147,8 +146,8 @@ cgrep a p "task"      # agent plan
 PyTorch scenario-completion benchmark snapshots:
 - Agent token-efficiency benchmark: `docs/benchmarks/pytorch-agent-token-efficiency.md`
 - Codex real-agent benchmark: `docs/benchmarks/pytorch-codex-agent-efficiency.md`
-- Latest Codex snapshot (`2026-02-18`, `gpt-5-codex`, `runs=1`):
-  baseline `89,764` -> cgrep `21,092` billable tokens (`76.5%` reduction).
+- Latest Codex snapshot (`2026-02-21`, `gpt-5-codex`, `runs=1`):
+  baseline `114,060` -> cgrep `41,011` billable tokens (`64.0%` reduction).
 
 ## Documentation
 
@@ -168,7 +167,7 @@ PyTorch scenario-completion benchmark snapshots:
 
 ## Project Notes
 
-- Current release: **v1.5.1**
+- Current release: **v1.5.2**
 - Changelog: `CHANGELOG.md`
 - Comparison material: `COMPARISON.md`
 - Contributing guide: `CONTRIBUTING.md`
