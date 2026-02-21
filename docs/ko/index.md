@@ -42,6 +42,7 @@ cgrep --format json2 --compact agent plan "trace authentication middleware flow"
 
 - [에이전트 토큰 효율 벤치마크 (PyTorch, 영문)](../benchmarks/pytorch-agent-token-efficiency.md)
 - [Codex 에이전트 효율 벤치마크 (PyTorch, 영문)](../benchmarks/pytorch-codex-agent-efficiency.md)
+- 최신 Codex 스냅샷(UTC 2026-02-21): cgrep 청구 토큰 **51,035**, baseline **104,456** 대비 **51.1% 감소** (`runs=1`).
 - 최신 측정 수치는 각 벤치마크 문서에 유지됩니다.
 
 ## 언어/사이트

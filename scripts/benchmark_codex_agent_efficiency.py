@@ -4,8 +4,8 @@
 """Benchmark Codex agent token efficiency on a local PyTorch checkout.
 
 This benchmark runs real `codex exec` sessions in two modes:
-1) baseline: grep/sed/cat style retrieval
-2) cgrep: cgrep-based retrieval
+1) baseline: autonomous retrieval with cgrep prohibited
+2) cgrep: cgrep-mandatory retrieval
 
 It records provider usage telemetry from Codex events (`turn.completed.usage`).
 """
@@ -20,8 +20,10 @@ import math
 import os
 import platform
 import re
+import shlex
 import statistics
 import subprocess
+import sys
 import tempfile
 import textwrap
 import time
@@ -119,6 +121,7 @@ class CodexRun:
     objective_met: bool
     markers_met: bool
     command_policy_ok: bool
+    required_tool_used: bool
     command_count: int
     input_tokens: int
     cached_input_tokens: int
@@ -208,34 +211,100 @@ def is_bootstrap_agents_command(cmd: str) -> bool:
     )
 
 
-def disallowed_for_mode(mode: str, cmd: str) -> bool:
-    normalized = cmd.lower()
+BASELINE_ALLOWED_EXECUTABLES = {
+    "cat",
+    "git",
+    "grep",
+    "head",
+    "rg",
+    "sed",
+    "tail",
+}
+BASELINE_ALLOWED_GIT_SUBCOMMANDS = {"grep", "ls-files", "rev-parse", "show", "status"}
+SHELL_CONTROL_RE = re.compile(r"(?:&&|\|\||;|\|)")
+DANGEROUS_TOKEN_RE = re.compile(r"[`]|[$][(]|[<>]")
+
+
+def parse_command_argv(cmd: str) -> list[str] | None:
+    try:
+        return shlex.split(cmd, posix=True)
+    except ValueError:
+        return None
+
+
+def command_has_shell_controls(cmd: str) -> bool:
+    if SHELL_CONTROL_RE.search(cmd):
+        return True
+    argv = parse_command_argv(cmd)
+    if not argv:
+        return True
+    return any(DANGEROUS_TOKEN_RE.search(token) is not None for token in argv)
+
+
+def command_executable(cmd: str) -> str | None:
+    argv = parse_command_argv(cmd)
+    if not argv:
+        return None
+    return Path(argv[0]).name.lower()
+
+
+def is_allowed_baseline_command(cmd: str) -> bool:
+    executable = command_executable(cmd)
+    if executable is None or executable not in BASELINE_ALLOWED_EXECUTABLES:
+        return False
+    if executable != "git":
+        return True
+    argv = parse_command_argv(cmd)
+    if not argv or len(argv) < 2:
+        return False
+    return argv[1] in BASELINE_ALLOWED_GIT_SUBCOMMANDS
+
+
+def is_cgrep_command(cmd: str) -> bool:
+    executable = command_executable(cmd)
+    return executable is not None and executable.endswith("cgrep")
+
+
+def cgrep_subcommand(cmd: str) -> str | None:
+    argv = parse_command_argv(cmd)
+    if not argv or len(argv) < 2 or not is_cgrep_command(cmd):
+        return None
+    return argv[1].lower()
+
+
+def is_allowed_cgrep_command(cmd: str, cgrep_bin: Path) -> bool:
+    argv = parse_command_argv(cmd)
+    if not argv:
+        return False
+    candidate = Path(argv[0]).expanduser()
+    if not candidate.is_absolute():
+        return False
+    try:
+        if candidate.resolve() != cgrep_bin.resolve():
+            return False
+    except OSError:
+        return False
+    subcommand = cgrep_subcommand(cmd)
+    return subcommand in {"s", "search", "d", "definition"}
+
+
+def disallowed_for_mode(mode: str, cmd: str, cgrep_bin: Path) -> bool:
+    raw_cmd = cmd.strip()
+    normalized = raw_cmd.lower()
     if is_bootstrap_agents_command(normalized):
         return False
+    if re.search(r"(?:^|\s)--help(?:\s|$)", normalized) is not None:
+        return True
+    if command_has_shell_controls(raw_cmd):
+        return True
     if mode == "baseline":
-        if " --help" in normalized:
+        if is_cgrep_command(raw_cmd):
             return True
-        return (" cgrep" in f" {normalized}") or re.search(r"(^|\s)rg(\s|$)", normalized) is not None
+        return not is_allowed_baseline_command(raw_cmd)
     if mode == "cgrep":
-        if " --help" in normalized:
+        if not is_cgrep_command(raw_cmd):
             return True
-        if re.search(r"(^|\s)cgrep(\s|$)", normalized) is None and "/cgrep" not in normalized:
-            return True
-        match = re.search(r"(?:^|\s)(?:[\w./-]*cgrep)\s+([\w-]+)", normalized)
-        if match is None:
-            return True
-        subcommand = match.group(1)
-        if subcommand not in {"s", "search", "d", "definition"}:
-            return True
-        if re.search(r"(^|\s)agent(\s|$)", normalized) is not None:
-            return True
-        if re.search(r"(^|\s)read(\s|$)", normalized) is not None:
-            return True
-        if re.search(r"(^|\s)rg(\s|$)", normalized) is not None:
-            return True
-        if re.search(r"(^|\s)grep(\s|$)", normalized) is not None:
-            return True
-        if re.search(r"(^|\s)find(\s|$)", normalized) is not None:
+        if not is_allowed_cgrep_command(raw_cmd, cgrep_bin):
             return True
     return False
 
@@ -273,32 +342,26 @@ def build_prompt(mode: str, scenario: Scenario, cgrep_bin: Path) -> str:
     groups = "; ".join(" OR ".join(group) for group in scenario.completion_groups)
     if mode == "baseline":
         rules = (
-            "- Do NOT use cgrep or rg.\n"
-            "- Use only grep-based retrieval.\n"
-            f"- First command MUST be:\n"
-            f"  grep -R -n -I -E --exclude-dir=.git -m 200 -e '{scenario.grep_pattern}' .\n"
-            "- If needed, run at most one additional grep command with a narrower pattern/path.\n"
+            "- Do NOT use cgrep commands.\n"
+            "- Choose retrieval commands autonomously from: grep/rg/sed/cat/head/tail/git.\n"
+            "- At least one retrieval command is required.\n"
+            "- Stop as soon as marker groups are satisfied.\n"
+            "- Do NOT wrap commands with `bash -lc`.\n"
             "- Do not run `--help`.\n"
             "- Do not edit files.\n"
             "- Keep commands minimal."
         )
     else:
-        cgrep_steps = []
-        for idx, command in enumerate(scenario.cgrep_commands, start=1):
-            cgrep_steps.append(f"{idx}. {cgrep_bin} {command}")
-        cgrep_plan = "\n".join(cgrep_steps)
         rules = (
             f"- Use only this cgrep binary: {cgrep_bin}\n"
+            "- You MUST execute at least one cgrep command.\n"
             "- Allowed subcommands are only `search`/`s` and `definition`/`d`.\n"
-            "- Start with command 1 and execute commands in order.\n"
-            "- Run the next command only when evidence is still insufficient.\n"
-            "- Do not run commands outside this list:\n"
-            f"{cgrep_plan}\n"
+            "- Choose cgrep commands autonomously and keep them minimal.\n"
             "- Stop as soon as marker groups are satisfied.\n"
             "- Do NOT wrap commands with `bash -lc`.\n"
             "- Do NOT use `cgrep agent`, `cgrep read`, grep/rg/find, or any `--help` command.\n"
             "- Do not edit files.\n"
-            "- If evidence is still insufficient after the listed commands, return `objective_met: false` instead of running extra commands."
+            "- If evidence is still insufficient, return `objective_met: false`."
         )
     return textwrap.dedent(
         f"""
@@ -361,6 +424,7 @@ def run_codex_mode(
     objective_met = False
     markers_met = False
     command_policy_ok = False
+    required_tool_used = False
     command_count = 0
 
     started = time.perf_counter()
@@ -375,6 +439,7 @@ def run_codex_mode(
             objective_met=False,
             markers_met=False,
             command_policy_ok=False,
+            required_tool_used=False,
             command_count=0,
             input_tokens=0,
             cached_input_tokens=0,
@@ -405,9 +470,9 @@ def run_codex_mode(
         elif etype == "turn.completed":
             usage = event.get("usage", {})
             if isinstance(usage, dict):
-                input_tokens = int(usage.get("input_tokens", 0) or 0)
-                cached_input_tokens = int(usage.get("cached_input_tokens", 0) or 0)
-                output_tokens = int(usage.get("output_tokens", 0) or 0)
+                input_tokens += int(usage.get("input_tokens", 0) or 0)
+                cached_input_tokens += int(usage.get("cached_input_tokens", 0) or 0)
+                output_tokens += int(usage.get("output_tokens", 0) or 0)
         elif etype == "item.completed":
             item = event.get("item", {})
             if not isinstance(item, dict):
@@ -417,7 +482,7 @@ def run_codex_mode(
                 command = item.get("command")
                 if isinstance(command, str):
                     command_items.append(command)
-                    if disallowed_for_mode(mode, command):
+                    if disallowed_for_mode(mode, command, cgrep_bin):
                         disallowed_commands.append(command)
             elif item_type == "agent_message":
                 text = item.get("text")
@@ -429,7 +494,14 @@ def run_codex_mode(
 
     objective_met = bool(final_json.get("objective_met")) if final_json else False
     markers_met = marker_groups_met(final_json, scenario.completion_groups) if final_json else False
-    command_policy_ok = len(disallowed_commands) == 0
+    non_bootstrap_commands = [c for c in command_items if not is_bootstrap_agents_command(c)]
+    if mode == "cgrep":
+        required_tool_used = any(is_allowed_cgrep_command(c, cgrep_bin) for c in non_bootstrap_commands)
+    else:
+        required_tool_used = any(is_allowed_baseline_command(c) for c in non_bootstrap_commands)
+    command_policy_ok = len(disallowed_commands) == 0 and required_tool_used
+    if not required_tool_used:
+        errors.append("required retrieval tool usage not observed")
     command_count = sum(1 for c in command_items if not is_bootstrap_agents_command(c))
     billable_tokens = (input_tokens - cached_input_tokens) + output_tokens
     total_tokens = input_tokens + output_tokens
@@ -449,6 +521,7 @@ def run_codex_mode(
         objective_met=objective_met,
         markers_met=markers_met,
         command_policy_ok=command_policy_ok,
+        required_tool_used=required_tool_used,
         command_count=command_count,
         input_tokens=input_tokens,
         cached_input_tokens=cached_input_tokens,
@@ -504,8 +577,8 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines.append("## What This Measures")
     lines.append("")
     lines.append("- Real `codex exec` runs on a local PyTorch repository.")
-    lines.append("- Baseline mode: grep/sed/cat style retrieval.")
-    lines.append("- cgrep mode: cgrep-based retrieval commands.")
+    lines.append("- Baseline mode: autonomous retrieval with cgrep disallowed.")
+    lines.append("- cgrep mode: cgrep command usage required.")
     lines.append("- Primary metric: Codex provider-reported billable tokens (`input - cached_input + output`).")
     lines.append("")
     lines.append("## Environment")
@@ -540,7 +613,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
         ) * 100.0
     else:
         reduction_all = 0.0
-    lines.append(f"- Total billable tokens (baseline): **{baseline_all['total_billable_tokens']:,}**")
+    lines.append(f"- Total billable tokens (baseline, no cgrep): **{baseline_all['total_billable_tokens']:,}**")
     lines.append(f"- Total billable tokens (cgrep): **{cgrep_all['total_billable_tokens']:,}**")
     lines.append(f"- Billable token reduction: **{reduction_all:.1f}%**")
     lines.append("")
@@ -579,7 +652,7 @@ def main() -> int:
         choices=["minimal", "low", "medium", "high"],
         help="Codex reasoning effort",
     )
-    parser.add_argument("--runs", type=int, default=3, help="Number of runs per scenario/mode")
+    parser.add_argument("--runs", type=int, default=4, help="Number of runs per scenario/mode")
     parser.add_argument("--timeout", type=int, default=600, help="Per Codex run timeout seconds")
     parser.add_argument("--skip-index", action="store_true", help="Skip cgrep index rebuild in target repo")
     parser.add_argument("--json-out", default="local/benchmarks/pytorch-codex-agent-efficiency.json")
@@ -598,6 +671,8 @@ def main() -> int:
         raise SystemExit(f"cgrep binary not found: {cgrep_bin}")
     if args.runs <= 0:
         raise SystemExit("--runs must be > 0")
+    if args.runs % 2 != 0:
+        print("warning: odd --runs value can introduce mode-order imbalance", file=sys.stderr)
 
     # Build index once for cgrep mode consistency.
     index_duration_ms = 0.0
@@ -646,6 +721,7 @@ def main() -> int:
                         "objective_met": run.objective_met,
                         "markers_met": run.markers_met,
                         "command_policy_ok": run.command_policy_ok,
+                        "required_tool_used": run.required_tool_used,
                         "command_count": run.command_count,
                         "input_tokens": run.input_tokens,
                         "cached_input_tokens": run.cached_input_tokens,
