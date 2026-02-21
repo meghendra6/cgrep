@@ -179,13 +179,15 @@ fn cross_feature_matrix_smoke_for_major_option_combinations() {
     assert!(!scoped_results.is_empty());
     let alias_map = scoped["meta"]["path_aliases"].as_object();
     assert!(scoped_results.iter().all(|row| {
-        row["path"].as_str().map(|raw| {
-            let resolved = alias_map
-                .and_then(|aliases| aliases.get(raw))
-                .and_then(Value::as_str)
-                .unwrap_or(raw);
-            resolved.ends_with(".rs")
-        })
+        row["path"]
+            .as_str()
+            .map(|raw| {
+                let resolved = alias_map
+                    .and_then(|aliases| aliases.get(raw))
+                    .and_then(Value::as_str)
+                    .unwrap_or(raw);
+                resolved.ends_with(".rs")
+            })
             .unwrap_or(false)
     }));
 
