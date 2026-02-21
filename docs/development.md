@@ -82,6 +82,27 @@ CI thresholds (median):
 - agent plan regression > `10%`: fail
 - small absolute deltas (`<= 3ms`) are treated as noise for agent-plan perf checks
 
+## Tag-Triggered Release CI
+
+`release` workflow (`.github/workflows/release.yml`) runs when a release tag is pushed.
+Accepted tag forms:
+- `vMAJOR.MINOR.PATCH` (for example `v1.5.2`)
+- `MAJOR.MINOR.PATCH` (for example `1.5.2`)
+
+```bash
+git tag v1.5.2
+git push origin v1.5.2
+```
+
+or
+
+```bash
+git tag 1.5.2
+git push origin 1.5.2
+```
+
+Manual fallback (`workflow_dispatch`) uses the selected commit and publishes with the provided tag input.
+
 ## Release-Ready Checklist
 
 - Build passes (`cargo build`)

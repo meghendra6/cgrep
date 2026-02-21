@@ -4,10 +4,11 @@ on:
   push:
     tags:
       - "v*"
+      - "*.*.*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to release (e.g. v1.2.3)"
+        description: "Tag to release (v1.2.3 or 1.2.3)"
         required: true
         type: string
 
@@ -39,19 +40,22 @@ jobs:
       TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
     steps:
-      - name: Validate tag format
+      - name: Resolve and validate tag
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! "${TAG_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid tag '${TAG_NAME}'. Expected format: vMAJOR.MINOR.PATCH"
+          RAW_TAG="${TAG_NAME}"
+          if [[ ! "${RAW_TAG}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid tag '${RAW_TAG}'. Expected format: vMAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH"
             exit 1
           fi
+          echo "TAG_NAME=${RAW_TAG}" >> "$GITHUB_ENV"
+          echo "TAG_VERSION=${RAW_TAG#v}" >> "$GITHUB_ENV"
 
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.ref }}
           fetch-depth: 0
 
       - name: Validate Cargo version matches tag
@@ -69,9 +73,8 @@ jobs:
             echo "Failed to read package.version from Cargo.toml"
             exit 1
           fi
-          EXPECTED_TAG="v${CARGO_VERSION}"
-          if [[ "${TAG_NAME}" != "${EXPECTED_TAG}" ]]; then
-            echo "Tag (${TAG_NAME}) does not match Cargo.toml version (${EXPECTED_TAG})"
+          if [[ "${TAG_VERSION}" != "${CARGO_VERSION}" ]]; then
+            echo "Tag (${TAG_NAME}) does not match Cargo.toml version (${CARGO_VERSION})"
             exit 1
           fi
 
@@ -171,6 +174,17 @@ jobs:
     env:
       TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     steps:
+      - name: Resolve and validate tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          RAW_TAG="${TAG_NAME}"
+          if [[ ! "${RAW_TAG}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid tag '${RAW_TAG}'. Expected format: vMAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          echo "TAG_NAME=${RAW_TAG}" >> "$GITHUB_ENV"
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -220,6 +234,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
           name: ${{ env.TAG_NAME }}
           generate_release_notes: true
           overwrite_files: true
