@@ -78,6 +78,11 @@ cgrep watch --no-adaptive
 - 재사용 캐시 루트:
   - macOS/Linux: `~/.cache/cgrep/indexes/`
   - Windows: `%LOCALAPPDATA%/cgrep/indexes/`
+- 재사용 스냅샷 레이아웃:
+  - `repo_key/snapshot_key/tantivy/`
+  - `repo_key/snapshot_key/symbols/`
+  - `repo_key/snapshot_key/manifest/`
+  - `repo_key/snapshot_key/metadata.json`
 - 재사용 안전성:
   - 재사용 활성 중 stale/nonexistent 파일은 결과에서 필터링
   - 비호환/손상 스냅샷은 일반 인덱싱으로 폴백

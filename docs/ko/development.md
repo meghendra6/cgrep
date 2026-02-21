@@ -22,6 +22,20 @@ CGREP_BIN=cgrep bash scripts/validate_all.sh
 - 저장소 통합 파일이 있을 때 doctor 흐름(`scripts/doctor.sh`)
 - 문서 로컬 링크 sanity 체크(README + docs 허브 파일)
 
+## 문서 사이트 검증 (GitHub Pages)
+
+로컬 미리보기:
+
+```bash
+mkdocs serve
+```
+
+CI(`docs-pages` 워크플로우)와 동일한 엄격 빌드:
+
+```bash
+mkdocs build --strict
+```
+
 ## 성능 게이트
 
 ```bash
@@ -117,5 +131,4 @@ python3 scripts/benchmark_codex_agent_efficiency.py \
 - `docs/benchmarks/pytorch-codex-agent-efficiency.md`
 - `local/benchmarks/pytorch-codex-agent-efficiency.json` (로컬 전용)
 
-최신 점검 스냅샷 (`2026-02-18`, `runs=1`, `gpt-5-codex`, `medium`):
-- baseline `89,764` -> cgrep `21,092` billable tokens (`76.5%` 절감)
+최신 측정 스냅샷은 벤치마크 문서 본문에 유지됩니다.

@@ -42,8 +42,7 @@ cgrep --format json2 --compact agent plan "trace authentication middleware flow"
 
 - [Benchmark: Agent Token Efficiency (PyTorch)](./benchmarks/pytorch-agent-token-efficiency.md)
 - [Benchmark: Codex Agent Efficiency (PyTorch)](./benchmarks/pytorch-codex-agent-efficiency.md)
-- Latest Codex snapshot (`2026-02-18`, `gpt-5-codex`, `runs=1`):
-  baseline `89,764` -> cgrep `21,092` billable tokens (`76.5%` reduction).
+- Latest measured numbers are tracked in each benchmark page.
 
 ## Language And Site
 
