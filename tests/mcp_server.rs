@@ -822,6 +822,97 @@ fn mcp_tool_call_times_out_when_child_exceeds_timeout_budget() {
 }
 
 #[test]
+fn mcp_map_large_output_does_not_timeout() {
+    let dir = TempDir::new().expect("tempdir");
+    for idx in 0..1_600 {
+        let path = dir.path().join(format!("src/large_{idx:04}.txt"));
+        write_file(&path, "x\n");
+    }
+
+    let mut mcp = McpProc::spawn_with_env(dir.path(), &[("CGREP_MCP_TOOL_TIMEOUT_MS", "3000")]);
+    let _ = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    }));
+
+    let map = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_map",
+            "arguments": {
+                "path": ".",
+                "depth": 2,
+                "cwd": dir.path().to_string_lossy().to_string()
+            }
+        }
+    }));
+
+    assert_ne!(map["result"]["isError"], true);
+    let map_text = map["result"]["content"][0]["text"]
+        .as_str()
+        .expect("map text");
+    let map_json: Value = serde_json::from_str(map_text).expect("map json");
+    assert_eq!(map_json["root"], ".");
+    assert!(
+        map_json["entries"]
+            .as_array()
+            .map(|rows| rows.len())
+            .unwrap_or(0)
+            >= 1_600
+    );
+
+    mcp.stop();
+}
+
+#[test]
+fn mcp_map_returns_error_when_output_exceeds_limit() {
+    let dir = TempDir::new().expect("tempdir");
+    for idx in 0..500 {
+        let path = dir.path().join(format!("src/capped_{idx:04}.txt"));
+        write_file(&path, "x\n");
+    }
+
+    let mut mcp = McpProc::spawn_with_env(
+        dir.path(),
+        &[
+            ("CGREP_MCP_TOOL_TIMEOUT_MS", "5000"),
+            ("CGREP_MCP_TOOL_MAX_OUTPUT_BYTES", "1024"),
+        ],
+    );
+    let _ = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    }));
+
+    let map = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_map",
+            "arguments": {
+                "path": ".",
+                "depth": 2,
+                "cwd": dir.path().to_string_lossy().to_string()
+            }
+        }
+    }));
+    assert_eq!(map["result"]["isError"], true);
+    assert!(map["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("output exceeded"));
+
+    mcp.stop();
+}
+
+#[test]
 fn mcp_references_file_scope_paths_roundtrip_to_read() {
     let dir = TempDir::new().expect("tempdir");
     write_file(
