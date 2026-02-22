@@ -569,6 +569,11 @@ def aggregate_mode(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def render_markdown(payload: dict[str, Any]) -> str:
     summary_all = payload["summary"]["all_cases"]
     rows = payload["results"]
+    scenario_ids = []
+    for row in rows:
+        sid = row.get("scenario_id")
+        if isinstance(sid, str) and sid not in scenario_ids:
+            scenario_ids.append(sid)
     lines: list[str] = []
     lines.append("# PyTorch Codex Agent Efficiency Benchmark")
     lines.append("")
@@ -580,6 +585,19 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines.append("- Baseline mode: autonomous retrieval with cgrep disallowed.")
     lines.append("- cgrep mode: cgrep command usage required.")
     lines.append("- Primary metric: Codex provider-reported billable tokens (`input - cached_input + output`).")
+    lines.append("")
+    lines.append("## Scenario Set")
+    lines.append("")
+    for sid in scenario_ids:
+        lines.append(f"- `{sid}`")
+    lines.append("")
+    lines.append("For each scenario:")
+    lines.append("- Success requires all marker groups to be satisfied from returned evidence.")
+    lines.append("- Baseline allows only `grep/rg/sed/cat/head/tail/git` commands.")
+    lines.append("- cgrep mode requires `cgrep search|s` or `cgrep definition|d` commands.")
+    lines.append("- Disallowed command usage or missing required tool usage marks the run as failed.")
+    lines.append("")
+    lines.append("> Single-run variance can be high. Prefer `--runs >= 2` and compare medians for release decisions.")
     lines.append("")
     lines.append("## Environment")
     lines.append("")

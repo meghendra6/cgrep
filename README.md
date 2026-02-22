@@ -158,8 +158,11 @@ cgrep a p "task"      # agent plan
 PyTorch scenario-completion benchmark snapshots:
 - Agent token-efficiency benchmark: `docs/benchmarks/pytorch-agent-token-efficiency.md`
 - Codex real-agent benchmark: `docs/benchmarks/pytorch-codex-agent-efficiency.md`
-- Latest Codex snapshot (`2026-02-21`, `gpt-5-codex`, `runs=1`):
-  baseline `114,060` -> cgrep `41,011` billable tokens (`64.0%` reduction).
+- Search option performance benchmark: `docs/benchmarks/pytorch-search-options-performance.md`
+- Latest Codex snapshot (`2026-02-22`, `gpt-5-codex`, `runs=1`):
+  baseline `158,242` -> cgrep `107,990` billable tokens (`31.8%` reduction).
+- Same-day repeated run variance observed (`-135.4%` to `+31.8%` total-token delta).
+  For release decisions, use multi-run medians (`--runs >= 2`).
 
 ## Documentation
 

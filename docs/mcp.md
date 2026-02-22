@@ -95,6 +95,7 @@ printf '%s\n' \
 
 - MCP tools accept optional `cwd` to pin relative path resolution.
 - `cgrep_search` defaults to balanced output budget and enables `path_alias`/`dedupe_context`/`suppress_boilerplate` unless explicitly disabled.
+- `cgrep_search` accepts `mode=keyword|semantic|hybrid`. For compatibility, `mode=fast|quick|agent|ai|human|user` is also accepted and treated as `profile`.
 - `cgrep_search`, `cgrep_agent_locate`, `cgrep_symbols`, `cgrep_definition`, `cgrep_references`, `cgrep_callers`, and `cgrep_dependents` default to `auto_index=true`.
 - With `auto_index=true`, MCP bootstraps index on first use when missing.
 - For existing indexes, MCP uses file-change-aware refresh: while the MCP server process is alive it subscribes to filesystem change events, then refreshes on the next MCP tool call only when changes are detected (no periodic background reindex loop).
@@ -106,6 +107,7 @@ printf '%s\n' \
 - `cgrep_search` result `path` values stay reusable:
   workspace-internal scopes return workspace-relative paths, external scopes return absolute paths.
 - `cgrep_read` rejects empty path arguments (`Error: Path cannot be empty`).
+- `cgrep_map` applies `depth=2` by default in MCP mode when depth is omitted, to avoid unbounded root-map timeouts. Increase `depth` explicitly when needed.
 - If MCP server cwd is `/`, relative scopes require `cwd` (or an absolute `path`) to avoid scanning system root by mistake.
 
 ## Config File Targets

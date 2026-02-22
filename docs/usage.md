@@ -47,6 +47,7 @@ cgrep mp -d 2
 - `search`/`symbols`/`definition`/`references`/`callers`/`dependents` and `agent locate|plan` auto-bootstrap and call-driven refresh index by default, so manual `cgrep index` is optional for normal use.
 - CLI auto-index change checks are debounced in tight command loops to reduce repeated scan overhead.
 - `search --no-index` always keeps scan-only behavior.
+- C/C++ symbol navigation treats `.h` headers as C++ and now resolves macro-annotated type declarations (for example `TORCH_API Foo`) in `definition` more reliably.
 
 Validation examples:
 

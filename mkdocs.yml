@@ -30,6 +30,7 @@ nav:
   - Benchmark:
       - Agent Token Efficiency: benchmarks/pytorch-agent-token-efficiency.md
       - Codex Agent Efficiency: benchmarks/pytorch-codex-agent-efficiency.md
+      - Search Option Performance: benchmarks/pytorch-search-options-performance.md
   - Troubleshooting: troubleshooting.md
   - Development: development.md
   - Korean:

@@ -253,3 +253,44 @@ Foo::Foo(int x) {}\n",
     assert_eq!(results[0]["kind"], "struct");
     assert_eq!(results[0]["path"], "sample/Foo.h");
 }
+
+#[test]
+fn definition_cpp_header_with_export_macro_prefers_type_symbol() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(
+        &dir.path().join("sample/TensorIterator.h"),
+        "\
+struct TORCH_API TensorIterator final : public TensorIteratorBase {\n\
+  TensorIterator();\n\
+};\n",
+    );
+
+    let mut index_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    index_cmd
+        .current_dir(dir.path())
+        .args(["index"])
+        .assert()
+        .success();
+
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    let assert = cmd
+        .current_dir(dir.path())
+        .args([
+            "--format",
+            "json",
+            "--compact",
+            "definition",
+            "TensorIterator",
+        ])
+        .assert()
+        .success();
+    let out = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8");
+    let results: Vec<Value> = serde_json::from_str(&out).expect("json");
+
+    assert!(
+        results
+            .iter()
+            .any(|r| r["kind"] == "struct" && r["path"] == "sample/TensorIterator.h"),
+        "expected struct definition in macro-annotated C++ header, got: {results:?}"
+    );
+}

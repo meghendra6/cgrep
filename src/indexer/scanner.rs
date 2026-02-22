@@ -313,8 +313,10 @@ pub fn detect_language(ext: &str) -> Option<String> {
         "py" => Some("python".into()),
         "go" => Some("go".into()),
         "java" => Some("java".into()),
-        "c" | "h" => Some("c".into()),
-        "cpp" | "cc" | "hpp" => Some("cpp".into()),
+        "c" => Some("c".into()),
+        // Many C++ projects (e.g., PyTorch) primarily use `.h` for C++ headers.
+        // Prefer C++ parsing for `.h` so class/struct/type extraction remains accurate.
+        "h" | "cpp" | "cc" | "hpp" => Some("cpp".into()),
         "cs" => Some("csharp".into()),
         "rb" => Some("ruby".into()),
         "php" => Some("php".into()),
@@ -343,6 +345,7 @@ mod tests {
     #[test]
     fn extension_aliases_map_to_expected_languages() {
         assert_eq!(detect_language("cc").as_deref(), Some("cpp"));
+        assert_eq!(detect_language("h").as_deref(), Some("cpp"));
         assert_eq!(detect_language("kts").as_deref(), Some("kotlin"));
         assert!(is_indexable_extension("CC"));
         assert!(is_indexable_extension("KTS"));

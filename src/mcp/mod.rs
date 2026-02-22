@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 const PROTOCOL_VERSION: &str = "2024-11-05";
 const DEFAULT_MCP_TOOL_TIMEOUT_MS: u64 = 45_000;
 const DEFAULT_MCP_TOOL_MAX_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
+const DEFAULT_MCP_MAP_DEPTH: u64 = 2;
 const PIPE_DRAIN_GRACE_MS: u64 = 250;
 const MIN_PIPE_DRAIN_WAIT_MS: u64 = 1_000;
 const AUTO_INDEX_FAILURE_TTL_MS: u64 = 60_000;
@@ -236,6 +237,7 @@ fn tool_search(args: &Value) -> Result<String, String> {
             Err(err) => return Err(err),
         }
     }
+    let (search_mode, search_profile) = resolve_search_mode_profile(args)?;
 
     let mut cmd = vec![
         "--format".to_string(),
@@ -270,8 +272,8 @@ fn tool_search(args: &Value) -> Result<String, String> {
         "--max-context-chars",
         opt_u64(args, "max_context_chars"),
     );
-    push_opt_flag_value(&mut cmd, "-P", opt_str(args, "profile"));
-    push_opt_flag_value(&mut cmd, "--mode", opt_str(args, "mode"));
+    push_opt_flag_value(&mut cmd, "-P", search_profile.as_deref());
+    push_opt_flag_value(&mut cmd, "--mode", search_mode.as_deref());
     push_changed(&mut cmd, args.get("changed"));
     push_bool_flag(
         &mut cmd,
@@ -414,6 +416,7 @@ fn run_read_for_path(
 fn tool_map(args: &Value) -> Result<String, String> {
     let cwd = opt_cwd(args);
     require_bounded_relative_scope("cgrep_map", cwd, opt_str(args, "path"), true)?;
+    let depth = opt_u64(args, "depth").unwrap_or(DEFAULT_MCP_MAP_DEPTH);
     let mut cmd = vec![
         "--format".to_string(),
         "json".to_string(),
@@ -421,7 +424,7 @@ fn tool_map(args: &Value) -> Result<String, String> {
         "map".to_string(),
     ];
     push_opt_flag_value(&mut cmd, "-p", opt_str(args, "path"));
-    push_opt_flag_value_u64(&mut cmd, "--depth", opt_u64(args, "depth"));
+    push_opt_flag_value_u64(&mut cmd, "--depth", Some(depth));
     run_cgrep(&cmd, cwd)
 }
 
@@ -1035,6 +1038,47 @@ fn push_changed(cmd: &mut Vec<String>, value: Option<&Value>) {
     }
 }
 
+fn resolve_search_mode_profile(args: &Value) -> Result<(Option<String>, Option<String>), String> {
+    let raw_mode = opt_str(args, "mode")
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let mut profile = opt_str(args, "profile")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_lowercase);
+    let mut mode: Option<String> = None;
+
+    if let Some(raw_mode) = raw_mode {
+        match raw_mode.to_ascii_lowercase().as_str() {
+            "keyword" | "semantic" | "hybrid" => mode = Some(raw_mode.to_ascii_lowercase()),
+            "fast" | "quick" => {
+                if profile.is_none() {
+                    profile = Some("fast".to_string());
+                }
+            }
+            "agent" | "ai" => {
+                if profile.is_none() {
+                    profile = Some("agent".to_string());
+                }
+            }
+            "human" | "user" => {
+                if profile.is_none() {
+                    profile = Some("human".to_string());
+                }
+            }
+            _ => {
+                return Err(format!(
+                    "invalid search mode `{}`. Use mode `keyword|semantic|hybrid`, \
+or pass profile `fast|agent|human` via `profile`.",
+                    raw_mode
+                ));
+            }
+        }
+    }
+
+    Ok((mode, profile))
+}
+
 fn run_cgrep(args: &[String], cwd: Option<&str>) -> Result<String, String> {
     let exe =
         std::env::current_exe().map_err(|e| format!("failed to resolve executable: {}", e))?;
@@ -1276,8 +1320,8 @@ fn tool_definitions() -> Vec<Value> {
                     "suppress_boilerplate": { "type": "boolean" },
                     "auto_index": { "type": "boolean" },
                     "changed": { "oneOf": [{ "type": "boolean" }, { "type": "string" }] },
-                    "mode": { "type": "string", "enum": ["keyword", "semantic", "hybrid"] },
-                    "profile": { "type": "string" },
+                    "mode": { "type": "string", "description": "Search mode (`keyword|semantic|hybrid`). Legacy aliases `fast|quick|agent|ai|human|user` are treated as profiles." },
+                    "profile": { "type": "string", "description": "Search profile (`fast|quick|agent|ai|human|user`)." },
                     "regex": { "type": "boolean" },
                     "case_sensitive": { "type": "boolean" },
                     "no_index": { "type": "boolean" },
@@ -1351,7 +1395,7 @@ fn tool_definitions() -> Vec<Value> {
                 "properties": {
                     "cwd": { "type": "string" },
                     "path": { "type": "string" },
-                    "depth": { "type": "number" }
+                    "depth": { "type": "number", "description": "Map depth. Defaults to 2 in MCP mode when omitted." }
                 }
             }
         }),

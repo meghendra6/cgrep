@@ -303,6 +303,95 @@ fn mcp_search_applies_default_budget_metadata() {
 }
 
 #[test]
+fn mcp_search_accepts_legacy_mode_alias_fast() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(
+        &dir.path().join("src/lib.rs"),
+        "pub fn legacy_mode_fast_marker() {}\n",
+    );
+
+    let mut index_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    index_cmd
+        .current_dir(dir.path())
+        .args(["index", "--embeddings", "off"])
+        .assert()
+        .success();
+
+    let mut mcp = McpProc::spawn(dir.path());
+    let _ = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    }));
+
+    let search = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_search",
+            "arguments": {
+                "query": "legacy_mode_fast_marker",
+                "path": "src",
+                "mode": "fast"
+            }
+        }
+    }));
+    assert_ne!(search["result"]["isError"], true);
+    let text = search["result"]["content"][0]["text"]
+        .as_str()
+        .expect("search text");
+    let payload: Value = serde_json::from_str(text).expect("json");
+    assert_eq!(payload["meta"]["search_mode"], "keyword");
+    assert!(payload["results"]
+        .as_array()
+        .map(|arr| !arr.is_empty())
+        .unwrap_or(false));
+
+    mcp.stop();
+}
+
+#[test]
+fn mcp_search_rejects_unknown_mode_with_actionable_message() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(
+        &dir.path().join("src/lib.rs"),
+        "pub fn invalid_mode_marker() {}\n",
+    );
+
+    let mut mcp = McpProc::spawn(dir.path());
+    let _ = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    }));
+
+    let search = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_search",
+            "arguments": {
+                "query": "invalid_mode_marker",
+                "path": "src",
+                "mode": "turbo"
+            }
+        }
+    }));
+    assert_eq!(search["result"]["isError"], true);
+    let err = search["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(err.contains("invalid search mode"));
+    assert!(err.contains("profile"));
+
+    mcp.stop();
+}
+
+#[test]
 fn mcp_agent_locate_and_expand_roundtrip() {
     let dir = TempDir::new().expect("tempdir");
     write_file(
@@ -1049,6 +1138,48 @@ fn mcp_map_large_output_does_not_timeout() {
             .map(|rows| rows.len())
             .unwrap_or(0)
             >= 1_600
+    );
+
+    mcp.stop();
+}
+
+#[test]
+fn mcp_map_applies_default_depth_when_omitted() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(&dir.path().join("a/b/c/deep.rs"), "pub fn deep() {}\n");
+
+    let mut mcp = McpProc::spawn_with_env(dir.path(), &[("CGREP_MCP_TOOL_TIMEOUT_MS", "3000")]);
+    let _ = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    }));
+
+    let map = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_map",
+            "arguments": {
+                "path": ".",
+                "cwd": dir.path().to_string_lossy().to_string()
+            }
+        }
+    }));
+    assert_ne!(map["result"]["isError"], true);
+    let map_text = map["result"]["content"][0]["text"]
+        .as_str()
+        .expect("map text");
+    let map_json: Value = serde_json::from_str(map_text).expect("map json");
+    assert_eq!(map_json["depth"], 2);
+    assert_eq!(
+        map_json["entries"]
+            .as_array()
+            .map(|rows| rows.len())
+            .unwrap_or(0),
+        0
     );
 
     mcp.stop();

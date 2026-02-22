@@ -52,7 +52,9 @@ cgrep --format json2 --compact agent plan "trace authentication middleware flow"
 
 - [Benchmark: Agent Token Efficiency (PyTorch)](./benchmarks/pytorch-agent-token-efficiency.md)
 - [Benchmark: Codex Agent Efficiency (PyTorch)](./benchmarks/pytorch-codex-agent-efficiency.md)
-- Latest Codex snapshot (February 21, 2026 UTC): cgrep billable tokens **41,011** vs baseline **114,060** (**64.0%** reduction, `runs=1`).
+- [Benchmark: Search Option Performance (PyTorch)](./benchmarks/pytorch-search-options-performance.md)
+- Latest Codex snapshot (February 22, 2026 UTC): cgrep billable tokens **107,990** vs baseline **158,242** (**31.8%** reduction, `runs=1`).
+- Same-day repeated run variance was high (**-135.4%** to **+31.8%** total-token delta); use multi-run medians for decisions.
 - Latest measured numbers are tracked in each benchmark page.
 
 ## Language And Site
