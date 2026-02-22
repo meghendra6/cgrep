@@ -1,4 +1,4 @@
-# cgrep
+# cgrep (English)
 
 [English](./README.en.md) | [한국어](./README.ko.md) | [中文](./README.zh.md)
 

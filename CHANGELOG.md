@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/indexing-watch.md`, `docs/ko/indexing-watch.md`
   - `docs/development.md`, `docs/ko/development.md`
 - Extended `perf-gate` workflow coverage to include deterministic local validation (`scripts/validate_all.sh`) in addition to existing perf gates.
+- Simplified user-facing docs information architecture for faster onboarding:
+  - Rewrote `README.md` to a concise quick-start format
+  - Added language-specific README variants (`README.en.md`, `README.ko.md`, `README.zh.md`) with top-of-file language links
+  - Refactored core docs pages (`docs/index.md`, `docs/installation.md`, `docs/usage.md`, `docs/agent.md`, `docs/mcp.md`, `docs/indexing-watch.md`) to goal-first minimal guidance
+  - Reorganized `mkdocs.yml` nav into Start Here / Benchmark / Advanced / Korean sections
+- Updated docs benchmark snapshot references to the latest Codex PyTorch runs (`--runs 2`) result set.
 
 ### Fixed
 - Improved C/C++ type resolution in `definition` for macro-annotated declarations (for example `struct TORCH_API Foo`) so symbol lookup returns primary type definitions instead of noisy constructor/base-class artifacts.
