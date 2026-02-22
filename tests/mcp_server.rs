@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Stdio};
+use std::time::Duration;
 use tempfile::TempDir;
 
 fn write_file(path: &std::path::Path, content: &str) {
@@ -160,6 +161,25 @@ fn mcp_initialize_and_list_tools() {
         .expect("cgrep_definition schema");
     assert!(cgrep_definition["inputSchema"]["properties"]["path"].is_object());
     assert!(cgrep_definition["inputSchema"]["properties"]["limit"].is_object());
+
+    for tool_name in [
+        "cgrep_search",
+        "cgrep_agent_locate",
+        "cgrep_symbols",
+        "cgrep_definition",
+        "cgrep_references",
+        "cgrep_callers",
+        "cgrep_dependents",
+    ] {
+        let tool = tools_array
+            .iter()
+            .find(|t| t["name"].as_str() == Some(tool_name))
+            .unwrap_or_else(|| panic!("missing tool schema for {tool_name}"));
+        assert!(
+            tool["inputSchema"]["properties"]["auto_index"].is_object(),
+            "{tool_name} should expose optional auto_index in MCP schema"
+        );
+    }
 
     mcp.stop();
 }
@@ -403,6 +423,172 @@ fn mcp_search_auto_indexes_once_when_missing() {
     let second_json: Value = serde_json::from_str(second_text).expect("second search json");
     assert_eq!(second_json["meta"]["index_mode"], "index");
     assert_eq!(second_json["meta"]["bootstrap_index"], false);
+
+    mcp.stop();
+}
+
+#[test]
+fn mcp_search_auto_refreshes_after_source_change() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(
+        &dir.path().join("src/lib.rs"),
+        "pub fn refresh_marker_v1() {}\n",
+    );
+
+    let mut index_cmd = Command::new(assert_cmd::cargo::cargo_bin!("cgrep"));
+    index_cmd
+        .current_dir(dir.path())
+        .args(["index", "--embeddings", "off"])
+        .assert()
+        .success();
+
+    let mut mcp = McpProc::spawn(dir.path());
+    let _ = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    }));
+
+    let first = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_search",
+            "arguments": {
+                "query": "refresh_marker_v1",
+                "path": "src"
+            }
+        }
+    }));
+    let first_text = first["result"]["content"][0]["text"]
+        .as_str()
+        .expect("first search text");
+    let first_json: Value = serde_json::from_str(first_text).expect("first search json");
+    assert_eq!(first_json["meta"]["index_mode"], "index");
+    assert!(first_json["results"]
+        .as_array()
+        .map(|arr| !arr.is_empty())
+        .unwrap_or(false));
+
+    write_file(
+        &dir.path().join("src/lib.rs"),
+        "pub fn refresh_marker_v2() {}\n",
+    );
+
+    let mut found_v2 = false;
+    for req_id in 3..=12 {
+        let resp = mcp.call(json!({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "method": "tools/call",
+            "params": {
+                "name": "cgrep_search",
+                "arguments": {
+                    "query": "refresh_marker_v2",
+                    "path": "src"
+                }
+            }
+        }));
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("search text");
+        let payload: Value = serde_json::from_str(text).expect("search json");
+        if payload["results"]
+            .as_array()
+            .map(|arr| !arr.is_empty())
+            .unwrap_or(false)
+        {
+            found_v2 = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(found_v2, "MCP auto-index should pick up changed files");
+
+    mcp.stop();
+}
+
+#[test]
+fn mcp_agent_locate_auto_indexes_by_default() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(
+        &dir.path().join("src/lib.rs"),
+        "pub fn locate_auto_index_marker() {}\n",
+    );
+
+    let mut mcp = McpProc::spawn(dir.path());
+    let _ = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    }));
+
+    let locate = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_agent_locate",
+            "arguments": {
+                "query": "locate_auto_index_marker",
+                "path": "src"
+            }
+        }
+    }));
+    let locate_text = locate["result"]["content"][0]["text"]
+        .as_str()
+        .expect("locate text");
+    let locate_json: Value = serde_json::from_str(locate_text).expect("locate json");
+    assert_eq!(locate_json["meta"]["index_mode"], "index");
+
+    assert!(
+        dir.path().join(".cgrep/manifest").exists()
+            || dir.path().join("src/.cgrep/manifest").exists()
+    );
+
+    mcp.stop();
+}
+
+#[test]
+fn mcp_agent_locate_respects_auto_index_false() {
+    let dir = TempDir::new().expect("tempdir");
+    write_file(
+        &dir.path().join("src/lib.rs"),
+        "pub fn locate_no_auto_index_marker() {}\n",
+    );
+
+    let mut mcp = McpProc::spawn(dir.path());
+    let _ = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {}
+    }));
+
+    let locate = mcp.call(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "cgrep_agent_locate",
+            "arguments": {
+                "query": "locate_no_auto_index_marker",
+                "path": "src",
+                "auto_index": false
+            }
+        }
+    }));
+    let locate_text = locate["result"]["content"][0]["text"]
+        .as_str()
+        .expect("locate text");
+    let locate_json: Value = serde_json::from_str(locate_text).expect("locate json");
+    assert_eq!(locate_json["meta"]["index_mode"], "scan");
+
+    assert!(!dir.path().join(".cgrep/manifest").exists());
+    assert!(!dir.path().join("src/.cgrep/manifest").exists());
 
     mcp.stop();
 }

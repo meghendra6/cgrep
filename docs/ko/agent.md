@@ -6,6 +6,7 @@
 - 기본 흐름은 `map -> search -> read -> definition/references/callers`입니다.
 - `-p`, `--glob`, `--changed`로 범위를 먼저 줄입니다.
 - 에이전트 출력은 `--format json2 --compact`를 기본으로 사용합니다.
+- MCP 사용 시 주요 조회 도구는 기본적으로 `auto_index=true`이며, 최초 bootstrap 이후에는 파일 변경 감지 + 호출 시점 refresh로 동작합니다(주기 인덱싱 루프 불필요).
 
 ## 2단계 조회 (`agent`)
 

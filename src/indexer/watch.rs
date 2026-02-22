@@ -7,6 +7,7 @@ use colored::Colorize;
 use notify::{
     Config as NotifyConfig, Event, RecommendedWatcher, RecursiveMode, Watcher as NotifyWatcher,
 };
+use serde_json::Value;
 use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 use std::sync::mpsc::{channel, RecvTimeoutError};
@@ -38,6 +39,15 @@ const MAX_ADAPTIVE_MIN_INTERVAL_SECS: u64 = 600;
 /// Safety cap for adaptive debounce scaling
 const MAX_ADAPTIVE_DEBOUNCE_SECS: u64 = 120;
 
+/// Default threshold where path-by-path updates switch to bulk incremental refresh.
+const DEFAULT_BULK_REFRESH_THRESHOLD: usize = 5_000;
+
+/// Lower bound for bulk threshold on small repositories.
+const MIN_BULK_REFRESH_THRESHOLD: usize = 1_500;
+
+/// Upper bound for bulk threshold on large repositories.
+const MAX_BULK_REFRESH_THRESHOLD: usize = 12_000;
+
 /// File system watcher with debouncing
 pub struct Watcher {
     root: PathBuf,
@@ -48,6 +58,7 @@ pub struct Watcher {
     min_reindex_interval: Duration,
     max_batch_delay: Duration,
     adaptive: bool,
+    bulk_refresh_threshold: usize,
 }
 
 impl Watcher {
@@ -62,8 +73,9 @@ impl Watcher {
         max_batch_delay_secs: u64,
         adaptive: bool,
     ) -> Self {
+        let root = root.as_ref().to_path_buf();
         Self {
-            root: root.as_ref().to_path_buf(),
+            root: root.clone(),
             builder,
             exclude_patterns,
             writer_budget_bytes,
@@ -71,6 +83,7 @@ impl Watcher {
             min_reindex_interval: Duration::from_secs(min_interval_secs.max(1)),
             max_batch_delay: Duration::from_secs(max_batch_delay_secs.max(1)),
             adaptive,
+            bulk_refresh_threshold: recommended_bulk_refresh_threshold(&root),
         }
     }
 
@@ -99,10 +112,15 @@ impl Watcher {
             self.max_batch_delay.as_secs(),
             if self.adaptive { "on" } else { "off" }
         );
+        println!(
+            "  Bulk refresh threshold: {} changed paths",
+            self.bulk_refresh_threshold
+        );
         println!("Press Ctrl+C to stop\n");
 
         // Track pending changes and last reindex time
         let mut pending_paths: HashSet<PathBuf> = HashSet::new();
+        let mut bulk_refresh_pending = false;
         let mut pending_since: Option<Instant> = None;
         let mut last_event_time: Option<Instant> = None;
         // Treat startup as the first cycle boundary so background reindex runs
@@ -111,14 +129,20 @@ impl Watcher {
         let mut last_reindex_duration: Option<Duration> = None;
 
         loop {
+            let has_pending = bulk_refresh_pending || !pending_paths.is_empty();
+            let pending_count = if bulk_refresh_pending {
+                self.bulk_refresh_threshold.max(pending_paths.len())
+            } else {
+                pending_paths.len()
+            };
             // Use timeout to implement debouncing
-            let timeout = if pending_paths.is_empty() {
+            let timeout = if !has_pending {
                 Duration::from_secs(60) // Long timeout when idle
             } else {
                 effective_debounce(
                     self.debounce_duration,
                     self.adaptive,
-                    pending_paths.len(),
+                    pending_count,
                     last_reindex_duration,
                 )
             };
@@ -132,8 +156,29 @@ impl Watcher {
                             if !should_track_path(&self.root, path, &self.exclude_patterns) {
                                 continue;
                             }
+                            if bulk_refresh_pending {
+                                accepted = true;
+                                continue;
+                            }
                             accepted |= pending_paths.insert(path.clone());
                         }
+
+                        if !bulk_refresh_pending
+                            && should_use_bulk_refresh_mode(
+                                pending_paths.len(),
+                                self.bulk_refresh_threshold,
+                            )
+                        {
+                            bulk_refresh_pending = true;
+                            pending_paths.clear();
+                            accepted = true;
+                            println!(
+                                "{} High churn detected; switching to bulk incremental refresh (threshold={})",
+                                "⚙".cyan(),
+                                self.bulk_refresh_threshold
+                            );
+                        }
+
                         if accepted {
                             let now = Instant::now();
                             last_event_time = Some(now);
@@ -155,11 +200,16 @@ impl Watcher {
             }
 
             // Check if we should trigger reindex
-            if !pending_paths.is_empty() {
+            if bulk_refresh_pending || !pending_paths.is_empty() {
+                let pending_count = if bulk_refresh_pending {
+                    self.bulk_refresh_threshold.max(pending_paths.len())
+                } else {
+                    pending_paths.len()
+                };
                 let current_debounce = effective_debounce(
                     self.debounce_duration,
                     self.adaptive,
-                    pending_paths.len(),
+                    pending_count,
                     last_reindex_duration,
                 );
                 let should_reindex = if let Some(last_event) = last_event_time {
@@ -186,15 +236,28 @@ impl Watcher {
                 };
 
                 if (should_reindex || force_flush) && can_reindex {
-                    let changed_paths: Vec<PathBuf> = pending_paths.iter().cloned().collect();
+                    let changed_paths: Vec<PathBuf> = if bulk_refresh_pending {
+                        Vec::new()
+                    } else {
+                        pending_paths.iter().cloned().collect()
+                    };
                     let num_changes = changed_paths.len();
-                    println!(
-                        "{} {} file(s) changed, reindexing... (debounce={}s min_interval={}s)",
-                        "🔄".yellow(),
-                        num_changes,
-                        current_debounce.as_secs(),
-                        current_min_interval.as_secs()
-                    );
+                    if bulk_refresh_pending {
+                        println!(
+                            "{} High-churn batch detected, running bulk incremental refresh... (debounce={}s min_interval={}s)",
+                            "🔄".yellow(),
+                            current_debounce.as_secs(),
+                            current_min_interval.as_secs()
+                        );
+                    } else {
+                        println!(
+                            "{} {} file(s) changed, reindexing... (debounce={}s min_interval={}s)",
+                            "🔄".yellow(),
+                            num_changes,
+                            current_debounce.as_secs(),
+                            current_min_interval.as_secs()
+                        );
+                    }
 
                     // Clear pending before reindex to capture new events during reindex
                     pending_paths.clear();
@@ -202,22 +265,39 @@ impl Watcher {
                     last_event_time = None;
 
                     let start = Instant::now();
-                    if let Err(e) = self.builder.update_paths_with_io_threads(
-                        &changed_paths,
-                        self.writer_budget_bytes,
-                        Some(WATCH_IO_THREADS),
-                    ) {
+                    let reindex_result = if bulk_refresh_pending {
+                        // For large churn bursts, use default thread selection to
+                        // shorten recovery time after branch-scale updates.
+                        self.builder
+                            .build_with_io_threads(false, self.writer_budget_bytes, None)
+                    } else {
+                        self.builder.update_paths_with_io_threads(
+                            &changed_paths,
+                            self.writer_budget_bytes,
+                            Some(WATCH_IO_THREADS),
+                        )
+                    };
+                    if let Err(e) = reindex_result {
                         eprintln!("{} Reindex failed: {}", "✗".red(), e);
                     } else {
                         let elapsed = start.elapsed();
-                        println!(
-                            "{} Reindex complete in {:.1}s ({} paths)",
-                            "✓".green(),
-                            elapsed.as_secs_f64(),
-                            num_changes
-                        );
+                        if bulk_refresh_pending {
+                            println!(
+                                "{} Reindex complete in {:.1}s (bulk)",
+                                "✓".green(),
+                                elapsed.as_secs_f64()
+                            );
+                        } else {
+                            println!(
+                                "{} Reindex complete in {:.1}s ({} paths)",
+                                "✓".green(),
+                                elapsed.as_secs_f64(),
+                                num_changes
+                            );
+                        }
                         last_reindex_duration = Some(elapsed);
                     }
+                    bulk_refresh_pending = false;
 
                     last_reindex_time = Some(Instant::now());
                 }
@@ -286,6 +366,32 @@ fn effective_debounce(
 fn scale_duration(duration: Duration, factor: f64, max: Duration) -> Duration {
     let secs = duration.as_secs_f64() * factor;
     Duration::from_secs_f64(secs).min(max)
+}
+
+fn should_use_bulk_refresh_mode(pending_count: usize, threshold: usize) -> bool {
+    pending_count >= threshold
+}
+
+fn recommended_bulk_refresh_threshold(root: &Path) -> usize {
+    let Some(indexed_files) = read_indexed_file_count(root) else {
+        return DEFAULT_BULK_REFRESH_THRESHOLD;
+    };
+    threshold_from_indexed_files(indexed_files)
+}
+
+fn threshold_from_indexed_files(indexed_files: usize) -> usize {
+    let scaled = indexed_files / 4;
+    scaled.clamp(MIN_BULK_REFRESH_THRESHOLD, MAX_BULK_REFRESH_THRESHOLD)
+}
+
+fn read_indexed_file_count(root: &Path) -> Option<usize> {
+    let metadata_path = root.join(".cgrep").join("metadata.json");
+    let raw = std::fs::read_to_string(metadata_path).ok()?;
+    let value: Value = serde_json::from_str(&raw).ok()?;
+    value
+        .get("files")
+        .and_then(|v| v.as_object())
+        .map(|files| files.len())
 }
 
 fn should_track_path(root: &Path, path: &Path, exclude_patterns: &[String]) -> bool {
@@ -420,5 +526,25 @@ mod tests {
 
         assert!(min_interval >= Duration::from_secs(40));
         assert!(debounce >= Duration::from_secs(25));
+    }
+
+    #[test]
+    fn bulk_refresh_threshold_scales_with_repo_size() {
+        assert_eq!(
+            threshold_from_indexed_files(500),
+            MIN_BULK_REFRESH_THRESHOLD
+        );
+        assert_eq!(threshold_from_indexed_files(8_000), 2_000);
+        assert_eq!(
+            threshold_from_indexed_files(80_000),
+            MAX_BULK_REFRESH_THRESHOLD
+        );
+    }
+
+    #[test]
+    fn bulk_refresh_mode_switch_threshold_is_inclusive() {
+        assert!(!should_use_bulk_refresh_mode(1_999, 2_000));
+        assert!(should_use_bulk_refresh_mode(2_000, 2_000));
+        assert!(should_use_bulk_refresh_mode(2_500, 2_000));
     }
 }

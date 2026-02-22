@@ -84,7 +84,12 @@ printf '%s\n' \
 
 - MCP tools accept optional `cwd` to pin relative path resolution.
 - `cgrep_search` defaults to balanced output budget and enables `path_alias`/`dedupe_context`/`suppress_boilerplate` unless explicitly disabled.
-- `cgrep_search` defaults to `auto_index=true`; when no index exists it attempts one bootstrap index build, then falls back to scan on bootstrap failure.
+- `cgrep_search`, `cgrep_agent_locate`, `cgrep_symbols`, `cgrep_definition`, `cgrep_references`, `cgrep_callers`, and `cgrep_dependents` default to `auto_index=true`.
+- With `auto_index=true`, MCP bootstraps index on first use when missing.
+- For existing indexes, MCP uses file-change-aware refresh: while the MCP server process is alive it subscribes to filesystem change events, then refreshes on the next MCP tool call only when changes are detected (no periodic background reindex loop).
+- If MCP/agent usage stops, auto-index activity also stops because refresh is call-driven.
+- MCP auto-indexing uses embeddings-off indexing for predictable latency/cost; semantic/hybrid (experimental) still require an explicit embeddings-enabled index.
+- Set `auto_index=false` per tool call if you want to skip this behavior.
 - `cgrep_search` treats dash-prefixed queries (e.g. `-n`, `--help`) as literal search text.
 - `cgrep_search` rejects empty/whitespace queries consistently (including `regex=true`).
 - `cgrep_search` result `path` values stay reusable:

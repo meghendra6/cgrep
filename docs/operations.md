@@ -12,7 +12,7 @@ This guide covers day-2 operations: readiness checks, background indexing, reuse
 - `.cgrep/metadata.json`: persisted index profile and incremental metadata.
 - `.cgrep/status.json`: basic/full readiness and background build progress.
 - `.cgrep/reuse-state.json`: last reuse decision and fallback reason.
-- `.cgrep/watch.pid`, `.cgrep/watch.log`: watch daemon process and log files.
+- `.cgrep/watch.pid`, `.cgrep/watch.log`: daemon process and log files.
 - `.cgrep/background-index.log`: background index worker log.
 
 ## Readiness, Status, and Search Stats
@@ -49,11 +49,17 @@ cgrep index --background
 # monitor state
 cgrep --format json2 --compact status
 
-# foreground watch daemon (managed process)
+# managed indexing daemon
 cgrep daemon start
 cgrep daemon status
 cgrep daemon stop
 ```
+
+Command roles:
+- `cgrep index --background` is a one-shot async build command (no ongoing file tracking).
+- `cgrep daemon start` is continuous change tracking + incremental reindexing until `cgrep daemon stop`.
+- During very large change bursts, daemon coalesces updates and can switch to bulk incremental refresh automatically.
+- Bulk switch threshold is auto-sized from indexed files (about 25%), clamped to `1500..12000`.
 
 Behavior guarantees:
 - background mode is opt-in (`--background`); default index flow is unchanged.

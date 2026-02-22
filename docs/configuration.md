@@ -71,11 +71,11 @@ batch_size = 4      # lower = less memory, often faster on CPU
 - Use `cgrep index --include-path <path>` (repeatable) to include specific ignored paths only.
 - Config equivalent: `[index] respect_git_ignore = true|false` (default `true`).
 
-## Watch/daemon index profile reuse
+## Daemon index profile reuse
 
-- `cgrep watch` and `cgrep daemon` reuse the latest index profile stored in `.cgrep/metadata.json`.
+- `cgrep daemon` reuses the latest index profile stored in `.cgrep/metadata.json`.
 - The reused profile preserves the options from the latest `cgrep index` run as-is.
-- If no stored profile exists yet, watch falls back to `[index]` config defaults.
+- If no stored profile exists yet, daemon falls back to `[index]` config defaults.
 
 ## Artifact compatibility notes
 

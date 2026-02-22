@@ -47,9 +47,9 @@ pub enum CliSearchMode {
     /// BM25 keyword search only
     #[default]
     Keyword,
-    /// Embedding-based semantic search only
+    /// Experimental: embedding-based semantic search only
     Semantic,
-    /// Combined BM25 + embedding search
+    /// Experimental: combined BM25 + embedding search
     Hybrid,
 }
 
@@ -103,7 +103,7 @@ pub enum AgentCommands {
         #[arg(short = 'm', long = "limit")]
         limit: Option<usize>,
 
-        /// Search mode: keyword, semantic, or hybrid
+        /// Search mode: keyword, semantic, or hybrid (semantic/hybrid are experimental)
         #[arg(short = 'M', long, value_enum)]
         mode: Option<CliSearchMode>,
 
@@ -180,10 +180,10 @@ pub enum AgentCommands {
 
 #[derive(Subcommand, Debug)]
 pub enum DaemonCommands {
-    /// Start background watch daemon
+    /// Start background indexing daemon
     #[command(visible_aliases = ["up"])]
     Start {
-        /// Path to watch (defaults to current directory)
+        /// Path to monitor (defaults to current directory)
         #[arg(short, long)]
         path: Option<String>,
 
@@ -204,7 +204,7 @@ pub enum DaemonCommands {
         no_adaptive: bool,
     },
 
-    /// Stop background watch daemon
+    /// Stop background indexing daemon
     #[command(visible_aliases = ["down"])]
     Stop {
         /// Path containing daemon state (defaults to current directory)
@@ -218,6 +218,30 @@ pub enum DaemonCommands {
         /// Path containing daemon state (defaults to current directory)
         #[arg(short, long)]
         path: Option<String>,
+    },
+
+    /// Internal: run file-change monitor loop for daemon workers
+    #[command(name = "__watch-worker", hide = true)]
+    WatchWorker {
+        /// Path to monitor (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Debounce interval in seconds (default: 15)
+        #[arg(short = 'd', long, default_value = "15")]
+        debounce: u64,
+
+        /// Minimum time between reindex operations in seconds (default: 180)
+        #[arg(short = 'i', long = "min-interval", default_value = "180")]
+        min_interval: u64,
+
+        /// Force reindex if events keep arriving for this many seconds (default: 180)
+        #[arg(short = 'b', long = "max-batch-delay", default_value = "180")]
+        max_batch_delay: u64,
+
+        /// Disable adaptive backoff (adaptive is on by default)
+        #[arg(long = "no-adaptive")]
+        no_adaptive: bool,
     },
 }
 
@@ -353,7 +377,7 @@ pub enum Commands {
         #[arg(long, conflicts_with = "ignore_case", help_heading = "Mode")]
         case_sensitive: bool,
 
-        /// Search mode: keyword, semantic, or hybrid
+        /// Search mode: keyword, semantic, or hybrid (semantic/hybrid are experimental)
         #[arg(short = 'M', long, value_enum, help_heading = "Mode")]
         mode: Option<CliSearchMode>,
 
@@ -475,7 +499,7 @@ pub enum Commands {
         command: AgentCommands,
     },
 
-    /// Manage background watch daemon
+    /// Manage background indexing daemon
     #[command(visible_aliases = ["bg"])]
     Daemon {
         #[command(subcommand)]
@@ -655,30 +679,6 @@ pub enum Commands {
         /// Paths/patterns to exclude (can be specified multiple times)
         #[arg(long = "exclude", short = 'e')]
         exclude_paths: Vec<String>,
-    },
-
-    /// Watch for file changes and update index
-    #[command(visible_aliases = ["wt", "w"])]
-    Watch {
-        /// Path to watch (defaults to current directory)
-        #[arg(short, long)]
-        path: Option<String>,
-
-        /// Debounce interval in seconds (default: 15)
-        #[arg(short = 'd', long, default_value = "15")]
-        debounce: u64,
-
-        /// Minimum time between reindex operations in seconds (default: 180)
-        #[arg(short = 'i', long = "min-interval", default_value = "180")]
-        min_interval: u64,
-
-        /// Force reindex if events keep arriving for this many seconds (default: 180)
-        #[arg(short = 'b', long = "max-batch-delay", default_value = "180")]
-        max_batch_delay: u64,
-
-        /// Disable adaptive backoff (adaptive is on by default)
-        #[arg(long = "no-adaptive")]
-        no_adaptive: bool,
     },
 
     /// Install cgrep for Claude Code
@@ -949,5 +949,10 @@ mod tests {
             }
             other => panic!("expected status command, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn watch_command_is_not_available() {
+        assert!(Cli::try_parse_from(["cgrep", "watch"]).is_err());
     }
 }

@@ -12,10 +12,10 @@ Current release: **v1.5.2**
 | Learn daily search/navigation commands | [Usage](./usage.md) |
 | Set up token-efficient agent retrieval | [Agent Workflow](./agent.md) |
 | Connect editor/host tools via MCP | [MCP](./mcp.md) |
-| Keep large repo index fresh | [Indexing and Watch](./indexing-watch.md) |
+| Keep large repo index fresh | [Indexing and Daemon](./indexing-watch.md) |
 | Operate background/reuse safely | [Operations](./operations.md) |
 | Tune defaults and profiles | [Configuration](./configuration.md) |
-| Use semantic/hybrid retrieval | [Embeddings](./embeddings.md) |
+| Use semantic/hybrid retrieval (experimental) | [Embeddings](./embeddings.md) |
 | Fix common failures quickly | [Troubleshooting](./troubleshooting.md) |
 | Run build/test/perf validation | [Development](./development.md) |
 
@@ -24,6 +24,7 @@ Current release: **v1.5.2**
 ### User path (2 minutes)
 
 ```bash
+# optional warm-up
 cgrep index
 cgrep s "token validation" src/
 cgrep d handle_auth

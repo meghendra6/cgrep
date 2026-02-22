@@ -1,4 +1,4 @@
-# Indexing And Watch
+# Indexing And Daemon
 
 ## Indexing
 
@@ -33,14 +33,10 @@ cgrep index --reuse auto
 cgrep index --reuse off
 ```
 
-## Watch and daemon
+## Daemon
 
 ```bash
-# Foreground watch
-cgrep watch
-cgrep w
-
-# Daemon mode (managed background watch)
+# Daemon mode (managed background indexing)
 cgrep daemon start
 cgrep daemon status
 cgrep daemon stop
@@ -51,19 +47,27 @@ cgrep bg st
 cgrep bg down
 ```
 
+## Choosing Between `index --background` and `daemon`
+
+- `cgrep index --background`:
+  - one-shot async build
+  - worker exits after the build
+  - does not keep watching files
+- `cgrep daemon start`:
+  - long-running managed process
+  - keeps tracking file changes and applies incremental reindex updates
+  - stop explicitly with `cgrep daemon stop`
+
 Large-repo low-pressure example:
 
 ```bash
-cgrep watch --debounce 30 --min-interval 180 --max-batch-delay 240
-
-# Short flag form
-cgrep w -d 30 -i 180 -b 240
+cgrep daemon start --debounce 30 --min-interval 180 --max-batch-delay 240
 ```
 
 Disable adaptive mode (fixed timing behavior):
 
 ```bash
-cgrep watch --no-adaptive
+cgrep daemon start --no-adaptive
 ```
 
 ## Behavior notes
@@ -71,6 +75,7 @@ cgrep watch --no-adaptive
 - Index lives under `.cgrep/`
 - Manifest lives under `.cgrep/manifest/` (`version`, `v1.json`, optional `root.hash`)
 - Search from subdirectories reuses nearest parent index
+- Search/symbol-style commands auto-bootstrap and call-driven refresh the index by default; daemon is optional for always-hot indexing.
 - Indexing respects `.gitignore`/`.ignore` by default (`--include-ignored` to opt out)
 - `--include-path <path>` lets you index selected ignored paths without indexing everything ignored
 - Default indexing uses a two-stage change detector:
@@ -90,14 +95,16 @@ cgrep watch --no-adaptive
   - stale/nonexistent files are filtered while reuse is active
   - incompatible/corrupt snapshots fall back to normal indexing
 - `status` reads `.cgrep/status.json` and reports deterministic readiness/progress fields
-- Watch mode uses adaptive backoff by default (`--no-adaptive` to disable)
-- Watch defaults are tuned for background operation (`--min-interval 180`, about 3 minutes)
-- Watch reacts only to indexable source extensions and skips temp/swap files
-- Watch/daemon reuse the most recent index profile from `.cgrep/metadata.json`
+- Daemon uses adaptive backoff by default (`--no-adaptive` to disable)
+- Daemon defaults are tuned for background operation (`--min-interval 180`, about 3 minutes)
+- Daemon reacts only to indexable source extensions and skips temp/swap files
+- Daemon reuses the most recent index profile from `.cgrep/metadata.json`
 - Reused profile preserves the latest `cgrep index` options as-is
-- Watch reindex is changed-path incremental (update/remove touched files only)
+- Daemon reindex is changed-path incremental (update/remove touched files only)
+- For high-churn batches (for example large branch switches), daemon automatically switches to bulk incremental refresh to reduce event/memory overhead.
+- Bulk switch threshold is auto-sized from indexed files (about 25%), clamped to `1500..12000`.
 
-## Watch defaults
+## Daemon defaults
 
 | Option | Default | Purpose |
 |---|---:|---|
@@ -106,18 +113,12 @@ cgrep watch --no-adaptive
 | `--max-batch-delay` | `180` | force a run if events keep streaming |
 | adaptive mode | `on` | auto-backoff based on change volume/reindex cost |
 
-## Background watch
+## Managed daemon lifecycle
 
 ```bash
-# Run in background and write logs
-nohup cgrep watch > .cgrep/watch.log 2>&1 &
-
-# Check process/log
-pgrep -fl "cgrep watch"
-tail -f .cgrep/watch.log
-
-# Stop
-pkill -f "cgrep watch"
+cgrep daemon start
+cgrep daemon status
+cgrep daemon stop
 ```
 
 For very large repositories, prefer:

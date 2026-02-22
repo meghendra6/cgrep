@@ -12,7 +12,7 @@
 - `.cgrep/metadata.json`: 인덱스 프로필/증분 메타데이터.
 - `.cgrep/status.json`: basic/full 준비 상태와 백그라운드 진행률.
 - `.cgrep/reuse-state.json`: 마지막 재사용 판단/폴백 사유.
-- `.cgrep/watch.pid`, `.cgrep/watch.log`: watch daemon PID/로그.
+- `.cgrep/watch.pid`, `.cgrep/watch.log`: daemon PID/로그.
 - `.cgrep/background-index.log`: 백그라운드 인덱스 워커 로그.
 
 ## 준비 상태, status, 검색 통계
@@ -49,11 +49,17 @@ cgrep index --background
 # 상태 모니터링
 cgrep --format json2 --compact status
 
-# 관리형 watch daemon
+# 관리형 인덱싱 daemon
 cgrep daemon start
 cgrep daemon status
 cgrep daemon stop
 ```
+
+명령 역할 구분:
+- `cgrep index --background`는 1회성 비동기 빌드 명령입니다(지속 감시 없음).
+- `cgrep daemon start`는 `cgrep daemon stop`까지 파일 변경 추적 + 증분 재인덱싱을 계속 수행합니다.
+- 대규모 변경 이벤트 폭주 시 daemon은 업데이트를 묶고 자동으로 bulk 증분 갱신 경로로 전환할 수 있습니다.
+- bulk 전환 임계값은 인덱스 파일 수의 약 25%를 기준으로 자동 산정되며, `1500..12000` 범위로 클램프됩니다.
 
 동작 보장:
 - 백그라운드 모드는 `--background`에서만 활성화(기본 동작 유지).
