@@ -59,6 +59,17 @@ printf '%s\n' \
 | cgrep mcp serve
 ```
 
+## Manual Indexing And Daemon FAQ
+
+- Do I need to run `cgrep index` manually before MCP?
+  - Usually no. Default MCP tools run with `auto_index=true` and bootstrap/refresh as needed.
+- Do I need to run `cgrep daemon start` for MCP?
+  - Not required. MCP auto-index is call-driven and uses file-change signals while the MCP server is alive.
+- When should I still run daemon manually?
+  - During heavy active coding sessions when you want the index to stay warm continuously between tool calls.
+- Semantic/hybrid via MCP:
+  - still requires an embeddings-enabled index and remains experimental.
+
 ## Behavior Notes
 
 - `cgrep mcp install <host>` writes `command = "cgrep"` by default so binary updates are picked up without reinstalling MCP config.

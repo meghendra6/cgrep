@@ -39,6 +39,15 @@ cgrep agent expand --id "$ID" -C 8 --compact
 cgrep --format json2 --compact agent plan "trace authentication middleware flow"
 ```
 
+## 인덱싱 선택 빠른 가이드
+
+| 상황 | 권장 선택 |
+|---|---|
+| 바로 검색 시작 | `search/read/definition`을 바로 실행 (auto-bootstrap) |
+| 코딩 중 인덱스를 계속 hot 유지 | 세션 동안 `cgrep daemon start`, 종료 시 `cgrep daemon stop` |
+| 1회성 비동기 사전 빌드 | `cgrep index --background` |
+| semantic/hybrid 실험 | embeddings 인덱스 빌드 (`cgrep index --embeddings precompute`) |
+
 ## 벤치마크 문서
 
 - [에이전트 토큰 효율 벤치마크 (PyTorch, 영문)](../benchmarks/pytorch-agent-token-efficiency.md)

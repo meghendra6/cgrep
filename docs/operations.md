@@ -61,10 +61,28 @@ Command roles:
 - During very large change bursts, daemon coalesces updates and can switch to bulk incremental refresh automatically.
 - Bulk switch threshold is auto-sized from indexed files (about 25%), clamped to `1500..12000`.
 
+When indexing runs vs stops:
+- Normal CLI/MCP search-like commands: call-driven auto-index checks (no permanent background loop).
+- Daemon mode: event-driven while daemon is running.
+- No new filesystem events + no tool calls: no extra reindex work.
+- `cgrep daemon stop`: ends daemon-managed indexing immediately.
+
 Behavior guarantees:
 - background mode is opt-in (`--background`); default index flow is unchanged.
 - status writes are atomic and interruption-safe.
 - stale background pid state is recovered by status checks.
+
+## Large-Repo Tuning Checklist
+
+Use this as an operator baseline before increasing complexity:
+
+- Keep adaptive mode enabled first (`--no-adaptive` only for fixed-timing needs).
+- Start with:
+  - `--min-interval 180`
+  - `--debounce 30`
+  - `--max-batch-delay 180` to `240`
+- If branch switching causes high event churn, keep daemon running and let bulk switching absorb bursts.
+- If indexing cost is too high for your workflow, switch to one-shot `cgrep index --background` and run daemon only during active coding windows.
 
 ## Reuse Diagnostics and Migration Notes
 

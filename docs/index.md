@@ -39,6 +39,15 @@ cgrep agent expand --id "$ID" -C 8 --compact
 cgrep --format json2 --compact agent plan "trace authentication middleware flow"
 ```
 
+## Indexing Decision Quick Guide
+
+| Situation | Recommended |
+|---|---|
+| Start searching immediately | run `search/read/definition` directly (auto-bootstrap) |
+| Keep index warm while coding | `cgrep daemon start` during session, then `cgrep daemon stop` |
+| One-time asynchronous prebuild | `cgrep index --background` |
+| Semantic/hybrid experiments | build embeddings index (`cgrep index --embeddings precompute`) |
+
 ## Benchmark References
 
 - [Benchmark: Agent Token Efficiency (PyTorch)](./benchmarks/pytorch-agent-token-efficiency.md)
