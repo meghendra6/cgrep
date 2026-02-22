@@ -313,6 +313,16 @@ fn cli_auto_index_stamp_path(index_scope: &Path) -> PathBuf {
         .join("auto_index_check.stamp")
 }
 
+fn touch_cli_auto_index_check_for_scope(path: Option<&str>) {
+    let Ok(scope) = resolve_cli_scope(path) else {
+        return;
+    };
+    let index_scope = cgrep::utils::find_index_root(&scope)
+        .map(|root| root.root)
+        .unwrap_or(scope);
+    let _ = touch_cli_auto_index_check(&index_scope);
+}
+
 fn install_for_provider(provider: AgentProvider) -> Result<()> {
     match provider {
         AgentProvider::ClaudeCode => install::claude_code::install(),
@@ -787,6 +797,9 @@ fn main() -> Result<()> {
                     embeddings_force,
                 },
             )?;
+            if !background {
+                touch_cli_auto_index_check_for_scope(path.as_deref());
+            }
         }
         // Legacy installation commands (deprecated)
         Commands::InstallClaudeCode => {
