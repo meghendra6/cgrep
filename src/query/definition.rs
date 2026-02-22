@@ -90,19 +90,20 @@ pub fn run(
                     if is_cpp_like && is_cpp_declaration_without_body(&symbol.kind, line_text) {
                         continue;
                     }
+                    let symbol_name_lower = symbol.name.to_lowercase();
                     if is_cpp_like
                         && matches!(symbol.kind, SymbolKind::Function)
-                        && symbol.name.to_lowercase() == name_lower
                         && file_type_like_names.contains(&name_lower)
+                        && is_cpp_constructor_like_name(&symbol_name_lower, &name_lower)
                     {
-                        // Constructor-like overloads with the same name as a type are redundant
-                        // when locating a type definition and add significant token noise.
+                        // Constructor-like overloads are redundant when locating a type definition
+                        // and add significant token noise.
                         continue;
                     }
 
-                    if symbol.name.to_lowercase() == name_lower {
+                    if symbol_name_lower == name_lower {
                         exact_matches.push((file.path.clone(), symbol));
-                    } else if symbol.name.to_lowercase().contains(&name_lower) {
+                    } else if symbol_name_lower.contains(&name_lower) {
                         partial_matches.push((file.path.clone(), symbol));
                     }
                 }
@@ -293,7 +294,11 @@ fn sort_matches(matches: &mut [(PathBuf, Symbol)], name_lower: &str) {
     });
 }
 
-fn rank_match(name_lower: &str, path: &Path, symbol: &Symbol) -> (u8, u8, usize, String) {
+fn rank_match(
+    name_lower: &str,
+    path: &Path,
+    symbol: &Symbol,
+) -> (u8, u8, u8, usize, String, usize) {
     let kind_rank = match symbol.kind {
         SymbolKind::Class => 0,
         SymbolKind::Struct => 1,
@@ -315,6 +320,8 @@ fn rank_match(name_lower: &str, path: &Path, symbol: &Symbol) -> (u8, u8, usize,
         .map(|s| s.to_ascii_lowercase())
         .unwrap_or_default();
     let path_text = path.to_string_lossy().to_ascii_lowercase();
+    let backend_penalty = definition_backend_penalty(name_lower, &path_text);
+    let path_depth = path.components().count();
     let name_rank = if stem_name == name_lower {
         0
     } else if file_name.contains(name_lower) {
@@ -324,7 +331,50 @@ fn rank_match(name_lower: &str, path: &Path, symbol: &Symbol) -> (u8, u8, usize,
     } else {
         3
     };
-    (kind_rank, name_rank, symbol.line, path_text)
+    (
+        kind_rank,
+        backend_penalty,
+        name_rank,
+        path_depth,
+        path_text,
+        symbol.line,
+    )
+}
+
+fn definition_backend_penalty(query_lower: &str, path_text: &str) -> u8 {
+    let query = query_lower.to_ascii_lowercase();
+    const BACKEND_SEGMENTS: &[&str] = &[
+        "cuda",
+        "xpu",
+        "mps",
+        "mkldnn",
+        "vulkan",
+        "metal",
+        "sparse",
+        "quantized",
+        "rocm",
+        "hip",
+    ];
+
+    BACKEND_SEGMENTS
+        .iter()
+        .filter(|segment| path_text.contains(**segment) && !query_mentions_segment(&query, segment))
+        .count()
+        .min(3) as u8
+}
+
+fn query_mentions_segment(query_lower: &str, segment: &str) -> bool {
+    query_lower.contains(segment)
+        || query_lower
+            .split(|ch: char| !ch.is_alphanumeric() && ch != '_')
+            .filter(|part| !part.is_empty())
+            .any(|part| part.contains(segment) || segment.contains(part))
+}
+
+fn is_cpp_constructor_like_name(symbol_name_lower: &str, query_name_lower: &str) -> bool {
+    symbol_name_lower == query_name_lower
+        || symbol_name_lower.ends_with(&format!("::{query_name_lower}"))
+        || symbol_name_lower.ends_with(&format!("::~{query_name_lower}"))
 }
 
 fn load_definition_candidate_files(
@@ -362,5 +412,41 @@ fn load_definition_candidate_files(
             let scanner = FileScanner::new(search_root);
             scanner.scan()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_symbol(line: usize) -> Symbol {
+        Symbol {
+            name: "addmm_out".to_string(),
+            kind: SymbolKind::Function,
+            line,
+            column: 1,
+            end_line: line,
+            byte_start: None,
+            byte_end: None,
+            scope: None,
+        }
+    }
+
+    #[test]
+    fn backend_penalty_prefers_generic_path_for_generic_query() {
+        let generic = Path::new("aten/src/ATen/native/LinearAlgebra.cpp");
+        let backend = Path::new("aten/src/ATen/native/mkldnn/xpu/Blas.cpp");
+        let generic_rank = rank_match("addmm_out", generic, &sample_symbol(1200));
+        let backend_rank = rank_match("addmm_out", backend, &sample_symbol(25));
+        assert!(generic_rank < backend_rank);
+    }
+
+    #[test]
+    fn backend_penalty_is_disabled_when_query_mentions_backend() {
+        let query = "cuda_graph";
+        let cuda_penalty = definition_backend_penalty(query, "aten/src/ATen/cuda/CUDAGraph.cpp");
+        let generic_penalty = definition_backend_penalty(query, "aten/src/ATen/native/Graph.cpp");
+        assert_eq!(cuda_penalty, 0);
+        assert_eq!(generic_penalty, 0);
     }
 }

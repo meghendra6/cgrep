@@ -139,16 +139,40 @@ python3 scripts/benchmark_codex_agent_efficiency.py \
   --cgrep-bin /path/to/cgrep \
   --model gpt-5-codex \
   --reasoning-effort medium \
-  --runs 1
+  --runs 2
 ```
 
 Tracks:
 - `input_tokens`, `cached_input_tokens`, `output_tokens`
 - `billable_tokens = input - cached_input + output`
 - success/failure under command-policy constraints
+- scenario set includes: autograd, TensorIterator, PythonArgParser, DispatchKeySet, CUDAGraph, addmm
+- prompt includes scenario-specific starter hints:
+  - baseline: focused `rg` starter (`grep_pattern`)
+  - cgrep: high-signal `search/definition` starters (`cgrep_commands`) + compact/scoped recommendation
 
 Outputs:
 - `docs/benchmarks/pytorch-codex-agent-efficiency.md`
 - `local/benchmarks/pytorch-codex-agent-efficiency.json` (local-only)
 
-Latest measured snapshot is maintained in the benchmark document.
+Codex single-run variance can be high; prefer multi-run medians (`--runs >= 2`) for release decisions.
+
+## Benchmark: Search Option Performance (PyTorch)
+
+```bash
+python3 scripts/benchmark_search_option_performance.py \
+  --repo /path/to/pytorch \
+  --cgrep-bin /path/to/cgrep \
+  --runs 5 \
+  --warmup 1
+```
+
+Covers practical `search` option/scenario pairs, including:
+- scoped keyword search
+- `--type`, `--glob`, `-C`, `-B`, `-P`
+- payload-focused flags (`--path-alias`, `--dedupe-context`, `--suppress-boilerplate`)
+- scan-mode comparisons (`--no-index`, `--regex --no-index`)
+
+Outputs:
+- `docs/benchmarks/pytorch-search-options-performance.md`
+- `local/benchmarks/pytorch-search-options-performance.json` (local-only)

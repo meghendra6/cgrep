@@ -351,17 +351,26 @@ def build_prompt(mode: str, scenario: Scenario, cgrep_bin: Path) -> str:
             "- Do not edit files.\n"
             "- Keep commands minimal."
         )
+        strategy_hint = f'- Start with a focused `rg -n "{scenario.grep_pattern}"` and stop early once markers are satisfied.'
     else:
+        command_hints = "\n".join(
+            f"  - {cgrep_bin} {cmd}" for cmd in scenario.cgrep_commands
+        )
         rules = (
             f"- Use only this cgrep binary: {cgrep_bin}\n"
             "- You MUST execute at least one cgrep command.\n"
             "- Allowed subcommands are only `search`/`s` and `definition`/`d`.\n"
-            "- Choose cgrep commands autonomously and keep them minimal.\n"
+            "- Choose cgrep commands autonomously and keep them minimal (normally <= 4 commands).\n"
+            "- Prefer scoped + compact commands first: `--format json2 --compact -m 8` and `-p` when scope is clear.\n"
             "- Stop as soon as marker groups are satisfied.\n"
             "- Do NOT wrap commands with `bash -lc`.\n"
             "- Do NOT use `cgrep agent`, `cgrep read`, grep/rg/find, or any `--help` command.\n"
             "- Do not edit files.\n"
             "- If evidence is still insufficient, return `objective_met: false`."
+        )
+        strategy_hint = (
+            "High-signal starter commands (choose one first, then refine only if needed):\n"
+            f"{command_hints}"
         )
     return textwrap.dedent(
         f"""
@@ -375,6 +384,9 @@ def build_prompt(mode: str, scenario: Scenario, cgrep_bin: Path) -> str:
 
         Rules:
         {rules}
+
+        Retrieval strategy hint:
+        {strategy_hint}
 
         Success marker groups:
         {groups}
@@ -569,6 +581,11 @@ def aggregate_mode(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def render_markdown(payload: dict[str, Any]) -> str:
     summary_all = payload["summary"]["all_cases"]
     rows = payload["results"]
+    scenario_ids = []
+    for row in rows:
+        sid = row.get("scenario_id")
+        if isinstance(sid, str) and sid not in scenario_ids:
+            scenario_ids.append(sid)
     lines: list[str] = []
     lines.append("# PyTorch Codex Agent Efficiency Benchmark")
     lines.append("")
@@ -580,6 +597,21 @@ def render_markdown(payload: dict[str, Any]) -> str:
     lines.append("- Baseline mode: autonomous retrieval with cgrep disallowed.")
     lines.append("- cgrep mode: cgrep command usage required.")
     lines.append("- Primary metric: Codex provider-reported billable tokens (`input - cached_input + output`).")
+    lines.append("")
+    lines.append("## Scenario Set")
+    lines.append("")
+    for sid in scenario_ids:
+        lines.append(f"- `{sid}`")
+    lines.append("")
+    lines.append("For each scenario:")
+    lines.append("- Success requires all marker groups to be satisfied from returned evidence.")
+    lines.append("- Baseline allows only `grep/rg/sed/cat/head/tail/git` commands.")
+    lines.append("- Baseline prompt includes a single focused `rg` starter hint (`grep_pattern`) per scenario.")
+    lines.append("- cgrep mode requires `cgrep search|s` or `cgrep definition|d` commands.")
+    lines.append("- cgrep prompt includes scenario-specific high-signal starter commands (`cgrep_commands`) and recommends scoped compact output (`--format json2 --compact`).")
+    lines.append("- Disallowed command usage or missing required tool usage marks the run as failed.")
+    lines.append("")
+    lines.append("> Single-run variance can be high. Prefer `--runs >= 2` and compare medians for release decisions.")
     lines.append("")
     lines.append("## Environment")
     lines.append("")

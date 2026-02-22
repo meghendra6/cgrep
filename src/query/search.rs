@@ -1844,6 +1844,18 @@ fn parse_index_mode(mode: &str) -> IndexMode {
 const KEYWORD_FALLBACK_CONFIDENCE_THRESHOLD: f32 = 0.45;
 const MAX_INITIAL_RESULTS_PER_PATH: usize = 2;
 const NOISY_PATH_SEGMENTS: &[&str] = &["target/", "dist/", "build/", "node_modules/", ".venv/"];
+const CONTEXTUAL_NOISY_PATH_SEGMENTS: &[&str] = &[
+    "cuda",
+    "xpu",
+    "mps",
+    "mkldnn",
+    "vulkan",
+    "metal",
+    "sparse",
+    "quantized",
+    "rocm",
+    "hip",
+];
 
 struct KeywordFallbackPolicy<'a> {
     mode: HybridSearchMode,
@@ -2052,7 +2064,7 @@ impl ScoreComponents {
 }
 
 fn path_signal_components(display_path: &str, query_tokens: &[String]) -> (f32, f32) {
-    let path = display_path.to_ascii_lowercase();
+    let path = display_path.to_ascii_lowercase().replace('\\', "/");
     let mut bonus = 0.0f32;
     for token in query_tokens {
         if path.contains(token) {
@@ -2065,12 +2077,26 @@ fn path_signal_components(display_path: &str, query_tokens: &[String]) -> (f32, 
             penalty += 0.08;
         }
     }
-    (bonus.min(0.15), penalty.min(0.25))
+    for segment in CONTEXTUAL_NOISY_PATH_SEGMENTS {
+        if path.contains(segment) && !query_mentions_path_segment(query_tokens, segment) {
+            penalty += 0.06;
+        }
+    }
+    (bonus.min(0.15), penalty.min(0.35))
 }
 
 fn path_ranking_bonus(display_path: &str, query_tokens: &[String]) -> f32 {
     let (bonus, penalty) = path_signal_components(display_path, query_tokens);
-    (bonus - penalty).clamp(-0.25, 0.15)
+    (bonus - penalty).clamp(-0.35, 0.15)
+}
+
+fn query_mentions_path_segment(query_tokens: &[String], segment: &str) -> bool {
+    query_tokens.iter().any(|token| {
+        token == segment
+            || token.contains(segment)
+            || segment.contains(token.as_str())
+            || token.contains(&format!("_{segment}"))
+    })
 }
 
 fn symbol_ranking_bonus(
@@ -3678,6 +3704,22 @@ mod tests {
         let noisy = path_ranking_bonus("target/debug/noise.rs", &tokens);
         let clean = path_ranking_bonus("src/core/noise.rs", &tokens);
         assert!(noisy < clean);
+    }
+
+    #[test]
+    fn ranking_path_bonus_penalizes_irrelevant_backend_paths() {
+        let tokens = query_tokens_for_ranking("addmm_out");
+        let backend = path_ranking_bonus("aten/src/ATen/native/mkldnn/xpu/Blas.cpp", &tokens);
+        let generic = path_ranking_bonus("aten/src/ATen/native/LinearAlgebra.cpp", &tokens);
+        assert!(backend < generic);
+    }
+
+    #[test]
+    fn ranking_path_bonus_respects_backend_query_affinity() {
+        let tokens = query_tokens_for_ranking("CUDAGraph");
+        let cuda = path_ranking_bonus("aten/src/ATen/cuda/CUDAGraph.cpp", &tokens);
+        let generic = path_ranking_bonus("aten/src/ATen/native/LinearAlgebra.cpp", &tokens);
+        assert!(cuda >= generic);
     }
 
     #[test]

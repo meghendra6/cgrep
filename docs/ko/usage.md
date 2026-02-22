@@ -47,6 +47,7 @@ cgrep mp -d 2
 - 기본적으로 `search`/`symbols`/`definition`/`references`/`callers`/`dependents`와 `agent locate|plan`은 호출 시점 auto-bootstrap + call-driven refresh를 수행하므로, 일반 사용에서 수동 `cgrep index`는 선택 사항입니다.
 - CLI auto-index 변경 검사는 연속 명령 루프에서 반복 스캔 오버헤드를 줄이기 위해 debounce됩니다.
 - `search --no-index`를 사용하면 항상 scan-only로 동작합니다.
+- C/C++ 심볼 내비게이션에서는 `.h`를 C++ 헤더로 처리하며, `definition`에서 `TORCH_API Foo` 같은 매크로 포함 타입 선언을 더 안정적으로 찾습니다.
 
 검증 예시:
 

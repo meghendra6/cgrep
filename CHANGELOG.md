@@ -22,8 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/development.md`, `docs/ko/development.md`
 - Extended `perf-gate` workflow coverage to include deterministic local validation (`scripts/validate_all.sh`) in addition to existing perf gates.
 
+### Fixed
+- Improved C/C++ type resolution in `definition` for macro-annotated declarations (for example `struct TORCH_API Foo`) so symbol lookup returns primary type definitions instead of noisy constructor/base-class artifacts.
+- `.h` headers now use C++ parsing for symbol navigation, improving real-world accuracy in C++-heavy repositories (including mixed `.h` header layouts).
+
 ### Compatibility
-- No default CLI behavior changes: new flows are opt-in via explicit flags/commands.
+- CLI command surface remains unchanged; C/C++ symbol parsing now treats `.h` headers as C++ for navigation commands.
 - Existing aliases and deprecated compatibility mode flags remain supported.
 - `json2` contracts remain additive; optional fields are omitted when empty and required fields remain stable.
 
