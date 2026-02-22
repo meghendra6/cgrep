@@ -140,16 +140,37 @@ python3 scripts/benchmark_codex_agent_efficiency.py \
   --cgrep-bin /path/to/cgrep \
   --model gpt-5-codex \
   --reasoning-effort medium \
-  --runs 1
+  --runs 2
 ```
 
 수집 항목:
 - `input_tokens`, `cached_input_tokens`, `output_tokens`
 - `billable_tokens = input - cached_input + output`
 - 명령 정책 제약 하 성공/실패율
+- 시나리오 세트: autograd, TensorIterator, PythonArgParser, DispatchKeySet, CUDAGraph, addmm
 
 출력:
 - `docs/benchmarks/pytorch-codex-agent-efficiency.md`
 - `local/benchmarks/pytorch-codex-agent-efficiency.json` (로컬 전용)
 
-최신 측정 스냅샷은 벤치마크 문서 본문에 유지됩니다.
+Codex는 단일 실행 변동이 큰 편이므로 릴리즈 판단에는 다회 실행 median(`--runs >= 2`)을 권장합니다.
+
+## 벤치마크: 검색 옵션 성능 (PyTorch)
+
+```bash
+python3 scripts/benchmark_search_option_performance.py \
+  --repo /path/to/pytorch \
+  --cgrep-bin /path/to/cgrep \
+  --runs 5 \
+  --warmup 1
+```
+
+실무형 `search` 옵션/시나리오 조합을 점검합니다.
+- 범위 제한 keyword 검색
+- `--type`, `--glob`, `-C`, `-B`, `-P`
+- payload 최적화 플래그(`--path-alias`, `--dedupe-context`, `--suppress-boilerplate`)
+- scan-mode 비교(`--no-index`, `--regex --no-index`)
+
+출력:
+- `docs/benchmarks/pytorch-search-options-performance.md`
+- `local/benchmarks/pytorch-search-options-performance.json` (로컬 전용)

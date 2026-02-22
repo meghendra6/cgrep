@@ -1,8 +1,9 @@
 # PyTorch AI Agent Token Efficiency Benchmark
 
-Generated: 2026-02-17T01:13:05.138969+00:00
+Generated: 2026-02-22T05:40:03.631143+00:00
 
-> Snapshot note: these numbers were collected at cgrep commit `3606f38`. They are historical benchmark results, not a guarantee for every later release.
+> Snapshot note: benchmark outputs vary by repository state and model behavior.
+> Compare trends over repeated runs rather than relying on one run.
 
 ## What This Measures
 
@@ -14,10 +15,10 @@ Generated: 2026-02-17T01:13:05.138969+00:00
 
 ## Environment
 
-- OS: `macOS-26.2-arm64-arm-64bit`
-- cgrep commit: `3606f38`
-- pytorch commit: `b7abe8e3ab9`
-- PyTorch files (`git ls-files`): `20437`
+- OS: `macOS-26.3-arm64-arm-64bit`
+- cgrep commit: `be95ef6`
+- pytorch commit: `66e77ae932c`
+- PyTorch files (`git ls-files`): `21634`
 - Tokenizer: `tiktoken:cl100k_base`
 - Baseline file tiers: `[2, 4, 6, 8, 12]`
 - cgrep expand tiers: `[1, 2, 4, 6, 8]`
@@ -26,24 +27,24 @@ Generated: 2026-02-17T01:13:05.138969+00:00
 
 | Scenario | Representative coding task | Baseline done | cgrep done | Baseline attempts | cgrep attempts | Baseline tokens-to-complete | cgrep tokens-to-complete | Reduction | Baseline latency (ms) | cgrep latency (ms) |
 |---|---|---|---|---:|---:|---:|---:|---:|---:|---:|
-| Find where autograd engine evaluate_function is implemented and inspected. | Patch autograd evaluate_function flow and verify the implementation file + autograd context. | yes | yes | 1 | 1 | 7,129 | 939 | 86.8% | 2036.06 | 22.15 |
-| Find TensorIterator definition and major implementation usage points. | Prepare a TensorIterator behavior change by locating the core declaration and implementation paths. | yes | yes | 1 | 1 | 43,263 | 1,026 | 97.6% | 1121.76 | 20.12 |
-| Locate PythonArgParser implementation and usage points. | Implement a parser-related fix by gathering PythonArgParser definition and source implementation. | yes | yes | 1 | 1 | 6,741 | 1,004 | 85.1% | 1018.43 | 20.89 |
-| Understand DispatchKeySet representation and references. | Refactor DispatchKeySet logic with confidence by finding its representation and core references. | yes | yes | 1 | 1 | 43,743 | 1,028 | 97.6% | 1017.19 | 21.95 |
-| Locate CUDAGraph implementation-related code quickly. | Make a CUDAGraph code-path update by collecting implementation and CUDA path context. | yes | yes | 1 | 1 | 11,476 | 1,018 | 91.1% | 1016.10 | 23.94 |
-| Find addmm implementation and call sites. | Modify addmm behavior by locating native implementation and addmm_out call path. | yes | yes | 1 | 1 | 15,690 | 1,144 | 92.7% | 1516.72 | 20.89 |
+| Find where autograd engine evaluate_function is implemented and inspected. | Patch autograd evaluate_function flow and verify the implementation file + autograd context. | yes | yes | 1 | 1 | 7,488 | 1,071 | 85.7% | 2205.27 | 118.21 |
+| Find TensorIterator definition and major implementation usage points. | Prepare a TensorIterator behavior change by locating the core declaration and implementation paths. | yes | yes | 1 | 1 | 42,834 | 1,098 | 97.4% | 1269.47 | 23.12 |
+| Locate PythonArgParser implementation and usage points. | Implement a parser-related fix by gathering PythonArgParser definition and source implementation. | yes | yes | 1 | 1 | 6,846 | 1,049 | 84.7% | 1173.61 | 118.82 |
+| Understand DispatchKeySet representation and references. | Refactor DispatchKeySet logic with confidence by finding its representation and core references. | yes | yes | 1 | 1 | 43,781 | 1,120 | 97.4% | 1150.99 | 26.29 |
+| Locate CUDAGraph implementation-related code quickly. | Make a CUDAGraph code-path update by collecting implementation and CUDA path context. | yes | yes | 1 | 1 | 12,593 | 1,107 | 91.2% | 1171.03 | 120.72 |
+| Find addmm implementation and call sites. | Modify addmm behavior by locating native implementation and addmm_out call path. | yes | yes | 1 | 1 | 15,677 | 1,222 | 92.2% | 1721.68 | 24.04 |
 
 ## Aggregate
 
-- One-time index build: **5.11s**
+- One-time index build: **5.37s**
 - Scenarios completed (baseline): **6/6**
 - Scenarios completed (cgrep): **6/6**
-- Baseline tokens-to-complete (total): **128,042**
-- cgrep tokens-to-complete (total): **6,159**
-- Token reduction (to completion): **95.2%**
-- Token compression ratio (baseline/cgrep): **20.79x**
-- Baseline total latency to completion: **7726.26ms**
-- cgrep total latency to completion: **129.95ms**
+- Baseline tokens-to-complete (total): **129,219**
+- cgrep tokens-to-complete (total): **6,667**
+- Token reduction (to completion): **94.8%**
+- Token compression ratio (baseline/cgrep): **19.38x**
+- Baseline total latency to completion: **8692.04ms**
+- cgrep total latency to completion: **431.20ms**
 
 ## Re-run
 
