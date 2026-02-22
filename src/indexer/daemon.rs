@@ -98,7 +98,11 @@ pub fn start(
     let pid_path = pid_file(&root);
     if let Some(pid) = read_pid(&pid_path)? {
         if process_alive(pid) {
-            println!("{} Indexing daemon already running (pid={})", "✓".green(), pid);
+            println!(
+                "{} Indexing daemon already running (pid={})",
+                "✓".green(),
+                pid
+            );
             println!("  Root: {}", root.display());
             return Ok(());
         }
