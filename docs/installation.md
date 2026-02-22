@@ -1,76 +1,48 @@
 # Installation
 
-## Quick Install (Recommended)
+## Recommended (Release Binary)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh | bash
+cgrep --help
 ```
 
-## Choose Your Install Path
-
-### 1) Release binary (most users)
-
-Use the quick-install command above.
-
-Linux note: release binaries target glibc 2.35+ (built on Ubuntu 22.04).
-
-Pin a version:
+## Install a Specific Version
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh \
-  | bash -s -- --version <tag>
+  | bash -s -- --version v1.5.2
 ```
 
-Custom binary directory:
+## Custom Install Directory
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh \
   | bash -s -- --bin-dir ~/.local/bin
 ```
 
-### 2) Install from source
-
-Prerequisite: Rust stable toolchain
-
-```bash
-cargo install --path .
-```
-
-### 3) Build manually
+## Build From Source
 
 ```bash
 cargo build --release
 cp target/release/cgrep ~/.local/bin/
 ```
 
-## Verify Install
+## First Commands
 
 ```bash
-cgrep --help
-```
-
-## First Run In A Repository
-
-```bash
-cgrep index
+cgrep index          # optional warm-up
 cgrep s "token validation" src/
+cgrep d handle_auth
 ```
 
-## Optional: Shell Completions
-
-```bash
-cgrep completions zsh
-```
-
-## macOS Gatekeeper Note
-
-If macOS blocks a downloaded binary:
+## macOS Gatekeeper (if blocked)
 
 ```bash
 xattr -d com.apple.quarantine ~/.local/bin/cgrep
 ```
 
-## Manual Release Asset Verification
+## Release Asset Check (Optional)
 
 ```bash
 TAG=v1.5.2

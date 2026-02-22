@@ -1,71 +1,53 @@
-# cgrep Documentation
+# cgrep Docs
 
-Local-first code search and navigation for users and AI agents.
+Local-first code search for developers and AI coding agents.
 
 Current release: **v1.5.2**
 
-## Start By Goal
-
-| I want to... | Open this doc |
-|---|---|
-| Install quickly and run first command | [Installation](./installation.md) |
-| Learn daily search/navigation commands | [Usage](./usage.md) |
-| Set up token-efficient agent retrieval | [Agent Workflow](./agent.md) |
-| Connect editor/host tools via MCP | [MCP](./mcp.md) |
-| Keep large repo index fresh | [Indexing and Daemon](./indexing-watch.md) |
-| Operate background/reuse safely | [Operations](./operations.md) |
-| Tune defaults and profiles | [Configuration](./configuration.md) |
-| Use semantic/hybrid retrieval (experimental) | [Embeddings](./embeddings.md) |
-| Fix common failures quickly | [Troubleshooting](./troubleshooting.md) |
-| Run build/test/perf validation | [Development](./development.md) |
-
-## Common Paths
-
-### User path (2 minutes)
+## Start Here (2 Minutes)
 
 ```bash
-# optional warm-up
-cgrep index
+# Install
+curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh | bash
+
+# Search + navigate
 cgrep s "token validation" src/
 cgrep d handle_auth
 cgrep read src/auth.rs
 ```
 
-### Agent path (low-token retrieval)
+## By Goal
+
+| Goal | Open this page |
+|---|---|
+| Install quickly | [Installation](./installation.md) |
+| Learn daily commands | [Usage](./usage.md) |
+| Set up AI-agent retrieval | [Agent Workflow](./agent.md) |
+| Connect MCP hosts | [MCP](./mcp.md) |
+| Keep index warm while coding | [Indexing and Daemon](./indexing-watch.md) |
+| Fix common issues | [Troubleshooting](./troubleshooting.md) |
+
+## For AI Coding Agents
 
 ```bash
+cgrep agent install codex
 ID=$(cgrep agent locate "where token validation happens" --compact | jq -r '.results[0].id')
 cgrep agent expand --id "$ID" -C 8 --compact
-cgrep --format json2 --compact agent plan "trace authentication middleware flow"
 ```
 
-## Indexing Decision Quick Guide
+## Benchmark Snapshot (PyTorch, Codex, runs=2)
 
-| Situation | Recommended |
-|---|---|
-| Start searching immediately | run `search/read/definition` directly (auto-bootstrap) |
-| Keep index warm while coding | `cgrep daemon start` during session, then `cgrep daemon stop` |
-| One-time asynchronous prebuild | `cgrep index --background` |
-| Semantic/hybrid experiments | build embeddings index (`cgrep index --embeddings precompute`) |
+- Date: **February 22, 2026 (UTC)**
+- Baseline billable tokens: **151,466**
+- cgrep billable tokens: **69,874**
+- Billable token reduction: **53.9%**
 
-## Benchmark References
+Reports:
+- [Codex Agent Efficiency](./benchmarks/pytorch-codex-agent-efficiency.md)
+- [Search Option Performance](./benchmarks/pytorch-search-options-performance.md)
+- [Agent Token Efficiency](./benchmarks/pytorch-agent-token-efficiency.md)
 
-- [Benchmark: Agent Token Efficiency (PyTorch)](./benchmarks/pytorch-agent-token-efficiency.md)
-- [Benchmark: Codex Agent Efficiency (PyTorch)](./benchmarks/pytorch-codex-agent-efficiency.md)
-- [Benchmark: Search Option Performance (PyTorch)](./benchmarks/pytorch-search-options-performance.md)
-- Latest Codex snapshot (February 22, 2026 UTC): cgrep billable tokens **107,990** vs baseline **158,242** (**31.8%** reduction, `runs=1`).
-- Same-day repeated run variance was high (**-135.4%** to **+31.8%** total-token delta); use multi-run medians for decisions.
-- Latest measured numbers are tracked in each benchmark page.
+## Language
 
-## Language And Site
-
-- Korean docs hub: [ko/index.md](./ko/index.md)
-- Canonical docs site: <https://meghendra6.github.io/cgrep/>
-- Repository README: [README.md](https://github.com/meghendra6/cgrep/blob/main/README.md)
-
-## Related Files
-
-- Changelog: [CHANGELOG.md](https://github.com/meghendra6/cgrep/blob/main/CHANGELOG.md)
-- Comparison: [COMPARISON.md](https://github.com/meghendra6/cgrep/blob/main/COMPARISON.md)
-- Contributing: [CONTRIBUTING.md](https://github.com/meghendra6/cgrep/blob/main/CONTRIBUTING.md)
-- Security: [SECURITY.md](https://github.com/meghendra6/cgrep/blob/main/SECURITY.md)
+- Korean hub: [ko/index.md](./ko/index.md)
+- Repository README (EN/KO/中文): [README.md](https://github.com/meghendra6/cgrep/blob/main/README.md)

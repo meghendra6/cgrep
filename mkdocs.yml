@@ -1,5 +1,5 @@
 site_name: cgrep Docs
-site_description: grep finds text. cgrep finds code intent.
+site_description: Local-first code search and navigation for humans and AI coding agents.
 site_url: https://meghendra6.github.io/cgrep/
 repo_url: https://github.com/meghendra6/cgrep
 repo_name: meghendra6/cgrep
@@ -8,7 +8,6 @@ theme:
   name: material
   features:
     - navigation.sections
-    - navigation.expand
     - navigation.top
     - toc.follow
 plugins:
@@ -18,21 +17,23 @@ markdown_extensions:
   - toc:
       permalink: true
 nav:
-  - Overview: index.md
-  - Installation: installation.md
-  - Usage: usage.md
-  - Agent Workflow: agent.md
-  - MCP: mcp.md
-  - Indexing and Daemon: indexing-watch.md
-  - Operations: operations.md
-  - Configuration: configuration.md
-  - Embeddings: embeddings.md
+  - Start Here:
+      - Overview: index.md
+      - Installation: installation.md
+      - Usage: usage.md
+      - Agent Workflow: agent.md
+      - MCP: mcp.md
+      - Indexing and Daemon: indexing-watch.md
+      - Troubleshooting: troubleshooting.md
   - Benchmark:
-      - Agent Token Efficiency: benchmarks/pytorch-agent-token-efficiency.md
       - Codex Agent Efficiency: benchmarks/pytorch-codex-agent-efficiency.md
       - Search Option Performance: benchmarks/pytorch-search-options-performance.md
-  - Troubleshooting: troubleshooting.md
-  - Development: development.md
+      - Agent Token Efficiency: benchmarks/pytorch-agent-token-efficiency.md
+  - Advanced:
+      - Configuration: configuration.md
+      - Operations: operations.md
+      - Embeddings (Experimental): embeddings.md
+      - Development: development.md
   - Korean:
       - 개요: ko/index.md
       - 설치: ko/installation.md
@@ -40,8 +41,4 @@ nav:
       - 에이전트 워크플로: ko/agent.md
       - MCP: ko/mcp.md
       - 인덱싱과 Daemon: ko/indexing-watch.md
-      - 운영 가이드: ko/operations.md
-      - 설정: ko/configuration.md
-      - 임베딩: ko/embeddings.md
       - 문제 해결: ko/troubleshooting.md
-      - 개발: ko/development.md
