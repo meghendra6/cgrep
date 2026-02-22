@@ -18,6 +18,7 @@ cgrep index --include-ignored
 # 임베딩 모드
 cgrep index --embeddings auto
 cgrep index --embeddings precompute
+# semantic/hybrid 검색 모드는 experimental이며 embeddings 인덱스가 필요합니다
 
 # 매니페스트 제어(증분 경로)
 cgrep index --print-diff
@@ -70,6 +71,15 @@ cgrep daemon start --debounce 30 --min-interval 180 --max-batch-delay 240
 cgrep daemon start --no-adaptive
 ```
 
+## 시나리오별 권장 흐름
+
+| 시나리오 | 권장 명령 | 이유 |
+|---|---|---|
+| 가끔 검색/읽기 | `cgrep search ...` (사전 작업 없음) | auto-bootstrap + 호출 시 refresh로 일반 사용을 처리 |
+| 코딩 세션 진행 중(사용자/에이전트) | `cgrep daemon start` → `cgrep daemon stop` | 파일 변경이 계속되는 동안 인덱스를 hot 상태로 유지 |
+| CI/1회성 사전 빌드 | `cgrep index --background` | daemon 상주 없이 비동기 인덱스 빌드 |
+| semantic/hybrid 실험 | `cgrep index --embeddings precompute` | experimental semantic/hybrid 모드를 위한 embeddings 준비 |
+
 ## 동작 참고
 
 - 인덱스는 `.cgrep/` 아래에 저장
@@ -95,11 +105,16 @@ cgrep daemon start --no-adaptive
 - daemon은 기본적으로 적응형 backoff 사용 (`--no-adaptive`로 비활성화)
 - daemon 기본값은 백그라운드 운용 기준으로 조정 (`--min-interval 180`, 약 3분)
 - daemon은 인덱싱 가능한 확장자만 반응하고 temp/swap 파일은 건너뜀
+- daemon 재인덱싱 트리거:
+  - 인덱싱 가능한 파일의 생성/수정/삭제/이름 변경
+  - 사용자/에디터/AI 코딩 에이전트가 만든 코드 변경
+  - 브랜치 전환으로 워킹트리에 반영되는 추적 파일 변화
 - daemon은 `.cgrep/metadata.json`의 최근 인덱스 프로필을 재사용
 - 재사용 프로필은 최근 `cgrep index` 실행 옵션을 그대로 보존
 - daemon 재인덱싱은 변경 경로만 증분 처리(갱신/삭제)
 - 대규모 변경 배치(예: 큰 브랜치 전환)에서는 daemon이 자동으로 bulk 증분 갱신 경로로 전환해 이벤트/메모리 오버헤드를 낮춥니다.
 - bulk 전환 임계값은 인덱스 파일 수의 약 25%를 기준으로 자동 산정되며, `1500..12000` 범위로 클램프됩니다.
+- daemon은 주기적인 전체 재인덱싱 루프를 돌리지 않으며, 새 이벤트가 없으면 idle 상태를 유지합니다.
 
 ## Daemon 기본값
 

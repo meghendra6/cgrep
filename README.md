@@ -84,6 +84,14 @@ Details:
 - Agent setup guide: <https://meghendra6.github.io/cgrep/agent/>
 - MCP integration guide: <https://meghendra6.github.io/cgrep/mcp/>
 
+## Indexing Model At A Glance
+
+- Manual `cgrep index` is optional for normal search workflows.
+- CLI/MCP search-like commands can auto-bootstrap and refresh indexes on demand.
+- `cgrep index --background` is one-shot async indexing (worker exits).
+- `cgrep daemon start` is for continuous event-driven indexing during active coding sessions.
+- Semantic/hybrid retrieval is experimental and requires an embeddings-enabled index.
+
 ## Search UX (grep-friendly, explicit)
 
 Use explicit search entrypoints:

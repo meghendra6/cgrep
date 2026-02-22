@@ -59,6 +59,17 @@ printf '%s\n' \
 | cgrep mcp serve
 ```
 
+## 수동 인덱싱/Daemon FAQ
+
+- MCP 전에 `cgrep index`를 수동으로 실행해야 하나요?
+  - 보통 필요 없습니다. 기본 MCP 도구는 `auto_index=true`로 동작하며 필요 시 bootstrap/refresh를 수행합니다.
+- MCP 사용 시 `cgrep daemon start`가 필수인가요?
+  - 필수는 아닙니다. MCP auto-index는 호출 기반이며, MCP 서버가 살아있는 동안 파일 변경 신호를 참고합니다.
+- 그럼 daemon을 수동 실행할 시점은?
+  - 툴 호출 간격이 있어도 인덱스를 계속 hot 상태로 유지하고 싶은 고변경 코딩 세션에서 유용합니다.
+- MCP에서 semantic/hybrid를 쓰려면?
+  - embeddings 활성 인덱스가 필요하며, semantic/hybrid 모드는 experimental입니다.
+
 ## 동작 참고
 
 - `cgrep mcp install <host>`는 기본적으로 `command = "cgrep"`를 기록합니다.

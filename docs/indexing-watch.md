@@ -18,6 +18,7 @@ cgrep index --include-ignored
 # Embeddings mode
 cgrep index --embeddings auto
 cgrep index --embeddings precompute
+# semantic/hybrid search modes are experimental and require an embeddings-enabled index
 
 # Manifest controls (incremental path)
 cgrep index --print-diff
@@ -70,6 +71,15 @@ Disable adaptive mode (fixed timing behavior):
 cgrep daemon start --no-adaptive
 ```
 
+## Recommended workflow by scenario
+
+| Scenario | Recommended command | Why |
+|---|---|---|
+| Occasional search/read | `cgrep search ...` (no pre-step) | auto-bootstrap + call-driven refresh handles normal usage |
+| Active coding session (user/agent) | `cgrep daemon start` → `cgrep daemon stop` | keeps index warm while files are changing |
+| CI or one-shot prebuild | `cgrep index --background` | asynchronous build without persistent daemon |
+| Semantic/hybrid evaluation | `cgrep index --embeddings precompute` | prepares embeddings for experimental semantic/hybrid modes |
+
 ## Behavior notes
 
 - Index lives under `.cgrep/`
@@ -98,11 +108,16 @@ cgrep daemon start --no-adaptive
 - Daemon uses adaptive backoff by default (`--no-adaptive` to disable)
 - Daemon defaults are tuned for background operation (`--min-interval 180`, about 3 minutes)
 - Daemon reacts only to indexable source extensions and skips temp/swap files
+- Daemon reindex triggers include:
+  - file create/modify/delete/rename on indexable files
+  - edits from users, editors, and AI coding agents
+  - branch switches that materialize different tracked files in the working tree
 - Daemon reuses the most recent index profile from `.cgrep/metadata.json`
 - Reused profile preserves the latest `cgrep index` options as-is
 - Daemon reindex is changed-path incremental (update/remove touched files only)
 - For high-churn batches (for example large branch switches), daemon automatically switches to bulk incremental refresh to reduce event/memory overhead.
 - Bulk switch threshold is auto-sized from indexed files (about 25%), clamped to `1500..12000`.
+- Daemon does not run periodic full reindex loops; without new events it stays idle.
 
 ## Daemon defaults
 
