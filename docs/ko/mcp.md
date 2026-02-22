@@ -96,6 +96,7 @@ printf '%s\n' \
 
 - MCP 도구는 optional `cwd`를 받아 상대경로 해석 기준을 고정할 수 있습니다.
 - `cgrep_search`는 기본적으로 balanced 출력 예산과 `path_alias`/`dedupe_context`/`suppress_boilerplate`를 사용합니다(명시적으로 비활성화하지 않는 한).
+- `cgrep_search`의 `mode`는 `keyword|semantic|hybrid`를 권장합니다. 호환성 차원에서 `mode=fast|quick|agent|ai|human|user`도 허용되며 내부적으로 `profile`로 처리됩니다.
 - `cgrep_search`, `cgrep_agent_locate`, `cgrep_symbols`, `cgrep_definition`, `cgrep_references`, `cgrep_callers`, `cgrep_dependents`는 기본적으로 `auto_index=true`입니다.
 - `auto_index=true`일 때 인덱스가 없으면 최초 호출에서 bootstrap 인덱싱을 시도합니다.
 - 기존 인덱스가 있으면 MCP 서버 프로세스가 살아있는 동안 파일시스템 변경 이벤트를 구독해 dirty 상태를 기록하고, 다음 MCP 호출 시점에만 refresh를 시도합니다(주기적 백그라운드 reindex 루프 없음).
@@ -107,6 +108,7 @@ printf '%s\n' \
 - `cgrep_search` 결과 `path`는 재사용 가능하도록 유지됩니다:
   워크스페이스 내부 스코프는 상대경로, 외부 스코프는 절대경로를 반환합니다.
 - `cgrep_read`는 빈 `path` 인자를 거부합니다 (`Error: Path cannot be empty`).
+- `cgrep_map`은 MCP 모드에서 `depth`를 생략하면 기본값 `2`를 적용해 루트 전역 맵 타임아웃 위험을 줄입니다. 더 깊은 구조가 필요하면 `depth`를 명시하세요.
 - MCP 서버 cwd가 `/`일 때 상대경로 스코프를 쓰면 `cwd`(또는 절대 `path`)가 필요합니다. 실수로 시스템 루트를 스캔하는 것을 막기 위함입니다.
 
 ## 설정 파일 대상
