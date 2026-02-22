@@ -27,13 +27,20 @@ cgrep read src/auth.rs
 | Keep index warm while coding | [Indexing and Daemon](./indexing-watch.md) |
 | Fix common issues | [Troubleshooting](./troubleshooting.md) |
 
-## For AI Coding Agents
+## AI Agent Setup (Required vs Optional)
 
 ```bash
+# One-time install (choose one)
 cgrep agent install codex
-ID=$(cgrep agent locate "where token validation happens" --compact | jq -r '.results[0].id')
-cgrep agent expand --id "$ID" -C 8 --compact
+cgrep agent install claude-code
+cgrep agent install cursor
+cgrep agent install copilot
+cgrep agent install opencode
 ```
+
+- Required: restart the agent session once.
+- Not required for normal usage: manual `cgrep index` or `cgrep daemon start`.
+- Optional CLI retrieval examples are in [agent.md](./agent.md).
 
 ## Benchmark Snapshot (PyTorch, Codex, runs=2)
 

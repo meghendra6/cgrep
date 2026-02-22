@@ -4,14 +4,14 @@
 
 面向开发者和 AI 编码代理的本地优先代码搜索工具。
 
-`grep` 找文本，`cgrep` 找实现意图。
+`grep` 适合定位文本，`cgrep` 更适合快速定位“功能是在哪里实现的”。
 
 ## 为什么选择 cgrep
 
-- 基于 Tantivy 的本地高速索引（无需云端）
+- 基于 Tantivy 的本地高速索引（不依赖云端）
 - 代码导航命令：`definition`、`references`、`callers`、`read`、`map`
 - 面向代理的稳定输出：`--format json2 --compact`
-- 支持 Codex / Claude / Cursor / VS Code 的 MCP 集成
+- 支持 Codex、Claude Code、Cursor、Copilot 等 MCP 集成
 
 ## 30 秒安装
 
@@ -34,25 +34,37 @@ cgrep read src/auth.rs
 cgrep map --depth 2
 ```
 
-## 面向 AI 编码代理
+## AI 编码代理
+
+### 1) 一次性安装（按你的宿主工具选择）
 
 ```bash
-# 安装 Codex 指南 + MCP 配置
 cgrep agent install codex
+cgrep agent install claude-code
+cgrep agent install cursor
+cgrep agent install copilot
+cgrep agent install opencode
+```
 
-# 低 token 两阶段检索
+### 2) 必需项与可选项
+
+- 必需：安装后重启当前代理会话一次。
+- 普通使用不需要：手动执行 `cgrep index` 或 `cgrep daemon start`。
+- 可选：在长时间、高频改动会话中可开启 daemon 让索引保持热状态。
+
+### 可选：CLI 两阶段检索示例
+
+```bash
 ID=$(cgrep agent locate "where token validation happens" --compact | jq -r '.results[0].id')
 cgrep agent expand --id "$ID" -C 8 --compact
-
-# 稳定的 plan 输出
 cgrep --format json2 --compact agent plan "trace authentication middleware flow"
 ```
 
-## 索引模式（简单规则）
+## 索引模式（简明规则）
 
-- 偶发使用：直接运行 `search/definition/read`（自动引导索引）
+- 偶发使用：直接运行 `search/definition/read`（自动 bootstrap）
 - 持续开发：`cgrep daemon start`，结束后 `cgrep daemon stop`
-- semantic/hybrid 搜索：实验特性，需要 embeddings 索引
+- semantic/hybrid：实验特性，需要 embeddings 索引
 
 ## 基准快照（PyTorch, Codex, runs=2）
 

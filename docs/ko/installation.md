@@ -1,76 +1,48 @@
 # 설치
 
-## 빠른 설치 (권장)
+## 권장 설치 (릴리즈 바이너리)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh | bash
+cgrep --help
 ```
 
-## 설치 방법 선택
-
-### 1) 릴리즈 바이너리 설치 (대부분 사용자 권장)
-
-위의 빠른 설치 명령을 그대로 사용하면 됩니다.
-
-Linux 참고: 릴리즈 바이너리는 glibc 2.35+ 기준(Ubuntu 22.04 빌드)입니다.
-
-특정 버전 고정:
+## 특정 버전 설치
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh \
-  | bash -s -- --version <tag>
+  | bash -s -- --version v1.5.2
 ```
 
-설치 경로 지정:
+## 설치 경로 지정
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh \
   | bash -s -- --bin-dir ~/.local/bin
 ```
 
-### 2) 소스에서 설치
-
-사전 조건: Rust stable 툴체인
-
-```bash
-cargo install --path .
-```
-
-### 3) 수동 빌드
+## 소스 빌드 설치
 
 ```bash
 cargo build --release
 cp target/release/cgrep ~/.local/bin/
 ```
 
-## 설치 확인
+## 첫 실행 명령
 
 ```bash
-cgrep --help
-```
-
-## 저장소에서 첫 실행
-
-```bash
-cgrep index
+cgrep index          # 선택: 워밍업
 cgrep s "token validation" src/
+cgrep d handle_auth
 ```
 
-## 선택: 셸 자동완성
-
-```bash
-cgrep completions zsh
-```
-
-## macOS Gatekeeper 참고
-
-다운로드한 바이너리가 차단되면:
+## macOS Gatekeeper 차단 시
 
 ```bash
 xattr -d com.apple.quarantine ~/.local/bin/cgrep
 ```
 
-## 릴리즈 자산 수동 검증
+## 릴리즈 자산 무결성 확인 (선택)
 
 ```bash
 TAG=v1.5.2
