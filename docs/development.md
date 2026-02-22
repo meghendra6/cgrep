@@ -147,6 +147,9 @@ Tracks:
 - `billable_tokens = input - cached_input + output`
 - success/failure under command-policy constraints
 - scenario set includes: autograd, TensorIterator, PythonArgParser, DispatchKeySet, CUDAGraph, addmm
+- prompt includes scenario-specific starter hints:
+  - baseline: focused `rg` starter (`grep_pattern`)
+  - cgrep: high-signal `search/definition` starters (`cgrep_commands`) + compact/scoped recommendation
 
 Outputs:
 - `docs/benchmarks/pytorch-codex-agent-efficiency.md`

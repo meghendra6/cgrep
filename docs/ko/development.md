@@ -148,6 +148,9 @@ python3 scripts/benchmark_codex_agent_efficiency.py \
 - `billable_tokens = input - cached_input + output`
 - 명령 정책 제약 하 성공/실패율
 - 시나리오 세트: autograd, TensorIterator, PythonArgParser, DispatchKeySet, CUDAGraph, addmm
+- 프롬프트에는 시나리오별 starter hint가 포함됩니다:
+  - baseline: 집중형 `rg` starter(`grep_pattern`)
+  - cgrep: 고신호 `search/definition` starter(`cgrep_commands`) + compact/scope 권장
 
 출력:
 - `docs/benchmarks/pytorch-codex-agent-efficiency.md`

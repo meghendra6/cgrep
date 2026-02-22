@@ -114,6 +114,8 @@ impl SymbolExtractor {
             }
         }
 
+        dedupe_symbols_in_place(&mut symbols);
+
         Ok(symbols)
     }
 
@@ -150,6 +152,13 @@ impl SymbolExtractor {
     /// Extract a symbol from a node if it represents a definition
     fn extract_symbol_from_node(&self, node: Node, source: &[u8], lang: &str) -> Option<Symbol> {
         let kind = node.kind();
+
+        if matches!(lang, "c" | "cpp")
+            && kind == "function_declarator"
+            && is_inside_c_like_function_definition(node)
+        {
+            return None;
+        }
 
         // Match patterns based on language
         let (symbol_kind, name_field) = match lang {
@@ -451,11 +460,11 @@ fn canonicalize_c_like_function_name(raw: &str) -> String {
     }
 
     let mut cleaned = head.trim();
-    cleaned = cleaned.trim_start_matches(|ch| matches!(ch, '&' | '*'));
+    cleaned = cleaned.trim_start_matches(['&', '*']);
     cleaned = cleaned.trim();
-    cleaned = cleaned.trim_end_matches(|ch| matches!(ch, '&' | '*'));
+    cleaned = cleaned.trim_end_matches(['&', '*']);
     cleaned = cleaned.trim();
-    cleaned = cleaned.trim_matches(|ch| matches!(ch, '(' | ')'));
+    cleaned = cleaned.trim_matches(['(', ')']);
 
     let token = cleaned
         .split_whitespace()
@@ -468,11 +477,29 @@ fn canonicalize_c_like_function_name(raw: &str) -> String {
 
 fn symbol_dedupe_key(symbol: &Symbol) -> String {
     format!(
-        "{}:{}:{}",
+        "{}:{}:{}:{}:{}",
         symbol.kind,
         symbol.line,
+        symbol.column,
+        symbol.end_line,
         symbol.name.to_ascii_lowercase()
     )
+}
+
+fn dedupe_symbols_in_place(symbols: &mut Vec<Symbol>) {
+    let mut seen = HashSet::new();
+    symbols.retain(|symbol| seen.insert(symbol_dedupe_key(symbol)));
+}
+
+fn is_inside_c_like_function_definition(node: Node) -> bool {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if parent.kind() == "function_definition" {
+            return true;
+        }
+        current = parent.parent();
+    }
+    false
 }
 
 fn parse_c_like_type_name_with_kind(raw: &str) -> Option<(SymbolKind, String)> {
@@ -698,6 +725,15 @@ TensorIteratorConfig& TensorIteratorConfig::add_owned_output(const TensorBase& o
         assert!(function_symbols
             .iter()
             .all(|symbol| !symbol.name.starts_with('&')));
+        let canonical_name = "TensorIteratorConfig::add_owned_output";
+        assert_eq!(
+            function_symbols
+                .iter()
+                .filter(|symbol| symbol.name == canonical_name)
+                .count(),
+            1,
+            "canonicalized C++ function symbol should not be duplicated"
+        );
     }
 
     #[test]
