@@ -13,8 +13,7 @@
 | `cgrep references <name>` (`refs`, `r`) | 참조 조회 |
 | `cgrep dependents <file>` (`deps`, `dep`) | 역의존 파일 조회 |
 | `cgrep index` (`ix`, `i`) | 인덱스 생성/재생성 |
-| `cgrep watch` (`wt`, `w`) | 파일 변경 감시 후 재인덱싱 |
-| `cgrep daemon <start|status|stop>` (`bg`) | 백그라운드 watch daemon 관리 |
+| `cgrep daemon <start|status|stop>` (`bg`) | 백그라운드 인덱싱 daemon 관리 |
 | `cgrep status` (`st`) | basic/full 준비 상태 + 백그라운드 인덱스 상태 조회 |
 | `cgrep mcp <serve|install|uninstall>` | MCP 서버 및 host 설정 연동 |
 | `cgrep agent <...>` (`a`) | 에이전트 plan/locate/expand + 연동 설치 |
@@ -45,6 +44,9 @@ cgrep mp -d 2
 - `cgrep read`에 빈 경로를 넘기면 에러를 반환합니다 (`Error: Path cannot be empty`).
 - `search` 결과 `path`는 항상 round-trip 가능하도록 반환됩니다:
   워크스페이스 내부 스코프는 상대경로, 외부 스코프는 절대경로를 사용합니다.
+- 기본적으로 `search`/`symbols`/`definition`/`references`/`callers`/`dependents`와 `agent locate|plan`은 호출 시점 auto-bootstrap + call-driven refresh를 수행하므로, 일반 사용에서 수동 `cgrep index`는 선택 사항입니다.
+- CLI auto-index 변경 검사는 연속 명령 루프에서 반복 스캔 오버헤드를 줄이기 위해 debounce됩니다.
+- `search --no-index`를 사용하면 항상 scan-only로 동작합니다.
 
 검증 예시:
 
@@ -70,7 +72,7 @@ cgrep a l "token validation" -B tight -u
 ## 빠른 시작 (사람)
 
 ```bash
-# 1) 인덱스 생성
+# 1) 선택: 워밍업 인덱스 생성(필수 아님)
 cgrep index
 
 # 2) 핵심 5개 명령
@@ -165,13 +167,13 @@ cgrep s "controller middleware" -B tight -P agent
 
 ```bash
 cgrep search "token refresh" --mode keyword   # 기본값
-cgrep search "token refresh" --mode semantic  # embeddings + index 필요
-cgrep search "token refresh" --mode hybrid    # embeddings + index 필요
+cgrep search "token refresh" --mode semantic  # experimental, embeddings + index 필요
+cgrep search "token refresh" --mode hybrid    # experimental, embeddings + index 필요
 ```
 
 모드 참고:
 - `keyword`는 인덱스가 있으면 인덱스를 사용하고, 없으면 scan으로 폴백
-- `semantic/hybrid`는 인덱스가 반드시 필요하며 scan 폴백 없음
+- `semantic/hybrid`는 **experimental**이며 인덱스가 반드시 필요하고 scan 폴백이 없음
 
 하위 호환 별칭(권장하지 않음):
 - `--keyword`, `--semantic`, `--hybrid` (대신 `--mode` 사용)

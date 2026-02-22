@@ -1,6 +1,7 @@
 # Embeddings
 
 Embeddings are optional and used by `--mode semantic|hybrid`.
+This feature is **experimental** and may change.
 
 ## Basic flow
 

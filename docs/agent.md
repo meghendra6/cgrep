@@ -7,6 +7,7 @@
 - In MCP/Codex loops, prefer `cgrep_agent_locate -> cgrep_agent_expand` before direct `cgrep_search`.
 - Scope early with `-p`, `--glob`, `--changed`.
 - Keep payload deterministic for agents: `--format json2 --compact`.
+- In MCP usage, retrieval tools default to `auto_index=true`: first call bootstraps index if needed, and later refresh is call-driven + file-change-aware (no periodic reindex loop required).
 
 ## Two-stage retrieval (`agent`)
 

@@ -13,8 +13,7 @@
 | `cgrep references <name>` (`refs`, `r`) | References lookup |
 | `cgrep dependents <file>` (`deps`, `dep`) | Reverse dependency lookup |
 | `cgrep index` (`ix`, `i`) | Build/rebuild index |
-| `cgrep watch` (`wt`, `w`) | Reindex on file changes |
-| `cgrep daemon <start|status|stop>` (`bg`) | Manage background watch daemon |
+| `cgrep daemon <start|status|stop>` (`bg`) | Manage background indexing daemon |
 | `cgrep status` (`st`) | Show basic/full readiness + background index state |
 | `cgrep mcp <serve|install|uninstall>` | MCP server + host config integration |
 | `cgrep agent <...>` (`a`) | Agent plan/locate/expand + integration install |
@@ -45,6 +44,9 @@ cgrep mp -d 2
 - `cgrep read` rejects empty paths (`Error: Path cannot be empty`).
 - `search` result `path` is always round-trip safe:
   workspace-internal scopes return workspace-relative paths, and external scopes return absolute paths.
+- `search`/`symbols`/`definition`/`references`/`callers`/`dependents` and `agent locate|plan` auto-bootstrap and call-driven refresh index by default, so manual `cgrep index` is optional for normal use.
+- CLI auto-index change checks are debounced in tight command loops to reduce repeated scan overhead.
+- `search --no-index` always keeps scan-only behavior.
 
 Validation examples:
 
@@ -70,7 +72,7 @@ cgrep a l "token validation" -B tight -u
 ## Human quick start
 
 ```bash
-# 1) Build index
+# 1) Optional warm-up index (not required)
 cgrep index
 
 # 2) Core 5 commands
@@ -165,13 +167,13 @@ cgrep s "controller middleware" -B tight -P agent
 
 ```bash
 cgrep search "token refresh" --mode keyword   # default
-cgrep search "token refresh" --mode semantic  # requires embeddings + index
-cgrep search "token refresh" --mode hybrid    # requires embeddings + index
+cgrep search "token refresh" --mode semantic  # experimental, requires embeddings + index
+cgrep search "token refresh" --mode hybrid    # experimental, requires embeddings + index
 ```
 
 Mode notes:
 - `keyword` uses index when present, otherwise scan fallback
-- `semantic/hybrid` require index; no scan fallback
+- `semantic/hybrid` are **experimental**, require index, and have no scan fallback
 
 Deprecated compatibility aliases:
 - `--keyword`, `--semantic`, `--hybrid` (use `--mode`)

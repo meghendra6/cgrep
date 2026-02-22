@@ -15,7 +15,7 @@ Code search for humans and AI coding agents.
 |---|---|---|
 | Locate real implementation points | repeat grep + manual file opens | `search -> definition/references -> read` |
 | Keep agent loops small | noisy context payloads | `agent plan` or `agent locate -> agent expand` |
-| Maintain stable retrieval in large repos | ad-hoc scripts | index/watch/daemon + MCP server |
+| Maintain stable retrieval in large repos | ad-hoc scripts | index/daemon + MCP server |
 
 ## 60-Second Quick Start
 
@@ -25,13 +25,15 @@ Code search for humans and AI coding agents.
 # 1) Install (release binary)
 curl -fsSL https://raw.githubusercontent.com/meghendra6/cgrep/main/scripts/install_release.sh | bash
 
-# 2) Build index once per repo (respects .gitignore/.ignore by default)
+# 2) Optional warm-up index (normal search commands auto-bootstrap/call-driven refresh)
 cgrep index
-# or non-blocking background build
+# or one-shot non-blocking build (worker exits after the build)
 cgrep index --background
 # or warm-start from local compatible cache snapshots
 cgrep index --reuse strict
 cgrep index --reuse auto
+# for continuous file-change indexing during an active session
+cgrep daemon start
 
 # 3) Search and navigate
 cgrep s "token validation" src/
@@ -41,6 +43,8 @@ cgrep d handle_auth
 cgrep r UserService
 cgrep read src/auth.rs
 cgrep status
+# stop continuous daemon when done
+cgrep daemon stop
 ```
 
 ### For AI Agents
@@ -158,10 +162,10 @@ PyTorch scenario-completion benchmark snapshots:
 - Usage: `docs/usage.md`
 - Agent workflow: `docs/agent.md`
 - MCP integration: `docs/mcp.md`
-- Indexing/watch/daemon: `docs/indexing-watch.md`
+- Indexing/daemon: `docs/indexing-watch.md`
 - Operations: `docs/operations.md`
 - Configuration: `docs/configuration.md`
-- Embeddings mode: `docs/embeddings.md`
+- Embeddings mode (experimental): `docs/embeddings.md`
 - Troubleshooting: `docs/troubleshooting.md`
 - Development: `docs/development.md`
 

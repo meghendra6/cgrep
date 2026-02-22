@@ -83,6 +83,27 @@ CI 임계값(중앙값 기준):
 - agent plan 회귀 > `10%`: 실패
 - agent-plan 성능 체크에서는 작은 절대 편차(`<= 3ms`)를 노이즈로 처리
 
+## 태그 기반 릴리즈 CI
+
+릴리즈 워크플로우(`.github/workflows/release.yml`)는 릴리즈 태그가 push되면 실행됩니다.
+허용되는 태그 형식:
+- `vMAJOR.MINOR.PATCH` (예: `v1.5.2`)
+- `MAJOR.MINOR.PATCH` (예: `1.5.2`)
+
+```bash
+git tag v1.5.2
+git push origin v1.5.2
+```
+
+또는
+
+```bash
+git tag 1.5.2
+git push origin 1.5.2
+```
+
+수동 실행(`workflow_dispatch`)은 선택한 커밋(`github.sha`) 기준으로 지정한 태그 이름으로 퍼블리시합니다.
+
 ## 릴리즈 전 체크리스트
 
 - 빌드 통과 (`cargo build`)

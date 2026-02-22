@@ -71,9 +71,9 @@ batch_size = 4      # 작을수록 메모리 사용량이 낮고 CPU 환경에�
 - 무시 경로 중 일부만 포함하려면 `cgrep index --include-path <path>`를 반복 지정하세요.
 - 설정 파일 기준으로는 `[index] respect_git_ignore = true|false` (기본값 `true`)와 동일합니다.
 
-## Watch/daemon 인덱스 프로필 재사용
+## Daemon 인덱스 프로필 재사용
 
-- `cgrep watch`와 `cgrep daemon`은 `.cgrep/metadata.json`에 저장된 최근 인덱스 프로필을 재사용합니다.
+- `cgrep daemon`은 `.cgrep/metadata.json`에 저장된 최근 인덱스 프로필을 재사용합니다.
 - 재사용 프로필은 최근 `cgrep index` 실행에 사용된 옵션을 그대로 보존합니다.
 - 저장된 프로필이 없으면 `[index]` 설정 기본값으로 동작합니다.
 

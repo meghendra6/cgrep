@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Background watch daemon management.
+//! Background indexing daemon management.
 
 use anyhow::{Context, Result};
 use colored::Colorize;
@@ -98,7 +98,11 @@ pub fn start(
     let pid_path = pid_file(&root);
     if let Some(pid) = read_pid(&pid_path)? {
         if process_alive(pid) {
-            println!("{} Watch daemon already running (pid={})", "✓".green(), pid);
+            println!(
+                "{} Indexing daemon already running (pid={})",
+                "✓".green(),
+                pid
+            );
             println!("  Root: {}", root.display());
             return Ok(());
         }
@@ -118,7 +122,8 @@ pub fn start(
     let exe = std::env::current_exe().context("failed to resolve current executable")?;
     let mut cmd = Command::new(exe);
     cmd.current_dir(&root)
-        .arg("watch")
+        .arg("daemon")
+        .arg("__watch-worker")
         .arg("--path")
         .arg(root.as_os_str())
         .arg("--debounce")
@@ -134,12 +139,12 @@ pub fn start(
         cmd.arg("--no-adaptive");
     }
 
-    let child = cmd.spawn().context("failed to start watch daemon")?;
+    let child = cmd.spawn().context("failed to start indexing daemon")?;
     let pid = child.id();
     write_pid(&pid_path, pid)?;
 
     println!(
-        "{} Watch daemon started (pid={})",
+        "{} Indexing daemon started (pid={})",
         "✓".green(),
         pid.to_string().cyan()
     );
@@ -154,26 +159,26 @@ pub fn stop(path: Option<&str>) -> Result<()> {
     let root = resolve_root(path)?;
     let pid_path = pid_file(&root);
     let Some(pid) = read_pid(&pid_path)? else {
-        println!("{} Watch daemon is not running", "✗".yellow());
+        println!("{} Indexing daemon is not running", "✗".yellow());
         return Ok(());
     };
 
     if !process_alive(pid) {
         let _ = fs::remove_file(&pid_path);
         println!(
-            "{} Watch daemon was not running (stale pid removed)",
+            "{} Indexing daemon was not running (stale pid removed)",
             "✗".yellow()
         );
         return Ok(());
     }
 
     if !terminate_process(pid) {
-        anyhow::bail!("Failed to stop watch daemon process {}", pid);
+        anyhow::bail!("Failed to stop indexing daemon process {}", pid);
     }
 
     let _ = fs::remove_file(&pid_path);
     println!(
-        "{} Watch daemon stopped (pid={})",
+        "{} Indexing daemon stopped (pid={})",
         "✓".green(),
         pid.to_string().cyan()
     );
@@ -186,7 +191,7 @@ pub fn status(path: Option<&str>) -> Result<()> {
     let log_path = log_file(&root);
 
     let Some(pid) = read_pid(&pid_path)? else {
-        println!("{} Watch daemon: not running", "✗".yellow());
+        println!("{} Indexing daemon: not running", "✗".yellow());
         println!("  Root: {}", root.display());
         return Ok(());
     };
@@ -194,13 +199,13 @@ pub fn status(path: Option<&str>) -> Result<()> {
     let alive = process_alive(pid);
     if alive {
         println!(
-            "{} Watch daemon: running (pid={})",
+            "{} Indexing daemon: running (pid={})",
             "✓".green(),
             pid.to_string().cyan()
         );
     } else {
         println!(
-            "{} Watch daemon: stale pid file (pid={})",
+            "{} Indexing daemon: stale pid file (pid={})",
             "✗".yellow(),
             pid
         );

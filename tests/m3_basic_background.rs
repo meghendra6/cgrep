@@ -122,7 +122,8 @@ fn keyword_search_without_full_index_is_functional_and_deterministic() {
         &["search", "m3_missing_index_probe", "--limit", "20"],
     );
 
-    assert_eq!(first["meta"]["index_mode"], "scan");
+    assert_eq!(first["meta"]["index_mode"], "index");
+    assert_eq!(second["meta"]["index_mode"], "index");
     assert!(first["results"]
         .as_array()
         .map(|v| !v.is_empty())

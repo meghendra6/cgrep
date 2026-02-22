@@ -1,4 +1,4 @@
-# 인덱싱과 Watch
+# 인덱싱과 Daemon
 
 ## 인덱싱
 
@@ -33,14 +33,10 @@ cgrep index --reuse auto
 cgrep index --reuse off
 ```
 
-## Watch와 daemon
+## Daemon
 
 ```bash
-# 포그라운드 watch
-cgrep watch
-cgrep w
-
-# daemon 모드 (백그라운드 watch 관리)
+# daemon 모드 (백그라운드 인덱싱 관리)
 cgrep daemon start
 cgrep daemon status
 cgrep daemon stop
@@ -51,19 +47,27 @@ cgrep bg st
 cgrep bg down
 ```
 
+## `index --background`와 `daemon` 선택 기준
+
+- `cgrep index --background`:
+  - 1회성 비동기 빌드
+  - 빌드가 끝나면 worker가 종료됨
+  - 파일 변경 감시를 계속 유지하지 않음
+- `cgrep daemon start`:
+  - 장기 실행되는 관리형 프로세스
+  - 파일 변경을 계속 추적하며 증분 재인덱싱 수행
+  - 작업 종료 시 `cgrep daemon stop`으로 명시적으로 중지
+
 대형 저장소 저부하 예시:
 
 ```bash
-cgrep watch --debounce 30 --min-interval 180 --max-batch-delay 240
-
-# 단축 플래그 형태
-cgrep w -d 30 -i 180 -b 240
+cgrep daemon start --debounce 30 --min-interval 180 --max-batch-delay 240
 ```
 
 적응형 모드 비활성화(고정 타이밍):
 
 ```bash
-cgrep watch --no-adaptive
+cgrep daemon start --no-adaptive
 ```
 
 ## 동작 참고
@@ -71,6 +75,7 @@ cgrep watch --no-adaptive
 - 인덱스는 `.cgrep/` 아래에 저장
 - 매니페스트는 `.cgrep/manifest/` 아래에 저장 (`version`, `v1.json`, 선택적 `root.hash`)
 - 하위 디렉터리에서 검색해도 가장 가까운 상위 인덱스를 재사용
+- 기본적으로 search/symbol 계열 명령은 호출 시점 auto-bootstrap + call-driven refresh를 수행하므로, daemon은 항상 뜨거운 인덱스가 필요할 때만 선택적으로 사용하면 됩니다.
 - 인덱싱은 기본적으로 `.gitignore`/`.ignore`를 존중 (`--include-ignored`로 전체 포함 가능)
 - `--include-path <path>`로 ignore 경로 중 일부만 선택적으로 인덱싱 가능
 - `--manifest-only`는 문서 재인덱싱 없이 `.cgrep/metadata.json`의 매니페스트/요약만 갱신
@@ -87,14 +92,16 @@ cgrep watch --no-adaptive
   - 재사용 활성 중 stale/nonexistent 파일은 결과에서 필터링
   - 비호환/손상 스냅샷은 일반 인덱싱으로 폴백
 - `status`는 `.cgrep/status.json`에서 결정적 준비/진행 필드를 읽어 표시
-- watch는 기본적으로 적응형 backoff 사용 (`--no-adaptive`로 비활성화)
-- watch 기본값은 백그라운드 운용 기준으로 조정 (`--min-interval 180`, 약 3분)
-- watch는 인덱싱 가능한 확장자만 반응하고 temp/swap 파일은 건너뜀
-- watch/daemon은 `.cgrep/metadata.json`의 최근 인덱스 프로필을 재사용
+- daemon은 기본적으로 적응형 backoff 사용 (`--no-adaptive`로 비활성화)
+- daemon 기본값은 백그라운드 운용 기준으로 조정 (`--min-interval 180`, 약 3분)
+- daemon은 인덱싱 가능한 확장자만 반응하고 temp/swap 파일은 건너뜀
+- daemon은 `.cgrep/metadata.json`의 최근 인덱스 프로필을 재사용
 - 재사용 프로필은 최근 `cgrep index` 실행 옵션을 그대로 보존
-- watch 재인덱싱은 변경 경로만 증분 처리(갱신/삭제)
+- daemon 재인덱싱은 변경 경로만 증분 처리(갱신/삭제)
+- 대규모 변경 배치(예: 큰 브랜치 전환)에서는 daemon이 자동으로 bulk 증분 갱신 경로로 전환해 이벤트/메모리 오버헤드를 낮춥니다.
+- bulk 전환 임계값은 인덱스 파일 수의 약 25%를 기준으로 자동 산정되며, `1500..12000` 범위로 클램프됩니다.
 
-## Watch 기본값
+## Daemon 기본값
 
 | 옵션 | 기본값 | 목적 |
 |---|---:|---|
@@ -103,18 +110,12 @@ cgrep watch --no-adaptive
 | `--max-batch-delay` | `180` | 이벤트가 계속 들어오면 강제 실행 |
 | 적응형 모드 | `on` | 변경량/재인덱싱 비용에 따라 자동 backoff |
 
-## 백그라운드 watch
+## 관리형 daemon 수명주기
 
 ```bash
-# 백그라운드 실행 + 로그 기록
-nohup cgrep watch > .cgrep/watch.log 2>&1 &
-
-# 프로세스/로그 확인
-pgrep -fl "cgrep watch"
-tail -f .cgrep/watch.log
-
-# 종료
-pkill -f "cgrep watch"
+cgrep daemon start
+cgrep daemon status
+cgrep daemon stop
 ```
 
 대형 저장소에서는 아래 조합을 권장합니다.

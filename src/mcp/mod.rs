@@ -4,13 +4,19 @@
 
 pub mod install;
 
+use crate::indexer::scanner::is_indexable_extension;
+use notify::{
+    Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode,
+    Watcher as NotifyWatcher,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{mpsc, Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -20,7 +26,13 @@ const DEFAULT_MCP_TOOL_MAX_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
 const PIPE_DRAIN_GRACE_MS: u64 = 250;
 const MIN_PIPE_DRAIN_WAIT_MS: u64 = 1_000;
 const AUTO_INDEX_FAILURE_TTL_MS: u64 = 60_000;
+const AUTO_INDEX_REFRESH_DEBOUNCE_MS: u64 = 500;
+const AUTO_INDEX_REFRESH_FAILURE_TTL_MS: u64 = 60_000;
+const AUTO_INDEX_WATCH_POLL_INTERVAL_MS: u64 = 1_500;
+const AUTO_INDEX_SCOPE_IDLE_TTL_MS: u64 = 15 * 60_000;
 static AUTO_INDEX_FAILURES: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+static AUTO_INDEX_SCOPE_STATES: OnceLock<Mutex<HashMap<String, AutoIndexScopeState>>> =
+    OnceLock::new();
 
 // Keep harness guidance close to the server so every MCP host gets the same behavior.
 const HARNESS_INSTRUCTIONS: &str = "\
@@ -218,6 +230,7 @@ fn tool_search(args: &Value) -> Result<String, String> {
     if auto_index {
         match ensure_index_for_search(cwd, path) {
             Ok(BootstrapOutcome::AlreadyIndexed) => {}
+            Ok(BootstrapOutcome::Refreshed) => {}
             Ok(BootstrapOutcome::Bootstrapped) => bootstrap_index = true,
             Ok(BootstrapOutcome::FellBackToScan) => force_scan_from_bootstrap = true,
             Err(err) => return Err(err),
@@ -300,7 +313,9 @@ fn tool_search(args: &Value) -> Result<String, String> {
 fn tool_agent_locate(args: &Value) -> Result<String, String> {
     let query = required_str(args, "query")?;
     let cwd = opt_cwd(args);
-    require_bounded_relative_scope("cgrep_agent_locate", cwd, opt_str(args, "path"), true)?;
+    let path = opt_str(args, "path");
+    require_bounded_relative_scope("cgrep_agent_locate", cwd, path, true)?;
+    maybe_prepare_auto_index(args, cwd, path)?;
     let mut cmd = vec![
         "--format".to_string(),
         "json2".to_string(),
@@ -309,7 +324,7 @@ fn tool_agent_locate(args: &Value) -> Result<String, String> {
         "locate".to_string(),
         query.to_string(),
     ];
-    push_opt_flag_value(&mut cmd, "-p", opt_str(args, "path"));
+    push_opt_flag_value(&mut cmd, "-p", path);
     push_changed(&mut cmd, args.get("changed"));
     push_opt_flag_value_u64(&mut cmd, "--limit", opt_u64(args, "limit"));
     push_opt_flag_value(&mut cmd, "--mode", opt_str(args, "mode"));
@@ -414,6 +429,7 @@ fn tool_symbols(args: &Value) -> Result<String, String> {
     let name = required_str(args, "name")?;
     let cwd = opt_cwd(args);
     require_bounded_relative_scope("cgrep_symbols", cwd, None, true)?;
+    maybe_prepare_auto_index(args, cwd, None)?;
     let mut cmd = vec![
         "--format".to_string(),
         "json".to_string(),
@@ -436,6 +452,7 @@ fn tool_definition(args: &Value) -> Result<String, String> {
     let cwd = opt_cwd(args);
     let path = opt_str(args, "path");
     require_bounded_relative_scope("cgrep_definition", cwd, path, true)?;
+    maybe_prepare_auto_index(args, cwd, path)?;
     let mut cmd = vec![
         "--format".to_string(),
         "json".to_string(),
@@ -451,7 +468,9 @@ fn tool_definition(args: &Value) -> Result<String, String> {
 fn tool_references(args: &Value) -> Result<String, String> {
     let name = required_str(args, "name")?;
     let cwd = opt_cwd(args);
-    require_bounded_relative_scope("cgrep_references", cwd, opt_str(args, "path"), true)?;
+    let path = opt_str(args, "path");
+    require_bounded_relative_scope("cgrep_references", cwd, path, true)?;
+    maybe_prepare_auto_index(args, cwd, path)?;
     let mut cmd = vec![
         "--format".to_string(),
         "json".to_string(),
@@ -459,7 +478,7 @@ fn tool_references(args: &Value) -> Result<String, String> {
         "references".to_string(),
         name.to_string(),
     ];
-    push_opt_flag_value(&mut cmd, "-p", opt_str(args, "path"));
+    push_opt_flag_value(&mut cmd, "-p", path);
     push_opt_flag_value_u64(&mut cmd, "--limit", opt_u64(args, "limit"));
     push_changed(&mut cmd, args.get("changed"));
     push_opt_flag_value(&mut cmd, "--mode", opt_str(args, "mode"));
@@ -470,6 +489,7 @@ fn tool_callers(args: &Value) -> Result<String, String> {
     let function = required_str(args, "function")?;
     let cwd = opt_cwd(args);
     require_bounded_relative_scope("cgrep_callers", cwd, None, true)?;
+    maybe_prepare_auto_index(args, cwd, None)?;
     let mut cmd = vec![
         "--format".to_string(),
         "json".to_string(),
@@ -485,6 +505,11 @@ fn tool_dependents(args: &Value) -> Result<String, String> {
     let file = required_str(args, "file")?;
     let cwd = opt_cwd(args);
     require_bounded_relative_scope("cgrep_dependents", cwd, Some(file), false)?;
+    let dependents_scope = Path::new(file)
+        .parent()
+        .and_then(|parent| parent.to_str())
+        .filter(|parent| !parent.is_empty() && *parent != ".");
+    maybe_prepare_auto_index(args, cwd, dependents_scope)?;
     let cmd = vec![
         "--format".to_string(),
         "json".to_string(),
@@ -667,11 +692,49 @@ fn require_bounded_relative_scope(
     Ok(())
 }
 
+struct AutoIndexScopeState {
+    dirty: Arc<AtomicBool>,
+    has_watcher: bool,
+    // Hold watcher lifetime for this scope. Dropping it stops watching.
+    _watcher: Option<RecommendedWatcher>,
+    last_seen_at: Instant,
+    last_refresh_attempt_at: Option<Instant>,
+    last_refresh_failure_at: Option<Instant>,
+}
+
+impl AutoIndexScopeState {
+    fn new(scope: &Path) -> Self {
+        let dirty = Arc::new(AtomicBool::new(true));
+        let watcher = create_scope_watcher(scope, Arc::clone(&dirty));
+        Self {
+            dirty,
+            has_watcher: watcher.is_some(),
+            _watcher: watcher,
+            last_seen_at: Instant::now(),
+            last_refresh_attempt_at: None,
+            last_refresh_failure_at: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BootstrapOutcome {
     AlreadyIndexed,
+    Refreshed,
     Bootstrapped,
     FellBackToScan,
+}
+
+fn maybe_prepare_auto_index(
+    args: &Value,
+    cwd: Option<&str>,
+    path: Option<&str>,
+) -> Result<(), String> {
+    if !opt_bool_value(args, "auto_index").unwrap_or(true) {
+        return Ok(());
+    }
+    let _ = ensure_index_for_search(cwd, path)?;
+    Ok(())
 }
 
 fn ensure_index_for_search(
@@ -679,28 +742,30 @@ fn ensure_index_for_search(
     path: Option<&str>,
 ) -> Result<BootstrapOutcome, String> {
     let search_root = resolve_search_root(cwd, path)?;
-    if cgrep::utils::find_index_root(&search_root).is_some() {
-        clear_bootstrap_failure(&search_root);
+    let existing_index_root = cgrep::utils::find_index_root(&search_root);
+    let index_scope = existing_index_root
+        .as_ref()
+        .map(|root| root.root.clone())
+        .unwrap_or_else(|| search_root.clone());
+    if existing_index_root.is_some() {
+        clear_bootstrap_failure(&index_scope);
+        if maybe_refresh_existing_index(cwd, &index_scope)? {
+            return Ok(BootstrapOutcome::Refreshed);
+        }
         return Ok(BootstrapOutcome::AlreadyIndexed);
     }
-    if recently_failed_bootstrap(&search_root) {
+    if recently_failed_bootstrap(&index_scope) {
         return Ok(BootstrapOutcome::FellBackToScan);
     }
 
-    let cmd = vec![
-        "index".to_string(),
-        "-p".to_string(),
-        search_root.display().to_string(),
-        "--embeddings".to_string(),
-        "off".to_string(),
-    ];
-    match run_cgrep(&cmd, cwd) {
+    match run_index_for_scope(cwd, &index_scope) {
         Ok(_) => {
-            clear_bootstrap_failure(&search_root);
+            clear_bootstrap_failure(&index_scope);
+            mark_scope_indexed(&index_scope);
             Ok(BootstrapOutcome::Bootstrapped)
         }
         Err(_) => {
-            record_bootstrap_failure(&search_root);
+            record_bootstrap_failure(&index_scope);
             Ok(BootstrapOutcome::FellBackToScan)
         }
     }
@@ -725,6 +790,10 @@ fn resolve_search_root(cwd: Option<&str>, path: Option<&str>) -> Result<PathBuf,
 
 fn failure_cache() -> &'static Mutex<HashMap<String, Instant>> {
     AUTO_INDEX_FAILURES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn scope_state_cache() -> &'static Mutex<HashMap<String, AutoIndexScopeState>> {
+    AUTO_INDEX_SCOPE_STATES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn recently_failed_bootstrap(search_root: &Path) -> bool {
@@ -752,6 +821,185 @@ fn clear_bootstrap_failure(search_root: &Path) {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     cache.remove(&key);
+}
+
+fn maybe_refresh_existing_index(cwd: Option<&str>, index_scope: &Path) -> Result<bool, String> {
+    if !should_attempt_index_refresh(index_scope) {
+        return Ok(false);
+    }
+    match run_index_for_scope(cwd, index_scope) {
+        Ok(_) => {
+            record_scope_refresh_result(index_scope, true);
+            Ok(true)
+        }
+        Err(_) => {
+            record_scope_refresh_result(index_scope, false);
+            Ok(false)
+        }
+    }
+}
+
+fn should_attempt_index_refresh(index_scope: &Path) -> bool {
+    let now = Instant::now();
+    let key = index_scope.display().to_string();
+    let refresh_debounce = Duration::from_millis(AUTO_INDEX_REFRESH_DEBOUNCE_MS);
+    let refresh_failure_ttl = Duration::from_millis(AUTO_INDEX_REFRESH_FAILURE_TTL_MS);
+
+    let mut cache = scope_state_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    prune_idle_scope_states(&mut cache, now);
+
+    let state = cache
+        .entry(key)
+        .or_insert_with(|| AutoIndexScopeState::new(index_scope));
+    state.last_seen_at = now;
+
+    if state
+        .last_refresh_attempt_at
+        .is_some_and(|at| now.duration_since(at) < refresh_debounce)
+    {
+        return false;
+    }
+    if state
+        .last_refresh_failure_at
+        .is_some_and(|at| now.duration_since(at) < refresh_failure_ttl)
+    {
+        return false;
+    }
+
+    let should_refresh = if state.has_watcher {
+        state.dirty.load(Ordering::Acquire)
+    } else {
+        // If watcher setup fails, keep correctness by refreshing opportunistically.
+        true
+    };
+    if !should_refresh {
+        return false;
+    }
+
+    state.last_refresh_attempt_at = Some(now);
+    true
+}
+
+fn mark_scope_indexed(index_scope: &Path) {
+    let now = Instant::now();
+    let key = index_scope.display().to_string();
+    let mut cache = scope_state_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    prune_idle_scope_states(&mut cache, now);
+    let state = cache
+        .entry(key)
+        .or_insert_with(|| AutoIndexScopeState::new(index_scope));
+    state.last_seen_at = now;
+    state.dirty.store(false, Ordering::Release);
+    state.last_refresh_failure_at = None;
+}
+
+fn record_scope_refresh_result(index_scope: &Path, success: bool) {
+    let now = Instant::now();
+    let key = index_scope.display().to_string();
+    let mut cache = scope_state_cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    prune_idle_scope_states(&mut cache, now);
+    let state = cache
+        .entry(key)
+        .or_insert_with(|| AutoIndexScopeState::new(index_scope));
+    state.last_seen_at = now;
+    if success {
+        state.dirty.store(false, Ordering::Release);
+        state.last_refresh_failure_at = None;
+    } else {
+        state.last_refresh_failure_at = Some(now);
+    }
+}
+
+fn prune_idle_scope_states(cache: &mut HashMap<String, AutoIndexScopeState>, now: Instant) {
+    let idle_ttl = Duration::from_millis(AUTO_INDEX_SCOPE_IDLE_TTL_MS);
+    cache.retain(|_, state| now.duration_since(state.last_seen_at) <= idle_ttl);
+}
+
+fn create_scope_watcher(index_scope: &Path, dirty: Arc<AtomicBool>) -> Option<RecommendedWatcher> {
+    let watch_root = index_scope.to_path_buf();
+    let callback_root = watch_root.clone();
+    let callback_dirty = Arc::clone(&dirty);
+    let config = NotifyConfig::default()
+        .with_poll_interval(Duration::from_millis(AUTO_INDEX_WATCH_POLL_INTERVAL_MS));
+    let mut watcher = match RecommendedWatcher::new(
+        move |event: Result<Event, notify::Error>| {
+            if let Ok(event) = event {
+                if should_mark_scope_dirty(&callback_root, &event) {
+                    callback_dirty.store(true, Ordering::Release);
+                }
+            }
+        },
+        config,
+    ) {
+        Ok(watcher) => watcher,
+        Err(_) => return None,
+    };
+    if watcher
+        .watch(&watch_root, RecursiveMode::Recursive)
+        .is_err()
+    {
+        return None;
+    }
+    Some(watcher)
+}
+
+fn should_mark_scope_dirty(scope_root: &Path, event: &Event) -> bool {
+    matches!(
+        event.kind,
+        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+    ) && event
+        .paths
+        .iter()
+        .any(|path| should_track_auto_index_path(scope_root, path))
+}
+
+fn should_track_auto_index_path(scope_root: &Path, path: &Path) -> bool {
+    let relative = path.strip_prefix(scope_root).unwrap_or(path);
+    if relative.as_os_str().is_empty() {
+        return false;
+    }
+
+    for component in relative.components() {
+        if let Component::Normal(name) = component {
+            let Some(name) = name.to_str() else { continue };
+            if matches!(name, ".cgrep" | ".git" | ".hg" | ".svn") {
+                return false;
+            }
+        }
+    }
+
+    let file_name = relative.file_name().and_then(|f| f.to_str()).unwrap_or("");
+    if file_name.starts_with('.')
+        || file_name.starts_with(".#")
+        || file_name.ends_with('~')
+        || file_name.ends_with(".tmp")
+        || file_name.ends_with(".swp")
+        || file_name.ends_with(".swo")
+    {
+        return false;
+    }
+
+    let Some(ext) = relative.extension().and_then(|e| e.to_str()) else {
+        return false;
+    };
+    is_indexable_extension(ext)
+}
+
+fn run_index_for_scope(cwd: Option<&str>, scope: &Path) -> Result<String, String> {
+    let cmd = vec![
+        "index".to_string(),
+        "-p".to_string(),
+        scope.display().to_string(),
+        "--embeddings".to_string(),
+        "off".to_string(),
+    ];
+    run_cgrep(&cmd, cwd)
 }
 
 fn push_opt_flag_value(cmd: &mut Vec<String>, flag: &str, value: Option<&str>) {
@@ -793,6 +1041,7 @@ fn run_cgrep(args: &[String], cwd: Option<&str>) -> Result<String, String> {
     let mut command = Command::new(exe);
     command
         .args(args)
+        .env("CGREP_DISABLE_CLI_AUTO_INDEX", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -1049,6 +1298,7 @@ fn tool_definitions() -> Vec<Value> {
                     "query": { "type": "string" },
                     "path": { "type": "string" },
                     "cwd": { "type": "string" },
+                    "auto_index": { "type": "boolean" },
                     "changed": { "oneOf": [{ "type": "boolean" }, { "type": "string" }] },
                     "limit": { "type": "number" },
                     "mode": { "type": "string", "enum": ["keyword", "semantic", "hybrid"] },
@@ -1114,6 +1364,7 @@ fn tool_definitions() -> Vec<Value> {
                 "properties": {
                     "name": { "type": "string" },
                     "cwd": { "type": "string" },
+                    "auto_index": { "type": "boolean" },
                     "symbol_type": { "type": "string" },
                     "lang": { "type": "string" },
                     "file_type": { "type": "string" },
@@ -1134,6 +1385,7 @@ fn tool_definitions() -> Vec<Value> {
                     "name": { "type": "string" },
                     "cwd": { "type": "string" },
                     "path": { "type": "string" },
+                    "auto_index": { "type": "boolean" },
                     "limit": { "type": "number" }
                 }
             }
@@ -1148,6 +1400,7 @@ fn tool_definitions() -> Vec<Value> {
                     "name": { "type": "string" },
                     "cwd": { "type": "string" },
                     "path": { "type": "string" },
+                    "auto_index": { "type": "boolean" },
                     "limit": { "type": "number" },
                     "changed": { "oneOf": [{ "type": "boolean" }, { "type": "string" }] },
                     "mode": { "type": "string", "enum": ["auto", "regex", "ast"] }
@@ -1163,6 +1416,7 @@ fn tool_definitions() -> Vec<Value> {
                 "properties": {
                     "function": { "type": "string" },
                     "cwd": { "type": "string" },
+                    "auto_index": { "type": "boolean" },
                     "mode": { "type": "string", "enum": ["auto", "regex", "ast"] }
                 }
             }
@@ -1175,7 +1429,8 @@ fn tool_definitions() -> Vec<Value> {
                 "required": ["file"],
                 "properties": {
                     "file": { "type": "string" },
-                    "cwd": { "type": "string" }
+                    "cwd": { "type": "string" },
+                    "auto_index": { "type": "boolean" }
                 }
             }
         }),
