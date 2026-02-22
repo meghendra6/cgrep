@@ -4,14 +4,14 @@
 
 Local-first code search for humans and AI coding agents.
 
-`grep` finds text. `cgrep` finds implementation intent.
+`grep` tells you where text appears. `cgrep` helps you find where behavior is implemented.
 
 ## Why cgrep
 
 - Fast local search with Tantivy index (no cloud dependency)
 - Code-aware navigation: `definition`, `references`, `callers`, `read`, `map`
 - Agent-friendly deterministic output: `--format json2 --compact`
-- MCP integration for Codex/Claude/Cursor/VS Code hosts
+- MCP integration for Codex, Claude Code, Cursor, Copilot, and more
 
 ## Install in 30 seconds
 
@@ -36,22 +36,34 @@ cgrep map --depth 2
 
 ## For AI Coding Agents
 
-```bash
-# Install agent guidance + MCP wiring (Codex)
-cgrep agent install codex
+### 1) One-time install (choose your host)
 
-# Low-token two-stage retrieval
+```bash
+cgrep agent install codex
+cgrep agent install claude-code
+cgrep agent install cursor
+cgrep agent install copilot
+cgrep agent install opencode
+```
+
+### 2) What is required vs optional
+
+- Required: restart the current agent session once after install.
+- Not required for normal use: manual `cgrep index` or `cgrep daemon start`.
+- Optional: run daemon during long, high-churn coding sessions to keep index warm.
+
+### Optional CLI retrieval examples
+
+```bash
 ID=$(cgrep agent locate "where token validation happens" --compact | jq -r '.results[0].id')
 cgrep agent expand --id "$ID" -C 8 --compact
-
-# Deterministic plan output
 cgrep --format json2 --compact agent plan "trace authentication middleware flow"
 ```
 
 ## Indexing Modes (Simple Rule)
 
-- One-off usage: just run `search/definition/read` (auto bootstrap handles indexing)
-- Active coding session: `cgrep daemon start` and stop with `cgrep daemon stop`
+- One-off usage: run `search/definition/read` directly (auto bootstrap handles indexing)
+- Active coding session: `cgrep daemon start`, then `cgrep daemon stop`
 - Semantic/hybrid search: experimental, requires embeddings index
 
 ## Benchmark Snapshot (PyTorch, Codex, runs=2)

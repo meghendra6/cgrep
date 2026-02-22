@@ -1,6 +1,6 @@
 # cgrep 문서
 
-개발자와 AI 코딩 에이전트를 위한 로컬 우선 코드 검색 도구 문서입니다.
+개발자와 AI 코딩 에이전트를 위한 로컬 우선 코드 검색 문서입니다.
 
 현재 릴리즈: **v1.5.2**
 
@@ -22,18 +22,26 @@ cgrep read src/auth.rs
 |---|---|
 | 빠른 설치 | [설치](./installation.md) |
 | 일상 명령 익히기 | [사용법](./usage.md) |
-| AI 에이전트 조회 구성 | [에이전트 워크플로](./agent.md) |
+| AI 에이전트 연동 | [에이전트 워크플로](./agent.md) |
 | MCP 연동 | [MCP](./mcp.md) |
-| 인덱스/daemon 운영 | [인덱싱과 Daemon](./indexing-watch.md) |
+| 코딩 중 인덱스 유지 | [인덱싱과 Daemon](./indexing-watch.md) |
 | 문제 해결 | [문제 해결](./troubleshooting.md) |
 
-## AI 에이전트 빠른 흐름
+## AI 에이전트 설정 (필수/선택)
 
 ```bash
+# 1회 설치 (하나 선택)
 cgrep agent install codex
-ID=$(cgrep agent locate "where token validation happens" --compact | jq -r '.results[0].id')
-cgrep agent expand --id "$ID" -C 8 --compact
+cgrep agent install claude-code
+cgrep agent install cursor
+cgrep agent install copilot
+cgrep agent install opencode
 ```
+
+- 필수: 설치 후 에이전트 세션 재시작 1회
+- 일반 사용에서 불필요: 수동 `cgrep index`, 상시 daemon 실행
+- 선택: 장시간/고변경 세션에서 daemon 사용
+- CLI 조회 예시는 [agent.md](./agent.md) 참고
 
 ## 벤치마크 스냅샷 (PyTorch, Codex, runs=2)
 
